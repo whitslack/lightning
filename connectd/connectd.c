@@ -1445,8 +1445,7 @@ setup_listeners(const tal_t *ctx,
 		toraddr = tor_autoservice(tmpctx,
 					  &proposed_wireaddr[i],
 					  tor_password,
-					  localaddr,
-					  daemon->use_v3_autotor);
+					  localaddr);
 
 		if (!(proposed_listen_announce[i] & ADDR_ANNOUNCE)) {
 			continue;
@@ -1542,7 +1541,6 @@ static void connect_init(struct daemon *daemon, const u8 *msg)
 		&proxyaddr, &daemon->always_use_proxy,
 		&daemon->dev_allow_localhost, &daemon->use_dns,
 		&tor_password,
-		&daemon->use_v3_autotor,
 		&daemon->timeout_secs,
 		&daemon->websocket_helper,
 		&daemon->websocket_port,
