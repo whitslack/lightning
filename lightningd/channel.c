@@ -22,14 +22,14 @@
 void channel_set_owner(struct channel *channel, struct subd *owner)
 {
 	struct subd *old_owner = channel->owner;
+	bool was_connected = channel_is_connected(channel);
 	channel->owner = owner;
 
 	if (old_owner) {
 		subd_release_channel(old_owner, channel);
-		if (channel->connected)
+		if (was_connected && !channel_is_connected(channel))
 			maybe_disconnect_peer(channel->peer->ld, channel->peer);
 	}
-	channel->connected = (owner && owner->talks_to_peer);
 }
 
 struct htlc_out *channel_has_htlc_out(struct channel *channel)
@@ -238,8 +238,6 @@ struct channel *new_unsaved_channel(struct peer *peer,
 	channel->closing_feerate_range = NULL;
 	channel->channel_update = NULL;
 
-	/* Channel is connected! */
-	channel->connected = true;
 	channel->shutdown_scriptpubkey[REMOTE] = NULL;
 	channel->last_was_revoke = false;
 	channel->last_sent_commit = NULL;
@@ -373,7 +371,6 @@ struct channel *new_channel(struct peer *peer, u64 dbid,
 			    u32 first_blocknum,
 			    u32 min_possible_feerate,
 			    u32 max_possible_feerate,
-			    bool connected,
 			    const struct basepoints *local_basepoints,
 			    const struct pubkey *local_funding_pubkey,
 			    const struct pubkey *future_per_commitment_point,
@@ -479,7 +476,6 @@ struct channel *new_channel(struct peer *peer, u64 dbid,
 	channel->first_blocknum = first_blocknum;
 	channel->min_possible_feerate = min_possible_feerate;
 	channel->max_possible_feerate = max_possible_feerate;
-	channel->connected = connected;
 	channel->local_basepoints = *local_basepoints;
 	channel->local_funding_pubkey = *local_funding_pubkey;
 	channel->future_per_commitment_point
@@ -955,4 +951,9 @@ void channel_fail_reconnect(struct channel *channel, const char *fmt, ...)
 	va_start(ap, fmt);
 	err_and_reconnect(channel, tal_vfmt(tmpctx, fmt, ap), 1);
 	va_end(ap);
+}
+
+bool channel_is_connected(const struct channel *channel)
+{
+	return channel->owner && channel->owner->talks_to_peer;
 }
