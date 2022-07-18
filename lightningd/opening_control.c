@@ -19,6 +19,7 @@
 #include <lightningd/chaintopology.h>
 #include <lightningd/channel.h>
 #include <lightningd/channel_control.h>
+#include <lightningd/connect_control.h>
 #include <lightningd/hsm_control.h>
 #include <lightningd/notification.h>
 #include <lightningd/opening_common.h>
@@ -98,6 +99,7 @@ wallet_commit_channel(struct lightningd *ld,
 	u64 static_remotekey_start;
 	u32 lease_start_blockheight = 0; /* No leases on v1 */
 	struct timeabs timestamp;
+	bool any_active = peer_any_active_channel(uc->peer, NULL);
 
 	/* We cannot both be the fundee *and* have a `fundchannel_start`
 	 * command running!
@@ -225,6 +227,15 @@ wallet_commit_channel(struct lightningd *ld,
 				     channel->state,
 				     channel->state_change_cause,
 				     "new channel opened");
+
+
+	/* We might have disconnected and decided we didn't need to
+	 * reconnect because no channels are active.  But the subd
+	 * just made it active! */
+	if (!any_active && channel->peer->connected == PEER_DISCONNECTED) {
+		try_reconnect(channel->peer, channel->peer, 1,
+			      &channel->peer->addr);
+	}
 
 	return channel;
 }
