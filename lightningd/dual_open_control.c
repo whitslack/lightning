@@ -2578,6 +2578,7 @@ static struct command_result *json_openchannel_init(struct command *cmd,
 	struct open_attempt *oa;
 	struct lease_rates *rates;
 	struct command_result *res;
+	int fds[2];
 
 	if (!param(cmd, buffer, params,
 		   p_req("id", param_node_id, &id),
@@ -2736,10 +2737,28 @@ static struct command_result *json_openchannel_init(struct command *cmd,
 					   false,
 					   rates);
 
-	/* Tell connectd to hand us this so we can start dualopend */
+	if (socketpair(AF_LOCAL, SOCK_STREAM, 0, fds) != 0) {
+		return command_fail(cmd, FUND_MAX_EXCEEDED,
+				    "Failed to create socketpair: %s",
+				    strerror(errno));
+	}
+
+	/* Start dualopend! */
+	if (!peer_start_dualopend(peer, new_peer_fd(cmd, fds[0]), channel)) {
+		close(fds[1]);
+		/* FIXME: gets completed by failure path above! */
+		return command_its_complicated("completed by peer_start_dualopend");
+	}
+
+	/* Go! */
+	subd_send_msg(channel->owner, channel->open_attempt->open_msg);
+
+	/* Tell connectd connect this to this channel id. */
 	subd_send_msg(peer->ld->connectd,
-		      take(towire_connectd_peer_make_active(NULL, &peer->id,
-							    &channel->cid)));
+		      take(towire_connectd_peer_connect_subd(NULL,
+							     &peer->id,
+							     &channel->cid)));
+	subd_send_fd(peer->ld->connectd, fds[1]);
 	return command_still_pending(cmd);
 }
 
@@ -3102,6 +3121,7 @@ static struct command_result *json_queryrates(struct command *cmd,
 	struct open_attempt *oa;
 	u32 *our_upfront_shutdown_script_wallet_index;
 	struct command_result *res;
+	int fds[2];
 
 	if (!param(cmd, buffer, params,
 		   p_req("id", param_node_id, &id),
@@ -3203,13 +3223,30 @@ static struct command_result *json_queryrates(struct command *cmd,
 					   true,
 					   NULL);
 
-	/* Tell connectd to hand us this so we can start dualopend */
-	subd_send_msg(peer->ld->connectd,
-		      take(towire_connectd_peer_make_active(NULL, &peer->id,
-							    &channel->cid)));
-	return command_still_pending(cmd);
+	if (socketpair(AF_LOCAL, SOCK_STREAM, 0, fds) != 0) {
+		return command_fail(cmd, FUND_MAX_EXCEEDED,
+				    "Failed to create socketpair: %s",
+				    strerror(errno));
+	}
 
-}
+	/* Start dualopend! */
+	if (!peer_start_dualopend(peer, new_peer_fd(cmd, fds[0]), channel)) {
+		close(fds[1]);
+		/* FIXME: gets completed by failure path above! */
+		return command_its_complicated("completed by peer_start_dualopend");
+	}
+
+	/* Go! */
+	subd_send_msg(channel->owner, channel->open_attempt->open_msg);
+
+	/* Tell connectd connect this to this channel id. */
+	subd_send_msg(peer->ld->connectd,
+		      take(towire_connectd_peer_connect_subd(NULL,
+							     &peer->id,
+							     &channel->cid)));
+	subd_send_fd(peer->ld->connectd, fds[1]);
+ 	return command_still_pending(cmd);
+ }
 
 static const struct json_command queryrates_command = {
 	"dev-queryrates",
@@ -3326,7 +3363,7 @@ bool peer_start_dualopend(struct peer *peer,
 	return true;
 }
 
-void peer_restart_dualopend(struct peer *peer,
+bool peer_restart_dualopend(struct peer *peer,
 			    struct peer_fd *peer_fd,
 			    struct channel *channel)
 {
@@ -3338,10 +3375,9 @@ void peer_restart_dualopend(struct peer *peer,
 	u32 *local_shutdown_script_wallet_index;
 	u8 *msg;
 
-	if (channel_unsaved(channel)) {
-		peer_start_dualopend(peer, peer_fd, channel);
-		return;
-	}
+	if (channel_unsaved(channel))
+		return peer_start_dualopend(peer, peer_fd, channel);
+
 	hsmfd = hsm_get_client_fd(peer->ld, &peer->id, channel->dbid,
 				  HSM_CAP_COMMITMENT_POINT
 				  | HSM_CAP_SIGN_REMOTE_TX
@@ -3364,7 +3400,7 @@ void peer_restart_dualopend(struct peer *peer,
 			   strerror(errno));
 		channel_fail_reconnect_later(channel,
 					     "Failed to subdaemon channel");
-		return;
+		return false;
 	}
 
 	/* Find the max self delay and min htlc capacity */
@@ -3427,6 +3463,6 @@ void peer_restart_dualopend(struct peer *peer,
 				      inflight->lease_chan_max_msat,
 				      inflight->lease_chan_max_ppt);
 
-
 	subd_send_msg(channel->owner, take(msg));
+	return true;
 }

@@ -583,7 +583,7 @@ static unsigned channel_msg(struct subd *sd, const u8 *msg, const int *fds)
 	return 0;
 }
 
-void peer_start_channeld(struct channel *channel,
+bool peer_start_channeld(struct channel *channel,
 			 struct peer_fd *peer_fd,
 			 const u8 *fwd_msg,
 			 bool reconnected,
@@ -627,7 +627,7 @@ void peer_start_channeld(struct channel *channel,
 			   strerror(errno));
 		channel_fail_reconnect_later(channel,
 					     "Failed to subdaemon channel");
-		return;
+		return false;
 	}
 
 	htlcs = peer_htlcs(tmpctx, channel);
@@ -665,7 +665,7 @@ void peer_start_channeld(struct channel *channel,
 				       REASON_LOCAL,
 				       "Could not get revocation secret %"PRIu64,
 				       num_revocations-1);
-		return;
+		return false;
 	}
 
 	/* Warn once. */
@@ -679,7 +679,7 @@ void peer_start_channeld(struct channel *channel,
 		channel_internal_error(channel,
 				       "Could not load remote announcement"
 				       " signatures");
-		return;
+		return false;
 	}
 
 	pbases = wallet_penalty_base_load_for_channel(
@@ -694,7 +694,7 @@ void peer_start_channeld(struct channel *channel,
 		channel_internal_error(channel,
 				       "Could not derive final_ext_key %"PRIu64,
 				       channel->final_key_idx);
-		return;
+		return false;
 	}
 
 	initmsg = towire_channeld_init(tmpctx,
@@ -779,6 +779,8 @@ void peer_start_channeld(struct channel *channel,
 		try_update_blockheight(ld, channel,
 				       get_block_height(ld->topology));
 	}
+
+	return true;
 }
 
 bool channel_tell_depth(struct lightningd *ld,
