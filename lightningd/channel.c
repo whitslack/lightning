@@ -908,7 +908,7 @@ void channel_set_billboard(struct channel *channel, bool perm, const char *str)
 
 static void channel_err(struct channel *channel,
 			const char *why,
-			u32 seconds_before_reconnect /* FIXME: use this! */)
+			bool delay_reconnect)
 {
 	log_info(channel->log, "Peer transient failure in %s: %s",
 		 channel_state_name(channel), why);
@@ -921,6 +921,7 @@ static void channel_err(struct channel *channel,
 		return;
 	}
 #endif
+	channel->peer->delay_reconnect = delay_reconnect;
 
 	channel_set_owner(channel, NULL);
 }
@@ -930,7 +931,7 @@ void channel_fail_transient_delayreconnect(struct channel *channel, const char *
 	va_list ap;
 
 	va_start(ap, fmt);
-	channel_err(channel, tal_vfmt(tmpctx, fmt, ap), 60);
+	channel_err(channel, tal_vfmt(tmpctx, fmt, ap), true);
 	va_end(ap);
 }
 
@@ -939,7 +940,7 @@ void channel_fail_transient(struct channel *channel, const char *fmt, ...)
 	va_list ap;
 
 	va_start(ap, fmt);
-	channel_err(channel, tal_vfmt(tmpctx, fmt, ap), 1);
+	channel_err(channel, tal_vfmt(tmpctx, fmt, ap), false);
 	va_end(ap);
 }
 
