@@ -1245,8 +1245,6 @@ static void send_commit(struct peer *peer)
 		 * don't stress things by having more than one feerate change
 		 * in-flight! */
 		if (feerate_changes_done(peer->channel->fee_states, false)) {
-			u8 *msg;
-
 			/* BOLT-919 #2:
 			 *
 			 * A sending node:
@@ -1284,8 +1282,6 @@ static void send_commit(struct peer *peer)
 	if (want_blockheight_update(peer, &our_blockheight)) {
 		if (blockheight_changes_done(peer->channel->blockheight_states,
 					     false)) {
-			u8 *msg;
-
 			channel_update_blockheight(peer->channel,
 						   our_blockheight);
 
@@ -2417,14 +2413,14 @@ static void resend_commitment(struct peer *peer, struct changed_htlc *last)
 			} else
 				tlvs = NULL;
 #endif
-			u8 *msg = towire_update_add_htlc(NULL, &peer->channel_id,
-							 h->id, h->amount,
-							 &h->rhash,
-							 abs_locktime_to_blocks(
-								 &h->expiry),
-							 h->routing
+			msg = towire_update_add_htlc(NULL, &peer->channel_id,
+						     h->id, h->amount,
+						     &h->rhash,
+						     abs_locktime_to_blocks(
+							     &h->expiry),
+						     h->routing
 #if EXPERIMENTAL_FEATURES
-							 , tlvs
+						     , tlvs
 #endif
 				);
 			peer_write(peer->pps, take(msg));
@@ -2927,7 +2923,6 @@ skip_tlvs:
 	if (peer->funding_locked[LOCAL]
 	    && peer->next_index[LOCAL] == 1
 	    && next_commitment_number == 1) {
-		u8 *msg;
 		struct tlv_funding_locked_tlvs *tlvs = tlv_funding_locked_tlvs_new(tmpctx);
 
 		status_debug("Retransmitting funding_locked for channel %s",
