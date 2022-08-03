@@ -2259,7 +2259,6 @@ static void accepter_start(struct state *state, const u8 *oc2_msg)
 				 state->min_effective_htlc_capacity,
 				 &tx_state->remoteconf,
 				 &tx_state->localconf,
-				 false,
 				 true, /* v2 means we use anchor outputs */
 				 &err_reason)) {
 		negotiation_failed(state, "%s", err_reason);
@@ -2965,7 +2964,7 @@ static void opener_start(struct state *state, u8 *msg)
 				 state->min_effective_htlc_capacity,
 				 &tx_state->remoteconf,
 				 &tx_state->localconf,
-				 true, true, /* v2 means we use anchor outputs */
+				 true, /* v2 means we use anchor outputs */
 				 &err_reason)) {
 		negotiation_failed(state, "%s", err_reason);
 		return;
@@ -3216,7 +3215,6 @@ static void rbf_local_start(struct state *state, u8 *msg)
 				 state->min_effective_htlc_capacity,
 				 &tx_state->remoteconf,
 				 &tx_state->localconf,
-				 false,
 				 true, /* v2 means we use anchor outputs */
 				 &err_reason)) {
 		open_err_warn(state, "%s", err_reason);
@@ -3353,7 +3351,6 @@ static void rbf_remote_start(struct state *state, const u8 *rbf_msg)
 				 state->min_effective_htlc_capacity,
 				 &tx_state->remoteconf,
 				 &tx_state->localconf,
-				 false,
 				 true, /* v2 means we use anchor outputs */
 				 &err_reason)) {
 		open_err_warn(state, "%s", err_reason);
