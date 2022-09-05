@@ -24,22 +24,22 @@ RETURN VALUE
 [comment]: # (GENERATE-FROM-SCHEMA-START)
 On success, an object containing **forwards** is returned.  It is an array of objects, where each object contains:
 
-- **in_channel** (short_channel_id): the channel that received the HTLC
-- **in_msat** (msat): the value of the incoming HTLC
+- **in\_channel** (short_channel_id): the channel that received the HTLC
+- **in\_msat** (msat): the value of the incoming HTLC
 - **status** (string): still ongoing, completed, failed locally, or failed after forwarding (one of "offered", "settled", "local_failed", "failed")
-- **received_time** (number): the UNIX timestamp when this was received
-- **out_channel** (short_channel_id, optional): the channel that the HTLC (trying to) forward to
-- **payment_hash** (hex, optional): payment hash sought by HTLC (always 64 characters)
+- **received\_time** (number): the UNIX timestamp when this was received
+- **out\_channel** (short_channel_id, optional): the channel that the HTLC (trying to) forward to
+- **payment\_hash** (hex, optional): payment hash sought by HTLC (always 64 characters)
 - **style** (string, optional): Either a legacy onion format or a modern tlv format (one of "legacy", "tlv")
 
-If **out_msat** is present:
+If **out\_msat** is present:
 
-  - **fee_msat** (msat): the amount this paid in fees
-  - **out_msat** (msat): the amount we sent out the *out_channel*
+  - **fee\_msat** (msat): the amount this paid in fees
+  - **out\_msat** (msat): the amount we sent out the *out_channel*
 
 If **status** is "settled" or "failed":
 
-  - **resolved_time** (number): the UNIX timestamp when this was resolved
+  - **resolved\_time** (number): the UNIX timestamp when this was resolved
 
 If **status** is "local_failed" or "failed":
 
