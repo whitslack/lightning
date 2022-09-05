@@ -19,6 +19,7 @@ RETURN VALUE
 
 [comment]: # (GENERATE-FROM-SCHEMA-START)
 On success, an object is returned, containing:
+
 - **shared_secret** (hex): the SHA-2 of the compressed encoding of the shared secp256k1 point (always 64 characters)
 
 [comment]: # (GENERATE-FROM-SCHEMA-END)
@@ -91,4 +92,4 @@ RESOURCES
 * Main web site: <https://github.com/ElementsProject/lightning>
 
 
-[comment]: # ( SHA256STAMP:47c5b466b02b80d40937f40c725733f72c20f3bc26cc7f4dacd5ef858ab0282b)
+[comment]: # ( SHA256STAMP:84829ad92123f28e579a597f2a0d4a92b1183c87029da2beab149d8faa821078)
