@@ -53,7 +53,7 @@ On success, an object containing **peers** is returned.  It is an array of objec
     - **perkw** (u32): Feerate per 1000 weight (i.e kSipa)
     - **perkb** (u32): Feerate per 1000 virtual bytes
   - **owner** (string, optional): The current subdaemon controlling this connection
-  - **short\_channel\_id** (short_channel_id, optional): The short_channel_id (once locked in)
+  - **short\_channel\_id** (short\_channel\_id, optional): The short_channel_id (once locked in)
   - **channel\_id** (hash, optional): The full channel_id (always 64 characters)
   - **funding\_txid** (txid, optional): ID of the funding transaction
   - **funding\_outnum** (u32, optional): The 0-based output number of the funding transaction which opens the channel
@@ -396,4 +396,4 @@ Main web site: <https://github.com/ElementsProject/lightning> Lightning
 RFC site (BOLT \#9):
 <https://github.com/lightningnetwork/lightning-rfc/blob/master/09-features.md>
 
-[comment]: # ( SHA256STAMP:e80b24123fdeea4eacda71bb7d824b9234bf17c68239ebf7915d2ab747c58fdc)
+[comment]: # ( SHA256STAMP:108f43815e3475b88fd9b6a4a8f868e9d729c5d7616e0b0cc2c14f8922f54955)
