@@ -159,7 +159,7 @@ If **type** is "bolt11 invoice", and **valid** is *true*:
   - **routes** (array of arrays, optional): Route hints to the *payee*:
     - hops in the route:
       - **pubkey** (pubkey): the public key of the node
-      - **short\_channel\_id** (short_channel_id): a channel to the next peer
+      - **short\_channel\_id** (short\_channel\_id): a channel to the next peer
       - **fee\_base\_msat** (msat): the base fee for payments
       - **fee\_proportional\_millionths** (u32): the parts-per-million fee for payments
       - **cltv\_expiry\_delta** (u32): the CLTV delta across this hop
@@ -189,4 +189,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:e28818712410ae142595574d891db3d9532576887d8c7e8116919ec019d7d030)
+[comment]: # ( SHA256STAMP:92828d26e56335ef31656bbf9437a587031e8b842508f5c8b553e05beabffdeb)
