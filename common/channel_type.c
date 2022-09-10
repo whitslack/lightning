@@ -8,7 +8,7 @@
  * arbitrary combination (they represent the persistent features which
  * affect the channel operation).
  *
- * The currently defined types are:
+ * The currently defined basic types are:
  *   - no features (no bits set)
  *   - `option_static_remotekey` (bit 12)
  *   - `option_anchor_outputs` and `option_static_remotekey` (bits 20 and 12)
