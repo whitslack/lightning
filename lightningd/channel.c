@@ -220,7 +220,7 @@ struct channel *new_unsaved_channel(struct peer *peer,
 	channel->open_attempt = NULL;
 
 	channel->last_htlc_sigs = NULL;
-	channel->remote_funding_locked = false;
+	channel->remote_channel_ready = false;
 	channel->scid = NULL;
 	channel->next_index[LOCAL] = 1;
 	channel->next_index[REMOTE] = 1;
@@ -343,7 +343,7 @@ struct channel *new_channel(struct peer *peer, u64 dbid,
 			    struct amount_sat funding_sats,
 			    struct amount_msat push,
 			    struct amount_sat our_funds,
-			    bool remote_funding_locked,
+			    bool remote_channel_ready,
 			    /* NULL or stolen */
 			    struct short_channel_id *scid,
 			    struct channel_id *cid,
@@ -436,7 +436,7 @@ struct channel *new_channel(struct peer *peer, u64 dbid,
 	channel->funding_sats = funding_sats;
 	channel->push = push;
 	channel->our_funds = our_funds;
-	channel->remote_funding_locked = remote_funding_locked;
+	channel->remote_channel_ready = remote_channel_ready;
 	channel->scid = tal_steal(channel, scid);
 	channel->cid = *cid;
 	channel->our_msat = our_msat;
