@@ -50,7 +50,7 @@ struct out_req {
 };
 
 struct command {
-	u64 *id;
+	const char *id;
 	const char *methodname;
 	bool usage_only;
 	struct plugin *plugin;
