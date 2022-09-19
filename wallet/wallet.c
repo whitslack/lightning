@@ -4515,7 +4515,7 @@ const struct forwarding *wallet_forwarded_payments_get(struct wallet *w,
 	if (chan_in) {
 		// specific in_channel
 		db_bind_int(stmt, 2, 0);
-		db_bind_u64(stmt, 3, chan_in->u64);
+		db_bind_scid(stmt, 3, chan_in);
 	} else {
 		// any in_channel
 		db_bind_int(stmt, 2, 1);
@@ -4525,7 +4525,7 @@ const struct forwarding *wallet_forwarded_payments_get(struct wallet *w,
 	if (chan_out) {
 		// specific out_channel
 		db_bind_int(stmt, 4, 0);
-		db_bind_u64(stmt, 5, chan_out->u64);
+		db_bind_scid(stmt, 5, chan_out);
 	} else {
 		// any out_channel
 		db_bind_int(stmt, 4, 1);
@@ -4566,11 +4566,10 @@ const struct forwarding *wallet_forwarded_payments_get(struct wallet *w,
 			cur->payment_hash = NULL;
 		}
 
-		cur->channel_in.u64 = db_col_u64(stmt, "in_channel_scid");
+		db_col_scid(stmt, "in_channel_scid", &cur->channel_in);
 
 		if (!db_col_is_null(stmt, "out_channel_scid")) {
-			cur->channel_out.u64
-				= db_col_u64(stmt, "out_channel_scid");
+			db_col_scid(stmt, "out_channel_scid", &cur->channel_out);
 		} else {
 			assert(cur->status == FORWARD_LOCAL_FAILED);
 			cur->channel_out.u64 = 0;
