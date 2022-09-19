@@ -25,11 +25,12 @@ RETURN VALUE
 On success, an object containing **forwards** is returned.  It is an array of objects, where each object contains:
 
 - **in\_channel** (short\_channel\_id): the channel that received the HTLC
+- **in\_htlc\_id** (u64): the unique HTLC id the sender gave this
 - **in\_msat** (msat): the value of the incoming HTLC
 - **status** (string): still ongoing, completed, failed locally, or failed after forwarding (one of "offered", "settled", "local_failed", "failed")
 - **received\_time** (number): the UNIX timestamp when this was received
 - **out\_channel** (short\_channel\_id, optional): the channel that the HTLC (trying to) forward to
-- **payment\_hash** (hex, optional): payment hash sought by HTLC (always 64 characters)
+- **out\_htlc\_id** (u64, optional): the unique HTLC id we gave this when sending
 - **style** (string, optional): Either a legacy onion format or a modern tlv format (one of "legacy", "tlv")
 
 If **out\_msat** is present:
