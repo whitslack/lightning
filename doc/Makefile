@@ -9,6 +9,7 @@ MANPAGES := doc/lightning-cli.1 \
 	doc/lightningd-config.5 \
 	doc/lightning-addgossip.7 \
 	doc/lightning-autocleaninvoice.7 \
+	doc/lightning-batching.7 \
 	doc/lightning-check.7 \
 	doc/lightning-checkmessage.7 \
 	doc/lightning-close.7 \
