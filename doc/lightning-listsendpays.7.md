@@ -26,11 +26,11 @@ Note that the returned array is ordered by increasing *id*.
 On success, an object containing **payments** is returned.  It is an array of objects, where each object contains:
 
 - **id** (u64): unique ID for this payment attempt
+- **groupid** (u64): Grouping key to disambiguate multiple attempts to pay an invoice or the same payment_hash
 - **payment\_hash** (hash): the hash of the *payment_preimage* which will prove payment (always 64 characters)
 - **status** (string): status of the payment (one of "pending", "failed", "complete")
 - **created\_at** (u64): the UNIX timestamp showing when this payment was initiated
 - **amount\_sent\_msat** (msat): The amount sent
-- **groupid** (u64, optional): Grouping key to disambiguate multiple attempts to pay an invoice or the same payment_hash
 - **amount\_msat** (msat, optional): The amount delivered to destination (if known)
 - **destination** (pubkey, optional): the final destination of the payment if known
 - **label** (string, optional): the label, if given to sendpay
@@ -64,4 +64,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:2cd3f5a0d494ea4aaef6eb5ea9ff467da14198c0fa4d9fee6b45e72568a2d481)
+[comment]: # ( SHA256STAMP:b1fac2d4c71abd4de6c7bbd06ba0f90bd27d3aaae7b8c2004a1b6b0e282d029e)
