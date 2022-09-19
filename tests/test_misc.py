@@ -2349,6 +2349,21 @@ def test_listforwards(node_factory, bitcoind):
     assert i41['payment_hash'] in map(lambda x: x['payment_hash'], all_forwards)
     assert failed_inv['payment_hash'] in map(lambda x: x['payment_hash'], all_forwards)
 
+    # Not guaranteed to be in chronological order!
+    all_forwards.sort(key=lambda f: f['in_htlc_id'])
+    assert all_forwards[0]['in_channel'] == c12
+    assert all_forwards[0]['out_channel'] == c23
+    assert all_forwards[0]['in_htlc_id'] == 0
+    assert all_forwards[0]['out_htlc_id'] == 0
+    assert all_forwards[1]['in_channel'] == c12
+    assert all_forwards[1]['out_channel'] == c24
+    assert all_forwards[1]['in_htlc_id'] == 1
+    assert all_forwards[1]['out_htlc_id'] == 0
+    assert all_forwards[2]['in_channel'] == c12
+    assert all_forwards[2]['out_channel'] == c23
+    assert all_forwards[2]['in_htlc_id'] == 2
+    assert 'out_htlc_id' not in all_forwards[2]
+
     # status=settled
     settled_forwards = l2.rpc.listforwards(status='settled')['forwards']
     assert len(settled_forwards) == 2
