@@ -31,6 +31,7 @@ Core Lightning Documentation
 
    lightning-addgossip <lightning-addgossip.7.md>
    lightning-autocleaninvoice <lightning-autocleaninvoice.7.md>
+   lightning-batching <lightning-batching.7.md>
    lightning-check <lightning-check.7.md>
    lightning-checkmessage <lightning-checkmessage.7.md>
    lightning-cli <lightning-cli.1.md>
