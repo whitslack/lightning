@@ -76,6 +76,8 @@ static const char *init(struct plugin *p,
 	} else
 		plugin_log(p, LOG_DBG, "autocleaning not active");
 
+	/* Optimization FTW! */
+	rpc_enable_batching(p);
 	return NULL;
 }
 
