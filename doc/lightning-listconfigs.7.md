@@ -95,7 +95,8 @@ On success, an object is returned, containing:
 - **log-timestamps** (boolean, optional): `log-timestamps` field from config or cmdline, or default
 - **force-feerates** (string, optional): force-feerate configuration setting, if any
 - **subdaemon** (string, optional): `subdaemon` fields from config or cmdline if any (can be more than one)
-- **fetchinvoice-noconnect** (boolean, optional): `featchinvoice-noconnect` fileds from config or cmdline, or default
+- **fetchinvoice-noconnect** (boolean, optional): `fetchinvoice-noconnect` fields from config or cmdline, or default
+- **accept-htlc-tlv-types** (string, optional): `accept-extra-tlvs-type` fields from config or cmdline, or not present
 - **tor-service-password** (string, optional): `tor-service-password` field from config or cmdline, if any
 
 [comment]: # (GENERATE-FROM-SCHEMA-END)
@@ -214,4 +215,4 @@ RESOURCES
 ---------
 
 Main web site: <https://github.com/ElementsProject/lightning>
-[comment]: # ( SHA256STAMP:dcab86f29b946fed925de5e05cb79faa03cc4421cefeab3561a596ed5e64962d)
+[comment]: # ( SHA256STAMP:5871ac751654339ed65ab905d61f0bc3afbb8576a33a5c4e9a73d2084f438582)
