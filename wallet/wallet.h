@@ -164,7 +164,7 @@ bool string_to_forward_status(const char *status_str, enum forward_status *statu
  * already defined elements (adding is ok) /!\ */
 enum forward_style {
 	FORWARD_STYLE_LEGACY = 0,
-	FORWARD_STYLE_TLV = ONION_TLV_PAYLOAD,
+	FORWARD_STYLE_TLV = 1,
 	FORWARD_STYLE_UNKNOWN = 2, /* Not actually in db, safe to renumber! */
 };
 
