@@ -3799,9 +3799,6 @@ static void init_channel(struct peer *peer)
 	struct channel_type *channel_type;
 	u32 *dev_disable_commit; /* Always NULL */
 	bool dev_fast_gossip;
-#if !DEVELOPER
-	bool dev_fail_process_onionpacket; /* Ignored */
-#endif
 
 	assert(!(fcntl(MASTER_FD, F_GETFL) & O_NONBLOCK));
 
@@ -3864,7 +3861,6 @@ static void init_channel(struct peer *peer)
 				    &remote_ann_bitcoin_sig,
 				    &channel_type,
 				    &dev_fast_gossip,
-				    &dev_fail_process_onionpacket,
 				    &dev_disable_commit,
 				    &pbases,
 				    &reestablish_only,
