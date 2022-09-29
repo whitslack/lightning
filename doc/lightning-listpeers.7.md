@@ -394,6 +394,6 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning> Lightning
 RFC site (BOLT \#9):
-<https://github.com/lightningnetwork/lightning-rfc/blob/master/09-features.md>
+<https://github.com/lightning/bolts/blob/master/09-features.md>
 
 [comment]: # ( SHA256STAMP:3db584600848b06434751819f1502f5558dc993d1cc636c331095dde698ca86c)
