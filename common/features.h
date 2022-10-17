@@ -127,6 +127,11 @@ const char *fmt_featurebits(const tal_t *ctx, const u8 *featurebits);
 #define OPT_CHANNEL_TYPE			44
 #define OPT_PAYMENT_METADATA			48
 
+/* BOLT-route-blinding #9:
+ * | 24/25 | `option_route_blinding` | Node supports blinded paths | IN9 | `var_onion_optin` | ...
+ */
+#define OPT_ROUTE_BLINDING 			24
+
 /* BOLT-f53ca2301232db780843e894f55d95d512f297f9 #9:
  * | 28/29 | `option_dual_fund` | ... IN9 ...
  */
