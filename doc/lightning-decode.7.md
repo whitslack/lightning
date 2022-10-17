@@ -41,9 +41,10 @@ If **type** is "bolt12 offer", and **valid** is *true*:
   - **features** (hex, optional): the array of feature bits for this offer
   - **absolute\_expiry** (u64, optional): UNIX timestamp of when this offer expires
   - **paths** (array of objects, optional): Paths to the destination:
+    - **first\_node\_id** (pubkey): the (presumably well-known) public key of the start of the path
     - **blinding** (pubkey): blinding factor for this path
     - **path** (array of objects): an individual path:
-      - **node\_id** (pubkey): node_id of the hop
+      - **blinded\_node\_id** (pubkey): node_id of the hop
       - **encrypted\_recipient\_data** (hex): encrypted TLV entry for this hop
   - **quantity\_min** (u64, optional): the minimum quantity
   - **quantity\_max** (u64, optional): the maximum quantity
@@ -69,7 +70,7 @@ If **type** is "bolt12 offer", and **valid** is *false*:
 If **type** is "bolt12 invoice", and **valid** is *true*:
 
   - **node\_id** (pubkey): public key of the offering node
-  - **signature** (bip340sig): BIP-340 signature of the *node_id* on this offer
+  - **signature** (bip340sig): BIP-340 signature of the *node_id* on this invoice
   - **amount\_msat** (msat): the amount in bitcoin
   - **description** (string): the description of the purpose of the offer
   - **created\_at** (u64): the UNIX timestamp of invoice creation
@@ -83,10 +84,15 @@ If **type** is "bolt12 invoice", and **valid** is *true*:
   - **vendor** (string, optional): the name of the vendor for this offer
   - **features** (hex, optional): the array of feature bits for this offer
   - **paths** (array of objects, optional): Paths to the destination:
+    - **first\_node\_id** (pubkey): the (presumably well-known) public key of the start of the path
     - **blinding** (pubkey): blinding factor for this path
     - **path** (array of objects): an individual path:
-      - **node\_id** (pubkey): node_id of the hop
+      - **blinded\_node\_id** (pubkey): node_id of the hop
       - **encrypted\_recipient\_data** (hex): encrypted TLV entry for this hop
+      - **fee\_base\_msat** (msat, optional): base fee for the entire path
+      - **fee\_proportional\_millionths** (u32, optional): proportional fee for the entire path
+      - **cltv\_expiry\_delta** (u32, optional): total CLTV delta across path
+      - **features** (hex, optional): Features allowed/required for this path
   - **quantity** (u64, optional): the quantity ordered
   - **recurrence\_counter** (u32, optional): the 0-based counter for a recurring payment
   - **recurrence\_start** (u32, optional): the optional start period for a recurring payment
@@ -189,4 +195,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:081816063c80c25e78e6b740a6b975ac88e9db6665a1713760efdf5ae8a496fc)
+[comment]: # ( SHA256STAMP:df22a981945a97191bdc4b2de34da494e601e4fe5e4474b3de0e4343298b1a18)
