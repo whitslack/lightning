@@ -56,8 +56,8 @@
             "minLength": 64
           },
           "node_id": {
-            "type": "point32",
-            "description": "x-only public key of the offering node"
+            "type": "pubkey",
+            "description": "public key of the offering node"
           },
           "signature": {
             "type": "bip340sig",
@@ -324,8 +324,8 @@
             "minLength": 64
           },
           "node_id": {
-            "type": "point32",
-            "description": "x-only public key of the offering node"
+            "type": "pubkey",
+            "description": "public key of the offering node"
           },
           "signature": {
             "type": "bip340sig",
@@ -423,7 +423,7 @@
             "description": "the UNIX timestamp of the first recurrence period start"
           },
           "payer_key": {
-            "type": "point32",
+            "type": "pubkey",
             "description": "the transient key which identifies the payer"
           },
           "payer_info": {
@@ -651,7 +651,7 @@
             "description": "the optional start period for a recurring payment"
           },
           "payer_key": {
-            "type": "point32",
+            "type": "pubkey",
             "description": "the transient key which identifies the payer"
           },
           "payer_info": {
