@@ -3610,7 +3610,8 @@ def test_keysend_extra_tlvs(node_factory):
     ksinfo = """💕 ₿"'
 More info
 """
-    l1.rpc.keysend(l2.info['id'], amt, extratlvs={133773310: bytes(ksinfo, encoding='utf8').hex()})
+    # Since we're at it, use this to test string-keyed TLVs
+    l1.rpc.keysend(l2.info['id'], amt, extratlvs={"133773310": bytes(ksinfo, encoding='utf8').hex()})
     inv = only_one(l2.rpc.listinvoices()['invoices'])
     assert inv['description'] == 'keysend: ' + ksinfo
 
