@@ -117,6 +117,7 @@ Core Lightning Documentation
    lightning-sendpsbt <lightning-sendpsbt.7.md>
    lightning-setchannel <lightning-setchannel.7.md>
    lightning-setchannelfee <lightning-setchannelfee.7.md>
+   lightning-signinvoice <lightning-signinvoice.7.md>
    lightning-signmessage <lightning-signmessage.7.md>
    lightning-signpsbt <lightning-signpsbt.7.md>
    lightning-sql <lightning-sql.7.md>
