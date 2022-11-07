@@ -83,6 +83,7 @@ MANPAGES := doc/lightning-cli.1 \
 	doc/lightning-setchannel.7 \
 	doc/lightning-setchannelfee.7 \
 	doc/lightning-sendcustommsg.7 \
+	doc/lightning-signinvoice.7 \
 	doc/lightning-signmessage.7 \
 	doc/lightning-sql.7 \
 	doc/lightning-staticbackup.7 \
