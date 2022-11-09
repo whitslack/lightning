@@ -46,8 +46,7 @@ If **type** is "bolt12 offer", and **valid** is *true*:
     - **path** (array of objects): an individual path:
       - **blinded\_node\_id** (pubkey): node_id of the hop
       - **encrypted\_recipient\_data** (hex): encrypted TLV entry for this hop
-  - **quantity\_min** (u64, optional): the minimum quantity
-  - **quantity\_max** (u64, optional): the maximum quantity
+  - **quantity\_max** (u64, optional): the maximum quantity (or, if 0, means any quantity)
   - **recurrence** (object, optional): how often to this offer should be used:
     - **time\_unit** (u32): the BOLT12 time unit
     - **period** (u32): how many *time_unit* per payment period
@@ -76,7 +75,6 @@ If **type** is "bolt12 invoice", and **valid** is *true*:
   - **created\_at** (u64): the UNIX timestamp of invoice creation
   - **payment\_hash** (hex): the hash of the *payment_preimage* (always 64 characters)
   - **relative\_expiry** (u32): the number of seconds after *created_at* when this expires
-  - **min\_final\_cltv\_expiry** (u32): the number of blocks required by destination
   - **offer\_id** (hex, optional): the id of this offer (merkle hash of non-signature fields) (always 64 characters)
   - **chain** (hex, optional): which blockchain this invoice is for (missing implies bitcoin mainnet only) (always 64 characters)
   - **send\_invoice** (boolean, optional): present if this offer was a send_invoice offer (always *true*)
@@ -98,7 +96,7 @@ If **type** is "bolt12 invoice", and **valid** is *true*:
   - **recurrence\_start** (u32, optional): the optional start period for a recurring payment
   - **recurrence\_basetime** (u32, optional): the UNIX timestamp of the first recurrence period start
   - **payer\_key** (pubkey, optional): the transient key which identifies the payer
-  - **payer\_info** (hex, optional): the payer-provided blob to derive payer_key
+  - **invreq\_metadata** (hex, optional): the payer-provided blob to derive payer_key
   - **fallbacks** (array of objects, optional): onchain addresses:
     - **version** (u8): Segwit address version
     - **hex** (hex): Raw encoded segwit address
@@ -132,7 +130,7 @@ If **type** is "bolt12 invoice_request", and **valid** is *true*:
   - **quantity** (u64, optional): the quantity ordered
   - **recurrence\_counter** (u32, optional): the 0-based counter for a recurring payment
   - **recurrence\_start** (u32, optional): the optional start period for a recurring payment
-  - **payer\_info** (hex, optional): the payer-provided blob to derive payer_key
+  - **invreq\_metadata** (hex, optional): the payer-provided blob to derive payer_key
   - **recurrence\_signature** (bip340sig, optional): the payer key signature
 
 If **type** is "bolt12 invoice_request", and **valid** is *false*:
@@ -195,4 +193,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:df22a981945a97191bdc4b2de34da494e601e4fe5e4474b3de0e4343298b1a18)
+[comment]: # ( SHA256STAMP:ea7d931496a40dc5eb4df6073ccd9c425348bc9b18ca35438b64bcfb4fa0141a)
