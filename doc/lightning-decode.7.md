@@ -56,6 +56,10 @@ If **type** is "bolt12 offer", and **valid** is *true*:
       - **seconds\_before** (u32): seconds prior to period start
       - **seconds\_after** (u32): seconds after to period start
       - **proportional\_amount** (boolean, optional): amount should be scaled if payed after period start (always *true*)
+  - **unknown\_offer\_tlvs** (array of objects, optional): Any extra fields we didn't know how to parse:
+    - **type** (u64): The type
+    - **length** (u64): The length
+    - **value** (hex): The value
   - the following warnings are possible:
     - **warning\_unknown\_offer\_currency**: The currency code is unknown (so no `currency_minor_unit`)
 
@@ -111,6 +115,10 @@ If **type** is "bolt12 invoice_request", and **valid** is *true*:
   - **invreq\_payer\_note** (string, optional): a note attached by the payer
   - **invreq\_recurrence\_counter** (u32, optional): which number request this is for the same invoice
   - **invreq\_recurrence\_start** (u32, optional): when we're requesting to start an invoice at a non-zero period
+  - **unknown\_invoice\_request\_tlvs** (array of objects, optional): Any extra fields we didn't know how to parse:
+    - **type** (u64): The type
+    - **length** (u64): The length
+    - **value** (hex): The value
   - the following warnings are possible:
     - **warning\_unknown\_offer\_currency**: The currency code is unknown (so no `currency_minor_unit`)
 
@@ -191,6 +199,10 @@ If **type** is "bolt12 invoice", and **valid** is *true*:
   - **invoice\_features** (hex, optional): the feature bits of the invoice
   - **invoice\_node\_id** (pubkey, optional): the id to pay (usually the same as offer_node_id)
   - **invoice\_recurrence\_basetime** (u64, optional): the UNIX timestamp to base the invoice periods on
+  - **unknown\_invoice\_tlvs** (array of objects, optional): Any extra fields we didn't know how to parse:
+    - **type** (u64): The type
+    - **length** (u64): The length
+    - **value** (hex): The value
   - the following warnings are possible:
     - **warning\_unknown\_offer\_currency**: The currency code is unknown (so no `currency_minor_unit`)
 
@@ -268,4 +280,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:66dcc38a5bccddcefaf53fef8f851f8918e7465e2a3a3b1380f5c1385f40444f)
+[comment]: # ( SHA256STAMP:45b718540c65625a3f326063078c80d6d3ac0ff3aa2f9a7f79333ddc9f696fbc)
