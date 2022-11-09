@@ -169,13 +169,9 @@
               }
             }
           },
-          "quantity_min": {
-            "type": "u64",
-            "description": "the minimum quantity"
-          },
           "quantity_max": {
             "type": "u64",
-            "description": "the maximum quantity"
+            "description": "the maximum quantity (or, if 0, means any quantity)"
           },
           "recurrence": {
             "type": "object",
@@ -280,7 +276,6 @@
           "features": {},
           "absolute_expiry": {},
           "paths": {},
-          "quantity_min": {},
           "quantity_max": {},
           "recurrence": {},
           "warning_offer_missing_description": {
@@ -315,8 +310,7 @@
           "description",
           "created_at",
           "payment_hash",
-          "relative_expiry",
-          "min_final_cltv_expiry"
+          "relative_expiry"
         ],
         "additionalProperties": false,
         "properties": {
@@ -452,7 +446,7 @@
             "type": "pubkey",
             "description": "the transient key which identifies the payer"
           },
-          "payer_info": {
+          "invreq_metadata": {
             "type": "hex",
             "description": "the payer-provided blob to derive payer_key"
           },
@@ -472,10 +466,6 @@
           "relative_expiry": {
             "type": "u32",
             "description": "the number of seconds after *created_at* when this expires"
-          },
-          "min_final_cltv_expiry": {
-            "type": "u32",
-            "description": "the number of blocks required by destination"
           },
           "fallbacks": {
             "type": "array",
@@ -549,12 +539,11 @@
           "recurrence_start": {},
           "recurrence_basetime": {},
           "payer_key": {},
-          "payer_info": {},
+          "invreq_metadata": {},
           "timestamp": {},
           "created_at": {},
           "payment_hash": {},
           "relative_expiry": {},
-          "min_final_cltv_expiry": {},
           "fallbacks": {
             "type": "array",
             "items": {
@@ -680,7 +669,7 @@
             "type": "pubkey",
             "description": "the transient key which identifies the payer"
           },
-          "payer_info": {
+          "invreq_metadata": {
             "type": "hex",
             "description": "the payer-provided blob to derive payer_key"
           },
@@ -722,7 +711,7 @@
           "recurrence_counter": {},
           "recurrence_start": {},
           "payer_key": {},
-          "payer_info": {},
+          "invreq_metadata": {},
           "recurrence_signature": {},
           "warning_invoice_request_missing_offer_id": {
             "type": "string",
