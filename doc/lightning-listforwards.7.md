@@ -27,7 +27,7 @@ On success, an object containing **forwards** is returned.  It is an array of ob
 - **in\_channel** (short\_channel\_id): the channel that received the HTLC
 - **in\_htlc\_id** (u64): the unique HTLC id the sender gave this
 - **in\_msat** (msat): the value of the incoming HTLC
-- **status** (string): still ongoing, completed, failed locally, or failed after forwarding (one of "offered", "settled", "local_failed", "failed")
+- **status** (string): still ongoing, completed, failed locally, or failed after forwarding (one of "offered", "settled", "local\_failed", "failed")
 - **received\_time** (number): the UNIX timestamp when this was received
 - **out\_channel** (short\_channel\_id, optional): the channel that the HTLC (trying to) forward to
 - **out\_htlc\_id** (u64, optional): the unique HTLC id we gave this when sending
@@ -36,13 +36,13 @@ On success, an object containing **forwards** is returned.  It is an array of ob
 If **out\_msat** is present:
 
   - **fee\_msat** (msat): the amount this paid in fees
-  - **out\_msat** (msat): the amount we sent out the *out_channel*
+  - **out\_msat** (msat): the amount we sent out the *out\_channel*
 
 If **status** is "settled" or "failed":
 
   - **resolved\_time** (number): the UNIX timestamp when this was resolved
 
-If **status** is "local_failed" or "failed":
+If **status** is "local\_failed" or "failed":
 
   - **failcode** (u32, optional): the numeric onion code returned
   - **failreason** (string, optional): the name of the onion code returned
@@ -64,4 +64,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:5b2da52b7f3a28563d0103d3853b9d8f717dc41a9e9c6b395ff19f1b975ca5fd)
+[comment]: # ( SHA256STAMP:c1e99a64904bb41d8a158a93d1644048519afff64bbe55ac13ac1862bb05d40b)
