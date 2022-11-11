@@ -46,13 +46,13 @@ On success, an object is returned, containing:
   - **funding\_txid** (txid): funding transaction id
   - **funding\_output** (u32): the 0-based index of the output in the funding transaction
   - **connected** (boolean): whether the channel peer is connected
-  - **state** (string): the channel state, in particular "CHANNELD_NORMAL" means the channel can be used normally (one of "OPENINGD", "CHANNELD_AWAITING_LOCKIN", "CHANNELD_NORMAL", "CHANNELD_SHUTTING_DOWN", "CLOSINGD_SIGEXCHANGE", "CLOSINGD_COMPLETE", "AWAITING_UNILATERAL", "FUNDING_SPEND_SEEN", "ONCHAIN", "DUALOPEND_OPEN_INIT", "DUALOPEND_AWAITING_LOCKIN")
+  - **state** (string): the channel state, in particular "CHANNELD\_NORMAL" means the channel can be used normally (one of "OPENINGD", "CHANNELD\_AWAITING\_LOCKIN", "CHANNELD\_NORMAL", "CHANNELD\_SHUTTING\_DOWN", "CLOSINGD\_SIGEXCHANGE", "CLOSINGD\_COMPLETE", "AWAITING\_UNILATERAL", "FUNDING\_SPEND\_SEEN", "ONCHAIN", "DUALOPEND\_OPEN\_INIT", "DUALOPEND\_AWAITING\_LOCKIN")
 
-  If **state** is "CHANNELD_NORMAL":
+  If **state** is "CHANNELD\_NORMAL":
 
     - **short\_channel\_id** (short\_channel\_id): short channel id of channel
 
-  If **state** is "CHANNELD_SHUTTING_DOWN", "CLOSINGD_SIGEXCHANGE", "CLOSINGD_COMPLETE", "AWAITING_UNILATERAL", "FUNDING_SPEND_SEEN" or "ONCHAIN":
+  If **state** is "CHANNELD\_SHUTTING\_DOWN", "CLOSINGD\_SIGEXCHANGE", "CLOSINGD\_COMPLETE", "AWAITING\_UNILATERAL", "FUNDING\_SPEND\_SEEN" or "ONCHAIN":
 
     - **short\_channel\_id** (short\_channel\_id, optional): short channel id of channel (only if funding reached lockin depth before closing)
 
@@ -73,4 +73,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:e5c1f54c8a5008a30648e0fe5883132759fcdabd72bd7e8a00bedc360363e85e)
+[comment]: # ( SHA256STAMP:4ee2a199c9653f9589c5137e61c7f3e251615f2b918a7d78b4728f9e067f3863)
