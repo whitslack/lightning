@@ -29,6 +29,7 @@ Core Lightning Documentation
    :maxdepth: 1
    :caption: Manpages
 
+ .. block_start manpages
    lightning-addgossip <lightning-addgossip.7.md>
    lightning-autocleaninvoice <lightning-autocleaninvoice.7.md>
    lightning-batching <lightning-batching.7.md>
@@ -117,6 +118,7 @@ Core Lightning Documentation
    lightning-waitinvoice <lightning-waitinvoice.7.md>
    lightning-waitsendpay <lightning-waitsendpay.7.md>
    lightning-withdraw <lightning-withdraw.7.md>
-   lightningd <lightningd.8.md>
    lightningd-config <lightningd-config.5.md>
    lightningd-rpc <lightningd-rpc.7.md>
+   lightningd <lightningd.8.md>
+.. block_end manpages
