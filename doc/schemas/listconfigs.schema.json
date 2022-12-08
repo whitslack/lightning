@@ -282,6 +282,10 @@
     "tor-service-password": {
       "type": "string",
       "description": "`tor-service-password` field from config or cmdline, if any"
+    },
+    "announce-addr-dns": {
+      "type": "boolean",
+      "description": "Whether we put DNS entries into node_announcement"
     }
   }
 }
