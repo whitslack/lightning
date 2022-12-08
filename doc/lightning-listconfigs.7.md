@@ -98,6 +98,7 @@ On success, an object is returned, containing:
 - **fetchinvoice-noconnect** (boolean, optional): `fetchinvoice-noconnect` fields from config or cmdline, or default
 - **accept-htlc-tlv-types** (string, optional): `accept-extra-tlvs-type` fields from config or cmdline, or not present
 - **tor-service-password** (string, optional): `tor-service-password` field from config or cmdline, if any
+- **announce-addr-dns** (boolean, optional): Whether we put DNS entries into node_announcement
 
 [comment]: # (GENERATE-FROM-SCHEMA-END)
 
@@ -215,4 +216,4 @@ RESOURCES
 ---------
 
 Main web site: <https://github.com/ElementsProject/lightning>
-[comment]: # ( SHA256STAMP:15243ff5a7e090e2a658bd1d7aa09dcbd41f57c1553d131282e4999774129540)
+[comment]: # ( SHA256STAMP:656decdd1cd10131147099baf0fcac91aa364ca7de530d8199026cdda64388e9)
