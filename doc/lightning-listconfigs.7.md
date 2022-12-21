@@ -88,6 +88,7 @@ On success, an object is returned, containing:
 - **disable-dns** (boolean, optional): `true` if `disable-dns` was set in config or cmdline
 - **disable-ip-discovery** (boolean, optional): `true` if `disable-ip-discovery` was set in config or cmdline **deprecated, removal in v23.11**
 - **announce-addr-discovered** (string, optional): `true`/`false`/`auto` depending on how `announce-addr-discovered` was set in config or cmdline *(added v23.02)*
+- **announce-addr-discovered-port** (integer, optional): Sets the announced TCP port for dynamically discovered IPs. *(added v23.02)*
 - **encrypted-hsm** (boolean, optional): `true` if `encrypted-hsm` was set in config or cmdline
 - **rpc-file-mode** (string, optional): `rpc-file-mode` field from config or cmdline, or default
 - **log-level** (string, optional): `log-level` field from config or cmdline, or default
@@ -218,4 +219,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:471b9226eff1081a0a5b0af54cd2a3a2e8a14e4f770fc6629a7b194d9cdf8ef9)
+[comment]: # ( SHA256STAMP:33b8040f8e0a36d950b1dd80b35d6851d6d8f0072cd4e634e86f294346673c80)
