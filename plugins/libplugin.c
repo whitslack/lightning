@@ -1922,15 +1922,18 @@ static struct listpeers_channel *json_to_listpeers_channel(const tal_t *ctx,
 	if (scidtok != NULL) {
 		assert(dirtok != NULL);
 		chan->scid = tal(chan, struct short_channel_id);
-		chan->direction = tal(chan, int);
 		json_to_short_channel_id(buffer, scidtok, chan->scid);
-		json_to_int(buffer, dirtok, chan->direction);
 	}else {
 		assert(dirtok == NULL);
 		chan->scid = NULL;
-		chan->direction = NULL;
 	}
 
+	/* If we catch a channel during opening, these might not be set.
+	 * It's not a real channel (yet), so ignore it! */
+	if (!chan->scid)
+		return tal_free(chan);
+
+	json_to_int(buffer, dirtok, &chan->direction);
 	json_to_msat(buffer, tmsattok, &chan->total_msat);
 	json_to_msat(buffer, smsattok, &chan->spendable_msat);
 
@@ -1955,6 +1958,8 @@ static void json_add_listpeers_peer(struct listpeers_channel ***chans,
 
 	json_for_each_arr(i, iter, channelstok) {
 		struct listpeers_channel *chan = json_to_listpeers_channel(*chans, buffer, iter);
+		if (!chan)
+			continue;
 		chan->id = id;
 		chan->connected = connected;
 		tal_arr_expand(chans, chan);

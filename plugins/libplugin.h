@@ -438,7 +438,7 @@ struct listpeers_channel {
 	struct bitcoin_txid funding_txid;
 	const char *state;
 	struct short_channel_id *scid;
-	int *direction;
+	int direction;
 	struct amount_msat total_msat;
 	struct amount_msat spendable_msat;
 	/* TODO Add fields as we need them. */
