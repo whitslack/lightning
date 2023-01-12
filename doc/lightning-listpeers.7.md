@@ -43,7 +43,28 @@ On success, an object containing **peers** is returned.  It is an array of objec
 
 - **id** (pubkey): the public key of the peer
 - **connected** (boolean): True if the peer is currently connected
-- **channels** (array of objects):
+- **log** (array of objects, optional): if *level* is specified, logs for this peer:
+  - **type** (string) (one of "SKIPPED", "BROKEN", "UNUSUAL", "INFO", "DEBUG", "IO\_IN", "IO\_OUT")
+
+  If **type** is "SKIPPED":
+
+    - **num\_skipped** (u32): number of deleted/omitted entries
+
+  If **type** is "BROKEN", "UNUSUAL", "INFO" or "DEBUG":
+
+    - **time** (string): UNIX timestamp with 9 decimal places
+    - **source** (string): The particular logbook this was found in
+    - **log** (string): The actual log message
+    - **node\_id** (pubkey): The peer this is associated with
+
+  If **type** is "IO\_IN" or "IO\_OUT":
+
+    - **time** (string): UNIX timestamp with 9 decimal places
+    - **source** (string): The particular logbook this was found in
+    - **log** (string): The actual log message
+    - **node\_id** (pubkey): The peer this is associated with
+    - **data** (hex): The IO which occurred
+- **channels** (array of objects, optional) **deprecated, removal in v23.11**:
   - **state** (string): the channel state, in particular "CHANNELD\_NORMAL" means the channel can be used normally (one of "OPENINGD", "CHANNELD\_AWAITING\_LOCKIN", "CHANNELD\_NORMAL", "CHANNELD\_SHUTTING\_DOWN", "CLOSINGD\_SIGEXCHANGE", "CLOSINGD\_COMPLETE", "AWAITING\_UNILATERAL", "FUNDING\_SPEND\_SEEN", "ONCHAIN", "DUALOPEND\_OPEN\_INIT", "DUALOPEND\_AWAITING\_LOCKIN")
   - **opener** (string): Who initiated the channel (one of "local", "remote")
   - **features** (array of strings):
@@ -147,27 +168,6 @@ On success, an object containing **peers** is returned.  It is an array of objec
     - **initial\_feerate** (string): The feerate for the initial funding transaction in per-1000-weight, with "kpw" appended
     - **last\_feerate** (string): The feerate for the latest funding transaction in per-1000-weight, with "kpw" appended
     - **next\_feerate** (string): The minimum feerate for the next funding transaction in per-1000-weight, with "kpw" appended
-- **log** (array of objects, optional): if *level* is specified, logs for this peer:
-  - **type** (string) (one of "SKIPPED", "BROKEN", "UNUSUAL", "INFO", "DEBUG", "IO\_IN", "IO\_OUT")
-
-  If **type** is "SKIPPED":
-
-    - **num\_skipped** (u32): number of deleted/omitted entries
-
-  If **type** is "BROKEN", "UNUSUAL", "INFO" or "DEBUG":
-
-    - **time** (string): UNIX timestamp with 9 decimal places
-    - **source** (string): The particular logbook this was found in
-    - **log** (string): The actual log message
-    - **node\_id** (pubkey): The peer this is associated with
-
-  If **type** is "IO\_IN" or "IO\_OUT":
-
-    - **time** (string): UNIX timestamp with 9 decimal places
-    - **source** (string): The particular logbook this was found in
-    - **log** (string): The actual log message
-    - **node\_id** (pubkey): The peer this is associated with
-    - **data** (hex): The IO which occurred
 
 If **connected** is *true*:
 
@@ -396,4 +396,4 @@ Main web site: <https://github.com/ElementsProject/lightning> Lightning
 RFC site (BOLT \#9):
 <https://github.com/lightning/bolts/blob/master/09-features.md>
 
-[comment]: # ( SHA256STAMP:46b34142469d67d56e43204dc91435de41c962df2f66b702ffbfbf482b372ec1)
+[comment]: # ( SHA256STAMP:6f465a68e9695f1577aa7ca70ddbbc17ae22db5609fe59490a48e92fbfa5acb5)
