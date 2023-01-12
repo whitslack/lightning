@@ -3272,26 +3272,23 @@ static struct command_result *direct_pay_listpeers(struct command *cmd,
 						   const jsmntok_t *toks,
 						   struct payment *p)
 {
-	struct listpeers_result *r =
-	    json_to_listpeers_result(tmpctx, buffer, toks);
+	struct listpeers_channel **channels = json_to_listpeers_channels(tmpctx, buffer, toks);
 	struct direct_pay_data *d = payment_mod_directpay_get_data(p);
 
-	if (r && tal_count(r->peers) == 1) {
-		struct listpeers_peer *peer = r->peers[0];
-		if (!peer->connected)
-			goto cont;
+	for (size_t i=0; i<tal_count(channels); i++) {
+		struct listpeers_channel *chan = channels[i];
 
-		for (size_t i=0; i<tal_count(peer->channels); i++) {
-			struct listpeers_channel *chan = r->peers[0]->channels[i];
-			if (!streq(chan->state, "CHANNELD_NORMAL"))
-			    continue;
+		if (!chan->connected)
+			continue;
 
-			d->chan = tal(d, struct short_channel_id_dir);
-			d->chan->scid = *chan->scid;
-			d->chan->dir = *chan->direction;
-		}
+		if (!streq(chan->state, "CHANNELD_NORMAL"))
+			continue;
+
+		d->chan = tal(d, struct short_channel_id_dir);
+		d->chan->scid = *chan->scid;
+		d->chan->dir = *chan->direction;
 	}
-cont:
+
 	direct_pay_override(p);
 	return command_still_pending(cmd);
 
