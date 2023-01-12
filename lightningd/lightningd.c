@@ -1257,10 +1257,6 @@ stop:
 	/* Now close database */
 	ld->wallet->db = tal_free(ld->wallet->db);
 
-	/* Clean our our HTLC maps, since they use malloc. */
-	htlc_in_map_clear(ld->htlcs_in);
-	htlc_out_map_clear(ld->htlcs_out);
-
 	remove(ld->pidfile);
 
 	/* FIXME: pay can have children off tmpctx which unlink from
