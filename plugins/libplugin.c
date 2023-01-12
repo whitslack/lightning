@@ -1912,7 +1912,9 @@ static struct listpeers_channel *json_to_listpeers_channel(const tal_t *ctx,
 			*tmsattok =
 			    json_get_member(buffer, tok, "total_msat"),
 			*smsattok =
-			    json_get_member(buffer, tok, "spendable_msat");
+			    json_get_member(buffer, tok, "spendable_msat"),
+			*max_htlcs = json_get_member(buffer, tok, "max_accepted_htlcs"),
+			*htlcstok = json_get_member(buffer, tok, "htlcs");
 
 	chan = tal(ctx, struct listpeers_channel);
 
@@ -1936,6 +1938,8 @@ static struct listpeers_channel *json_to_listpeers_channel(const tal_t *ctx,
 	json_to_int(buffer, dirtok, &chan->direction);
 	json_to_msat(buffer, tmsattok, &chan->total_msat);
 	json_to_msat(buffer, smsattok, &chan->spendable_msat);
+	json_to_u16(buffer, max_htlcs, &chan->max_accepted_htlcs);
+	chan->num_htlcs = htlcstok->size;
 
 	return chan;
 }
@@ -1976,7 +1980,7 @@ struct listpeers_channel **json_to_listpeers_channels(const tal_t *ctx,
 	struct listpeers_channel **chans;
 
 	chans = tal_arr(ctx, struct listpeers_channel *, 0);
-	json_for_each_obj(i, iter, peerstok)
+	json_for_each_arr(i, iter, peerstok)
 		json_add_listpeers_peer(&chans, buffer, iter);
 	return chans;
 }
