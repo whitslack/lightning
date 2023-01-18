@@ -599,7 +599,12 @@ struct channel *any_channel_by_scid(struct lightningd *ld,
 {
 	struct peer *p;
 	struct channel *chan;
-	list_for_each(&ld->peers, p, list) {
+	struct peer_node_id_map_iter it;
+
+	/* FIXME: Support lookup by scid directly! */
+	for (p = peer_node_id_map_first(ld->peers, &it);
+	     p;
+	     p = peer_node_id_map_next(ld->peers, &it)) {
 		list_for_each(&p->channels, chan, list) {
 			if (chan->scid
 			    && short_channel_id_eq(scid, chan->scid))
@@ -613,7 +618,12 @@ struct channel *channel_by_dbid(struct lightningd *ld, const u64 dbid)
 {
 	struct peer *p;
 	struct channel *chan;
-	list_for_each(&ld->peers, p, list) {
+	struct peer_node_id_map_iter it;
+
+	/* FIXME: Support lookup by id directly! */
+	for (p = peer_node_id_map_first(ld->peers, &it);
+	     p;
+	     p = peer_node_id_map_next(ld->peers, &it)) {
 		list_for_each(&p->channels, chan, list) {
 			if (chan->dbid == dbid)
 				return chan;
@@ -627,8 +637,12 @@ struct channel *channel_by_cid(struct lightningd *ld,
 {
 	struct peer *p;
 	struct channel *channel;
+	struct peer_node_id_map_iter it;
 
-	list_for_each(&ld->peers, p, list) {
+	/* FIXME: Support lookup by cid directly! */
+	for (p = peer_node_id_map_first(ld->peers, &it);
+	     p;
+	     p = peer_node_id_map_next(ld->peers, &it)) {
 		if (p->uncommitted_channel) {
 			/* We can't use this method for old, uncommitted
 			 * channels; there's no "channel" struct here! */
