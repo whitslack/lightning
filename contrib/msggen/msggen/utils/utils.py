@@ -95,7 +95,7 @@ def load_jsonrpc_service(schema_dir: str):
         "Ping",
         # "plugin",
         # "reserveinputs",
-        # "sendcustommsg",
+        "SendCustomMsg",
         # "sendinvoice",
         # "sendonionmessage",
         # "setchannelfee",
