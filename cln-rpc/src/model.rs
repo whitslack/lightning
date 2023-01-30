@@ -2630,8 +2630,6 @@ pub mod responses {
 	    pub rawtx: String,
 	    pub blockheight: u32,
 	    pub txindex: u32,
-	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub channel: Option<ShortChannelId>,
 	    pub locktime: u32,
 	    pub version: u32,
 	    pub inputs: Vec<ListtransactionsTransactionsInputs>,
