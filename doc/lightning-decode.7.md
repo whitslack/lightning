@@ -28,8 +28,8 @@ If **type** is "bolt12 offer", and **valid** is *true*:
   - **offer\_id** (hex): the id we use to identify this offer (always 64 characters)
   - **offer\_description** (string): the description of the purpose of the offer
   - **offer\_node\_id** (pubkey): public key of the offering node
-  - **offer\_chains** (array of hexs, optional): which blockchains this offer is for (missing implies bitcoin mainnet only):
-    - the genesis blockhash (always 64 characters)
+  - **offer\_chains** (array of hashs, optional): which blockchains this offer is for (missing implies bitcoin mainnet only):
+    - the genesis blockhash
   - **offer\_metadata** (hex, optional): any metadata the creater of the offer includes
   - **offer\_currency** (string, optional): ISO 4217 code of the currency (missing implies Bitcoin) (always 3 characters)
   - **currency\_minor\_unit** (u32, optional): the number of decimal places to apply to amount (if currency known)
@@ -235,13 +235,13 @@ If **type** is "bolt11 invoice", and **valid** is *true*:
   - **created\_at** (u64): the UNIX-style timestamp of the invoice
   - **expiry** (u64): the number of seconds this is valid after `created_at`
   - **payee** (pubkey): the public key of the recipient
-  - **payment\_hash** (hex): the hash of the *payment\_preimage* (always 64 characters)
+  - **payment\_hash** (hash): the hash of the *payment\_preimage*
   - **signature** (signature): signature of the *payee* on this invoice
   - **min\_final\_cltv\_expiry** (u32): the minimum CLTV delay for the final node
   - **amount\_msat** (msat, optional): Amount the invoice asked for
   - **description** (string, optional): the description of the purpose of the purchase
-  - **description\_hash** (hex, optional): the hash of the description, in place of *description* (always 64 characters)
-  - **payment\_secret** (hex, optional): the secret to hand to the payee node (always 64 characters)
+  - **description\_hash** (hash, optional): the hash of the description, in place of *description*
+  - **payment\_secret** (secret, optional): the secret to hand to the payee node
   - **features** (hex, optional): the features bitmap for this invoice
   - **payment\_metadata** (hex, optional): the payment\_metadata to put in the payment
   - **fallbacks** (array of objects, optional): onchain addresses:
@@ -281,4 +281,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:17b71aed6e5b387aca97a09f398636210014ed4fe58b6b0ba4eb0d96f5930967)
+[comment]: # ( SHA256STAMP:a6a00653b24291e0fbbfe83a927ab8e0642270b3e4817eec8be6d638ad52c944)
