@@ -31,6 +31,7 @@ On success, an object containing **payments** is returned.  It is an array of ob
 - **status** (string): status of the payment (one of "pending", "failed", "complete")
 - **created\_at** (u64): the UNIX timestamp showing when this payment was initiated
 - **amount\_sent\_msat** (msat): The amount sent
+- **partid** (u64, optional): Part number (for multiple parts to a single payment)
 - **amount\_msat** (msat, optional): The amount delivered to destination (if known)
 - **destination** (pubkey, optional): the final destination of the payment if known
 - **label** (string, optional): the label, if given to sendpay
@@ -64,4 +65,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:ab64f0f8ccd4d5b39667f48e115f4368dc940fc44928643f8d43cfd16a155fc1)
+[comment]: # ( SHA256STAMP:d50083d5694ec65d7419aa815d0b6c7b07dc0a62d083bd90ec77af4aa7545c7f)
