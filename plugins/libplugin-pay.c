@@ -3265,6 +3265,7 @@ static struct command_result *direct_pay_listpeerchannels(struct command *cmd,
 		if (!streq(chan->state, "CHANNELD_NORMAL"))
 			continue;
 
+		tal_free(d->chan);
 		d->chan = tal(d, struct short_channel_id_dir);
 		d->chan->scid = *chan->scid;
 		d->chan->dir = chan->direction;
