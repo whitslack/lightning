@@ -107,6 +107,11 @@ MANPAGES := doc/lightning-cli.1 \
 	doc/lightning-help.7 \
 	doc/lightning-getlog.7
 
+ifeq ($(HAVE_SQLITE3),1)
+MANPAGES += doc/lightning-listsqlschemas.7 \
+	    doc/lightning-sql.7
+endif
+
 doc-all: $(MANPAGES) doc/index.rst
 
 SCHEMAS := $(wildcard doc/schemas/*.json)
