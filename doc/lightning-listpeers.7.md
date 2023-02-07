@@ -43,6 +43,7 @@ On success, an object containing **peers** is returned.  It is an array of objec
 
 - **id** (pubkey): the public key of the peer
 - **connected** (boolean): True if the peer is currently connected
+- **num\_channels** (u32): The number of channels the peer has with this node *(added v23.02)*
 - **log** (array of objects, optional): if *level* is specified, logs for this peer:
   - **type** (string) (one of "SKIPPED", "BROKEN", "UNUSUAL", "INFO", "DEBUG", "IO\_IN", "IO\_OUT")
 
@@ -396,4 +397,4 @@ Main web site: <https://github.com/ElementsProject/lightning> Lightning
 RFC site (BOLT \#9):
 <https://github.com/lightning/bolts/blob/master/09-features.md>
 
-[comment]: # ( SHA256STAMP:31bc6172f5b3db100eb72c620a0739cf9fc38f3d8c8009357861cf6123cd4e29)
+[comment]: # ( SHA256STAMP:9400feec9df82db1be225a4d40c3a2705e013c22888158d3ea1279bae51c54c1)
