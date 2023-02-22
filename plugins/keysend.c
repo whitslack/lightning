@@ -277,6 +277,15 @@ static int tlvfield_cmp(const struct tlv_field *a,
 	return 0;
 }
 
+/* Check to see if a given TLV type is in the allowlist. */
+static bool keysend_accept_extra_tlv_type(u64 type)
+{
+	for (size_t i=0; i<tal_count(accepted_extra_tlvs); i++)
+		if (type == accepted_extra_tlvs[i])
+			return true;
+	return false;
+}
+
 static struct command_result *
 htlc_accepted_invoice_created(struct command *cmd, const char *buf,
 			      const jsmntok_t *result,
@@ -293,6 +302,9 @@ htlc_accepted_invoice_created(struct command *cmd, const char *buf,
 			continue;
 		/* Same with known fields */
 		if (ki->payload->fields[i].meta)
+			continue;
+		/* If the type was explicitly allowed pass it through. */
+		if (keysend_accept_extra_tlv_type(ki->payload->fields[i].numtype))
 			continue;
 		/* Complain about it, at least. */
 		if (ki->preimage_field != &ki->payload->fields[i]) {
