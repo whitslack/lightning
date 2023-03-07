@@ -12,7 +12,7 @@ use bitcoin::hashes::sha256::Hash as Sha256;
 use bitcoin::hashes::Hash;
 use cln_rpc::primitives::PublicKey;
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::GetinfoOur_features> for pb::GetinfoOurFeatures {
     fn from(c: responses::GetinfoOur_features) -> Self {
         Self {
@@ -24,7 +24,7 @@ impl From<responses::GetinfoOur_features> for pb::GetinfoOurFeatures {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::GetinfoAddress> for pb::GetinfoAddress {
     fn from(c: responses::GetinfoAddress) -> Self {
         Self {
@@ -35,7 +35,7 @@ impl From<responses::GetinfoAddress> for pb::GetinfoAddress {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::GetinfoBinding> for pb::GetinfoBinding {
     fn from(c: responses::GetinfoBinding) -> Self {
         Self {
@@ -47,7 +47,7 @@ impl From<responses::GetinfoBinding> for pb::GetinfoBinding {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::GetinfoResponse> for pb::GetinfoResponse {
     fn from(c: responses::GetinfoResponse) -> Self {
         Self {
@@ -66,15 +66,15 @@ impl From<responses::GetinfoResponse> for pb::GetinfoResponse {
             #[allow(deprecated)]
             msatoshi_fees_collected: c.msatoshi_fees_collected, // Rule #2 for type u64?
             fees_collected_msat: Some(c.fees_collected_msat.into()), // Rule #2 for type msat
-            address: c.address.into_iter().map(|i| i.into()).collect(), // Rule #3 for type GetinfoAddress 
-            binding: c.binding.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
+            address: c.address.into_iter().map(|i| i.into()).collect(), // Rule #3 for type GetinfoAddress
+            binding: c.binding.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
             warning_bitcoind_sync: c.warning_bitcoind_sync, // Rule #2 for type string?
             warning_lightningd_sync: c.warning_lightningd_sync, // Rule #2 for type string?
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListpeersPeersLog> for pb::ListpeersPeersLog {
     fn from(c: responses::ListpeersPeersLog) -> Self {
         Self {
@@ -89,7 +89,7 @@ impl From<responses::ListpeersPeersLog> for pb::ListpeersPeersLog {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListpeersPeersChannelsFeerate> for pb::ListpeersPeersChannelsFeerate {
     fn from(c: responses::ListpeersPeersChannelsFeerate) -> Self {
         Self {
@@ -99,7 +99,7 @@ impl From<responses::ListpeersPeersChannelsFeerate> for pb::ListpeersPeersChanne
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListpeersPeersChannelsInflight> for pb::ListpeersPeersChannelsInflight {
     fn from(c: responses::ListpeersPeersChannelsInflight) -> Self {
         Self {
@@ -113,7 +113,7 @@ impl From<responses::ListpeersPeersChannelsInflight> for pb::ListpeersPeersChann
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListpeersPeersChannelsFunding> for pb::ListpeersPeersChannelsFunding {
     fn from(c: responses::ListpeersPeersChannelsFunding) -> Self {
         Self {
@@ -130,7 +130,7 @@ impl From<responses::ListpeersPeersChannelsFunding> for pb::ListpeersPeersChanne
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListpeersPeersChannelsAlias> for pb::ListpeersPeersChannelsAlias {
     fn from(c: responses::ListpeersPeersChannelsAlias) -> Self {
         Self {
@@ -140,7 +140,7 @@ impl From<responses::ListpeersPeersChannelsAlias> for pb::ListpeersPeersChannels
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListpeersPeersChannelsHtlcs> for pb::ListpeersPeersChannelsHtlcs {
     fn from(c: responses::ListpeersPeersChannelsHtlcs) -> Self {
         Self {
@@ -155,7 +155,7 @@ impl From<responses::ListpeersPeersChannelsHtlcs> for pb::ListpeersPeersChannels
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListpeersPeersChannels> for pb::ListpeersPeersChannels {
     fn from(c: responses::ListpeersPeersChannels) -> Self {
         Self {
@@ -171,12 +171,12 @@ impl From<responses::ListpeersPeersChannels> for pb::ListpeersPeersChannels {
             last_feerate: c.last_feerate, // Rule #2 for type string?
             next_feerate: c.next_feerate, // Rule #2 for type string?
             next_fee_step: c.next_fee_step, // Rule #2 for type u32?
-            inflight: c.inflight.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
+            inflight: c.inflight.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
             close_to: c.close_to.map(|v| hex::decode(v).unwrap()), // Rule #2 for type hex?
             private: c.private, // Rule #2 for type boolean?
             opener: c.opener as i32,
             closer: c.closer.map(|v| v as i32),
-            features: c.features.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListpeersPeersChannelsFeatures 
+            features: c.features.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListpeersPeersChannelsFeatures
             funding: c.funding.map(|v| v.into()),
             to_us_msat: c.to_us_msat.map(|f| f.into()), // Rule #2 for type msat?
             min_to_us_msat: c.min_to_us_msat.map(|f| f.into()), // Rule #2 for type msat?
@@ -197,7 +197,7 @@ impl From<responses::ListpeersPeersChannels> for pb::ListpeersPeersChannels {
             our_to_self_delay: c.our_to_self_delay, // Rule #2 for type u32?
             max_accepted_htlcs: c.max_accepted_htlcs, // Rule #2 for type u32?
             alias: c.alias.map(|v| v.into()),
-            status: c.status.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
+            status: c.status.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
             in_payments_offered: c.in_payments_offered, // Rule #2 for type u64?
             in_offered_msat: c.in_offered_msat.map(|f| f.into()), // Rule #2 for type msat?
             in_payments_fulfilled: c.in_payments_fulfilled, // Rule #2 for type u64?
@@ -206,38 +206,38 @@ impl From<responses::ListpeersPeersChannels> for pb::ListpeersPeersChannels {
             out_offered_msat: c.out_offered_msat.map(|f| f.into()), // Rule #2 for type msat?
             out_payments_fulfilled: c.out_payments_fulfilled, // Rule #2 for type u64?
             out_fulfilled_msat: c.out_fulfilled_msat.map(|f| f.into()), // Rule #2 for type msat?
-            htlcs: c.htlcs.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
+            htlcs: c.htlcs.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
             close_to_addr: c.close_to_addr, // Rule #2 for type string?
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListpeersPeers> for pb::ListpeersPeers {
     fn from(c: responses::ListpeersPeers) -> Self {
         Self {
             id: c.id.serialize().to_vec(), // Rule #2 for type pubkey
             connected: c.connected, // Rule #2 for type boolean
             num_channels: c.num_channels, // Rule #2 for type u32
-            log: c.log.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
-            channels: c.channels.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
-            netaddr: c.netaddr.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
+            log: c.log.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
+            channels: c.channels.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
+            netaddr: c.netaddr.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
             remote_addr: c.remote_addr, // Rule #2 for type string?
             features: c.features.map(|v| hex::decode(v).unwrap()), // Rule #2 for type hex?
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListpeersResponse> for pb::ListpeersResponse {
     fn from(c: responses::ListpeersResponse) -> Self {
         Self {
-            peers: c.peers.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListpeersPeers 
+            peers: c.peers.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListpeersPeers
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListfundsOutputs> for pb::ListfundsOutputs {
     fn from(c: responses::ListfundsOutputs) -> Self {
         Self {
@@ -254,7 +254,7 @@ impl From<responses::ListfundsOutputs> for pb::ListfundsOutputs {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListfundsChannels> for pb::ListfundsChannels {
     fn from(c: responses::ListfundsChannels) -> Self {
         Self {
@@ -271,17 +271,17 @@ impl From<responses::ListfundsChannels> for pb::ListfundsChannels {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListfundsResponse> for pb::ListfundsResponse {
     fn from(c: responses::ListfundsResponse) -> Self {
         Self {
-            outputs: c.outputs.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListfundsOutputs 
-            channels: c.channels.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListfundsChannels 
+            outputs: c.outputs.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListfundsOutputs
+            channels: c.channels.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListfundsChannels
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::SendpayResponse> for pb::SendpayResponse {
     fn from(c: responses::SendpayResponse) -> Self {
         Self {
@@ -303,7 +303,7 @@ impl From<responses::SendpayResponse> for pb::SendpayResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListchannelsChannels> for pb::ListchannelsChannels {
     fn from(c: responses::ListchannelsChannels) -> Self {
         Self {
@@ -327,16 +327,16 @@ impl From<responses::ListchannelsChannels> for pb::ListchannelsChannels {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListchannelsResponse> for pb::ListchannelsResponse {
     fn from(c: responses::ListchannelsResponse) -> Self {
         Self {
-            channels: c.channels.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListchannelsChannels 
+            channels: c.channels.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListchannelsChannels
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::AddgossipResponse> for pb::AddgossipResponse {
     fn from(c: responses::AddgossipResponse) -> Self {
         Self {
@@ -344,7 +344,7 @@ impl From<responses::AddgossipResponse> for pb::AddgossipResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::AutocleaninvoiceResponse> for pb::AutocleaninvoiceResponse {
     fn from(c: responses::AutocleaninvoiceResponse) -> Self {
         Self {
@@ -355,7 +355,7 @@ impl From<responses::AutocleaninvoiceResponse> for pb::AutocleaninvoiceResponse 
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::CheckmessageResponse> for pb::CheckmessageResponse {
     fn from(c: responses::CheckmessageResponse) -> Self {
         Self {
@@ -365,7 +365,7 @@ impl From<responses::CheckmessageResponse> for pb::CheckmessageResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::CloseResponse> for pb::CloseResponse {
     fn from(c: responses::CloseResponse) -> Self {
         Self {
@@ -376,7 +376,7 @@ impl From<responses::CloseResponse> for pb::CloseResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ConnectAddress> for pb::ConnectAddress {
     fn from(c: responses::ConnectAddress) -> Self {
         Self {
@@ -388,7 +388,7 @@ impl From<responses::ConnectAddress> for pb::ConnectAddress {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ConnectResponse> for pb::ConnectResponse {
     fn from(c: responses::ConnectResponse) -> Self {
         Self {
@@ -400,7 +400,7 @@ impl From<responses::ConnectResponse> for pb::ConnectResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::CreateinvoiceResponse> for pb::CreateinvoiceResponse {
     fn from(c: responses::CreateinvoiceResponse) -> Self {
         Self {
@@ -422,11 +422,11 @@ impl From<responses::CreateinvoiceResponse> for pb::CreateinvoiceResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::DatastoreResponse> for pb::DatastoreResponse {
     fn from(c: responses::DatastoreResponse) -> Self {
         Self {
-            key: c.key.into_iter().map(|i| i.into()).collect(), // Rule #3 for type string 
+            key: c.key.into_iter().map(|i| i.into()).collect(), // Rule #3 for type string
             generation: c.generation, // Rule #2 for type u64?
             hex: c.hex.map(|v| hex::decode(v).unwrap()), // Rule #2 for type hex?
             string: c.string, // Rule #2 for type string?
@@ -434,21 +434,21 @@ impl From<responses::DatastoreResponse> for pb::DatastoreResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::CreateonionResponse> for pb::CreateonionResponse {
     fn from(c: responses::CreateonionResponse) -> Self {
         Self {
             onion: hex::decode(&c.onion).unwrap(), // Rule #2 for type hex
-            shared_secrets: c.shared_secrets.into_iter().map(|i| i.to_vec()).collect(), // Rule #3 for type secret 
+            shared_secrets: c.shared_secrets.into_iter().map(|i| i.to_vec()).collect(), // Rule #3 for type secret
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::DeldatastoreResponse> for pb::DeldatastoreResponse {
     fn from(c: responses::DeldatastoreResponse) -> Self {
         Self {
-            key: c.key.into_iter().map(|i| i.into()).collect(), // Rule #3 for type string 
+            key: c.key.into_iter().map(|i| i.into()).collect(), // Rule #3 for type string
             generation: c.generation, // Rule #2 for type u64?
             hex: c.hex.map(|v| hex::decode(v).unwrap()), // Rule #2 for type hex?
             string: c.string, // Rule #2 for type string?
@@ -456,7 +456,7 @@ impl From<responses::DeldatastoreResponse> for pb::DeldatastoreResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::DelexpiredinvoiceResponse> for pb::DelexpiredinvoiceResponse {
     fn from(c: responses::DelexpiredinvoiceResponse) -> Self {
         Self {
@@ -464,7 +464,7 @@ impl From<responses::DelexpiredinvoiceResponse> for pb::DelexpiredinvoiceRespons
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::DelinvoiceResponse> for pb::DelinvoiceResponse {
     fn from(c: responses::DelinvoiceResponse) -> Self {
         Self {
@@ -482,7 +482,7 @@ impl From<responses::DelinvoiceResponse> for pb::DelinvoiceResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::InvoiceResponse> for pb::InvoiceResponse {
     fn from(c: responses::InvoiceResponse) -> Self {
         Self {
@@ -499,11 +499,11 @@ impl From<responses::InvoiceResponse> for pb::InvoiceResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListdatastoreDatastore> for pb::ListdatastoreDatastore {
     fn from(c: responses::ListdatastoreDatastore) -> Self {
         Self {
-            key: c.key.into_iter().map(|i| i.into()).collect(), // Rule #3 for type string 
+            key: c.key.into_iter().map(|i| i.into()).collect(), // Rule #3 for type string
             generation: c.generation, // Rule #2 for type u64?
             hex: c.hex.map(|v| hex::decode(v).unwrap()), // Rule #2 for type hex?
             string: c.string, // Rule #2 for type string?
@@ -511,16 +511,16 @@ impl From<responses::ListdatastoreDatastore> for pb::ListdatastoreDatastore {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListdatastoreResponse> for pb::ListdatastoreResponse {
     fn from(c: responses::ListdatastoreResponse) -> Self {
         Self {
-            datastore: c.datastore.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListdatastoreDatastore 
+            datastore: c.datastore.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListdatastoreDatastore
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListinvoicesInvoices> for pb::ListinvoicesInvoices {
     fn from(c: responses::ListinvoicesInvoices) -> Self {
         Self {
@@ -542,16 +542,16 @@ impl From<responses::ListinvoicesInvoices> for pb::ListinvoicesInvoices {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListinvoicesResponse> for pb::ListinvoicesResponse {
     fn from(c: responses::ListinvoicesResponse) -> Self {
         Self {
-            invoices: c.invoices.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListinvoicesInvoices 
+            invoices: c.invoices.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListinvoicesInvoices
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::SendonionResponse> for pb::SendonionResponse {
     fn from(c: responses::SendonionResponse) -> Self {
         Self {
@@ -572,7 +572,7 @@ impl From<responses::SendonionResponse> for pb::SendonionResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListsendpaysPayments> for pb::ListsendpaysPayments {
     fn from(c: responses::ListsendpaysPayments) -> Self {
         Self {
@@ -595,16 +595,16 @@ impl From<responses::ListsendpaysPayments> for pb::ListsendpaysPayments {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListsendpaysResponse> for pb::ListsendpaysResponse {
     fn from(c: responses::ListsendpaysResponse) -> Self {
         Self {
-            payments: c.payments.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListsendpaysPayments 
+            payments: c.payments.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListsendpaysPayments
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListtransactionsTransactionsInputs> for pb::ListtransactionsTransactionsInputs {
     fn from(c: responses::ListtransactionsTransactionsInputs) -> Self {
         Self {
@@ -617,7 +617,7 @@ impl From<responses::ListtransactionsTransactionsInputs> for pb::Listtransaction
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListtransactionsTransactionsOutputs> for pb::ListtransactionsTransactionsOutputs {
     fn from(c: responses::ListtransactionsTransactionsOutputs) -> Self {
         Self {
@@ -630,7 +630,7 @@ impl From<responses::ListtransactionsTransactionsOutputs> for pb::Listtransactio
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListtransactionsTransactions> for pb::ListtransactionsTransactions {
     fn from(c: responses::ListtransactionsTransactions) -> Self {
         Self {
@@ -640,22 +640,22 @@ impl From<responses::ListtransactionsTransactions> for pb::ListtransactionsTrans
             txindex: c.txindex, // Rule #2 for type u32
             locktime: c.locktime, // Rule #2 for type u32
             version: c.version, // Rule #2 for type u32
-            inputs: c.inputs.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListtransactionsTransactionsInputs 
-            outputs: c.outputs.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListtransactionsTransactionsOutputs 
+            inputs: c.inputs.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListtransactionsTransactionsInputs
+            outputs: c.outputs.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListtransactionsTransactionsOutputs
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListtransactionsResponse> for pb::ListtransactionsResponse {
     fn from(c: responses::ListtransactionsResponse) -> Self {
         Self {
-            transactions: c.transactions.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListtransactionsTransactions 
+            transactions: c.transactions.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListtransactionsTransactions
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::PayResponse> for pb::PayResponse {
     fn from(c: responses::PayResponse) -> Self {
         Self {
@@ -672,7 +672,7 @@ impl From<responses::PayResponse> for pb::PayResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListnodesNodesAddresses> for pb::ListnodesNodesAddresses {
     fn from(c: responses::ListnodesNodesAddresses) -> Self {
         Self {
@@ -683,7 +683,7 @@ impl From<responses::ListnodesNodesAddresses> for pb::ListnodesNodesAddresses {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListnodesNodes> for pb::ListnodesNodes {
     fn from(c: responses::ListnodesNodes) -> Self {
         Self {
@@ -692,21 +692,21 @@ impl From<responses::ListnodesNodes> for pb::ListnodesNodes {
             alias: c.alias, // Rule #2 for type string?
             color: c.color.map(|v| hex::decode(v).unwrap()), // Rule #2 for type hex?
             features: c.features.map(|v| hex::decode(v).unwrap()), // Rule #2 for type hex?
-            addresses: c.addresses.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
+            addresses: c.addresses.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListnodesResponse> for pb::ListnodesResponse {
     fn from(c: responses::ListnodesResponse) -> Self {
         Self {
-            nodes: c.nodes.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListnodesNodes 
+            nodes: c.nodes.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListnodesNodes
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::WaitanyinvoiceResponse> for pb::WaitanyinvoiceResponse {
     fn from(c: responses::WaitanyinvoiceResponse) -> Self {
         Self {
@@ -726,7 +726,7 @@ impl From<responses::WaitanyinvoiceResponse> for pb::WaitanyinvoiceResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::WaitinvoiceResponse> for pb::WaitinvoiceResponse {
     fn from(c: responses::WaitinvoiceResponse) -> Self {
         Self {
@@ -746,7 +746,7 @@ impl From<responses::WaitinvoiceResponse> for pb::WaitinvoiceResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::WaitsendpayResponse> for pb::WaitsendpayResponse {
     fn from(c: responses::WaitsendpayResponse) -> Self {
         Self {
@@ -767,7 +767,7 @@ impl From<responses::WaitsendpayResponse> for pb::WaitsendpayResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::NewaddrResponse> for pb::NewaddrResponse {
     fn from(c: responses::NewaddrResponse) -> Self {
         Self {
@@ -778,7 +778,7 @@ impl From<responses::NewaddrResponse> for pb::NewaddrResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::WithdrawResponse> for pb::WithdrawResponse {
     fn from(c: responses::WithdrawResponse) -> Self {
         Self {
@@ -789,7 +789,7 @@ impl From<responses::WithdrawResponse> for pb::WithdrawResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::KeysendResponse> for pb::KeysendResponse {
     fn from(c: responses::KeysendResponse) -> Self {
         Self {
@@ -806,7 +806,7 @@ impl From<responses::KeysendResponse> for pb::KeysendResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::FundpsbtReservations> for pb::FundpsbtReservations {
     fn from(c: responses::FundpsbtReservations) -> Self {
         Self {
@@ -819,7 +819,7 @@ impl From<responses::FundpsbtReservations> for pb::FundpsbtReservations {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::FundpsbtResponse> for pb::FundpsbtResponse {
     fn from(c: responses::FundpsbtResponse) -> Self {
         Self {
@@ -828,12 +828,12 @@ impl From<responses::FundpsbtResponse> for pb::FundpsbtResponse {
             estimated_final_weight: c.estimated_final_weight, // Rule #2 for type u32
             excess_msat: Some(c.excess_msat.into()), // Rule #2 for type msat
             change_outnum: c.change_outnum, // Rule #2 for type u32?
-            reservations: c.reservations.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
+            reservations: c.reservations.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::SendpsbtResponse> for pb::SendpsbtResponse {
     fn from(c: responses::SendpsbtResponse) -> Self {
         Self {
@@ -843,7 +843,7 @@ impl From<responses::SendpsbtResponse> for pb::SendpsbtResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::SignpsbtResponse> for pb::SignpsbtResponse {
     fn from(c: responses::SignpsbtResponse) -> Self {
         Self {
@@ -852,7 +852,7 @@ impl From<responses::SignpsbtResponse> for pb::SignpsbtResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::UtxopsbtReservations> for pb::UtxopsbtReservations {
     fn from(c: responses::UtxopsbtReservations) -> Self {
         Self {
@@ -865,7 +865,7 @@ impl From<responses::UtxopsbtReservations> for pb::UtxopsbtReservations {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::UtxopsbtResponse> for pb::UtxopsbtResponse {
     fn from(c: responses::UtxopsbtResponse) -> Self {
         Self {
@@ -874,12 +874,12 @@ impl From<responses::UtxopsbtResponse> for pb::UtxopsbtResponse {
             estimated_final_weight: c.estimated_final_weight, // Rule #2 for type u32
             excess_msat: Some(c.excess_msat.into()), // Rule #2 for type msat
             change_outnum: c.change_outnum, // Rule #2 for type u32?
-            reservations: c.reservations.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
+            reservations: c.reservations.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::TxdiscardResponse> for pb::TxdiscardResponse {
     fn from(c: responses::TxdiscardResponse) -> Self {
         Self {
@@ -889,7 +889,7 @@ impl From<responses::TxdiscardResponse> for pb::TxdiscardResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::TxprepareResponse> for pb::TxprepareResponse {
     fn from(c: responses::TxprepareResponse) -> Self {
         Self {
@@ -900,7 +900,7 @@ impl From<responses::TxprepareResponse> for pb::TxprepareResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::TxsendResponse> for pb::TxsendResponse {
     fn from(c: responses::TxsendResponse) -> Self {
         Self {
@@ -911,7 +911,7 @@ impl From<responses::TxsendResponse> for pb::TxsendResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::DisconnectResponse> for pb::DisconnectResponse {
     fn from(c: responses::DisconnectResponse) -> Self {
         Self {
@@ -919,7 +919,7 @@ impl From<responses::DisconnectResponse> for pb::DisconnectResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::FeeratesPerkb> for pb::FeeratesPerkb {
     fn from(c: responses::FeeratesPerkb) -> Self {
         Self {
@@ -935,7 +935,7 @@ impl From<responses::FeeratesPerkb> for pb::FeeratesPerkb {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::FeeratesPerkw> for pb::FeeratesPerkw {
     fn from(c: responses::FeeratesPerkw) -> Self {
         Self {
@@ -951,7 +951,7 @@ impl From<responses::FeeratesPerkw> for pb::FeeratesPerkw {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::FeeratesOnchain_fee_estimates> for pb::FeeratesOnchainFeeEstimates {
     fn from(c: responses::FeeratesOnchain_fee_estimates) -> Self {
         Self {
@@ -964,7 +964,7 @@ impl From<responses::FeeratesOnchain_fee_estimates> for pb::FeeratesOnchainFeeEs
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::FeeratesResponse> for pb::FeeratesResponse {
     fn from(c: responses::FeeratesResponse) -> Self {
         Self {
@@ -976,7 +976,7 @@ impl From<responses::FeeratesResponse> for pb::FeeratesResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::FundchannelResponse> for pb::FundchannelResponse {
     fn from(c: responses::FundchannelResponse) -> Self {
         Self {
@@ -990,7 +990,7 @@ impl From<responses::FundchannelResponse> for pb::FundchannelResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::GetrouteRoute> for pb::GetrouteRoute {
     fn from(c: responses::GetrouteRoute) -> Self {
         Self {
@@ -1006,16 +1006,16 @@ impl From<responses::GetrouteRoute> for pb::GetrouteRoute {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::GetrouteResponse> for pb::GetrouteResponse {
     fn from(c: responses::GetrouteResponse) -> Self {
         Self {
-            route: c.route.into_iter().map(|i| i.into()).collect(), // Rule #3 for type GetrouteRoute 
+            route: c.route.into_iter().map(|i| i.into()).collect(), // Rule #3 for type GetrouteRoute
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListforwardsForwards> for pb::ListforwardsForwards {
     fn from(c: responses::ListforwardsForwards) -> Self {
         Self {
@@ -1033,16 +1033,16 @@ impl From<responses::ListforwardsForwards> for pb::ListforwardsForwards {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListforwardsResponse> for pb::ListforwardsResponse {
     fn from(c: responses::ListforwardsResponse) -> Self {
         Self {
-            forwards: c.forwards.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListforwardsForwards 
+            forwards: c.forwards.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListforwardsForwards
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListpaysPays> for pb::ListpaysPays {
     fn from(c: responses::ListpaysPays) -> Self {
         Self {
@@ -1061,16 +1061,16 @@ impl From<responses::ListpaysPays> for pb::ListpaysPays {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::ListpaysResponse> for pb::ListpaysResponse {
     fn from(c: responses::ListpaysResponse) -> Self {
         Self {
-            pays: c.pays.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListpaysPays 
+            pays: c.pays.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListpaysPays
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::PingResponse> for pb::PingResponse {
     fn from(c: responses::PingResponse) -> Self {
         Self {
@@ -1079,7 +1079,7 @@ impl From<responses::PingResponse> for pb::PingResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::SendcustommsgResponse> for pb::SendcustommsgResponse {
     fn from(c: responses::SendcustommsgResponse) -> Self {
         Self {
@@ -1088,7 +1088,7 @@ impl From<responses::SendcustommsgResponse> for pb::SendcustommsgResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::SetchannelChannels> for pb::SetchannelChannels {
     fn from(c: responses::SetchannelChannels) -> Self {
         Self {
@@ -1105,16 +1105,16 @@ impl From<responses::SetchannelChannels> for pb::SetchannelChannels {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::SetchannelResponse> for pb::SetchannelResponse {
     fn from(c: responses::SetchannelResponse) -> Self {
         Self {
-            channels: c.channels.into_iter().map(|i| i.into()).collect(), // Rule #3 for type SetchannelChannels 
+            channels: c.channels.into_iter().map(|i| i.into()).collect(), // Rule #3 for type SetchannelChannels
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::SigninvoiceResponse> for pb::SigninvoiceResponse {
     fn from(c: responses::SigninvoiceResponse) -> Self {
         Self {
@@ -1123,7 +1123,7 @@ impl From<responses::SigninvoiceResponse> for pb::SigninvoiceResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::SignmessageResponse> for pb::SignmessageResponse {
     fn from(c: responses::SignmessageResponse) -> Self {
         Self {
@@ -1134,7 +1134,7 @@ impl From<responses::SignmessageResponse> for pb::SignmessageResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<responses::StopResponse> for pb::StopResponse {
     fn from(c: responses::StopResponse) -> Self {
         Self {
@@ -1142,7 +1142,7 @@ impl From<responses::StopResponse> for pb::StopResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::GetinfoRequest> for pb::GetinfoRequest {
     fn from(c: requests::GetinfoRequest) -> Self {
         Self {
@@ -1150,7 +1150,7 @@ impl From<requests::GetinfoRequest> for pb::GetinfoRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::ListpeersRequest> for pb::ListpeersRequest {
     fn from(c: requests::ListpeersRequest) -> Self {
         Self {
@@ -1160,7 +1160,7 @@ impl From<requests::ListpeersRequest> for pb::ListpeersRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::ListfundsRequest> for pb::ListfundsRequest {
     fn from(c: requests::ListfundsRequest) -> Self {
         Self {
@@ -1169,7 +1169,7 @@ impl From<requests::ListfundsRequest> for pb::ListfundsRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::SendpayRoute> for pb::SendpayRoute {
     fn from(c: requests::SendpayRoute) -> Self {
         Self {
@@ -1181,11 +1181,11 @@ impl From<requests::SendpayRoute> for pb::SendpayRoute {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::SendpayRequest> for pb::SendpayRequest {
     fn from(c: requests::SendpayRequest) -> Self {
         Self {
-            route: c.route.into_iter().map(|i| i.into()).collect(), // Rule #3 for type SendpayRoute 
+            route: c.route.into_iter().map(|i| i.into()).collect(), // Rule #3 for type SendpayRoute
             payment_hash: c.payment_hash.to_vec(), // Rule #2 for type hash
             label: c.label, // Rule #2 for type string?
             amount_msat: c.amount_msat.map(|f| f.into()), // Rule #2 for type msat?
@@ -1198,7 +1198,7 @@ impl From<requests::SendpayRequest> for pb::SendpayRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::ListchannelsRequest> for pb::ListchannelsRequest {
     fn from(c: requests::ListchannelsRequest) -> Self {
         Self {
@@ -1209,7 +1209,7 @@ impl From<requests::ListchannelsRequest> for pb::ListchannelsRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::AddgossipRequest> for pb::AddgossipRequest {
     fn from(c: requests::AddgossipRequest) -> Self {
         Self {
@@ -1218,7 +1218,7 @@ impl From<requests::AddgossipRequest> for pb::AddgossipRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::AutocleaninvoiceRequest> for pb::AutocleaninvoiceRequest {
     fn from(c: requests::AutocleaninvoiceRequest) -> Self {
         Self {
@@ -1228,7 +1228,7 @@ impl From<requests::AutocleaninvoiceRequest> for pb::AutocleaninvoiceRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::CheckmessageRequest> for pb::CheckmessageRequest {
     fn from(c: requests::CheckmessageRequest) -> Self {
         Self {
@@ -1239,7 +1239,7 @@ impl From<requests::CheckmessageRequest> for pb::CheckmessageRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::CloseRequest> for pb::CloseRequest {
     fn from(c: requests::CloseRequest) -> Self {
         Self {
@@ -1249,12 +1249,12 @@ impl From<requests::CloseRequest> for pb::CloseRequest {
             fee_negotiation_step: c.fee_negotiation_step, // Rule #2 for type string?
             wrong_funding: c.wrong_funding.map(|o|o.into()), // Rule #2 for type outpoint?
             force_lease_closed: c.force_lease_closed, // Rule #2 for type boolean?
-            feerange: c.feerange.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
+            feerange: c.feerange.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::ConnectRequest> for pb::ConnectRequest {
     fn from(c: requests::ConnectRequest) -> Self {
         Self {
@@ -1265,7 +1265,7 @@ impl From<requests::ConnectRequest> for pb::ConnectRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::CreateinvoiceRequest> for pb::CreateinvoiceRequest {
     fn from(c: requests::CreateinvoiceRequest) -> Self {
         Self {
@@ -1276,11 +1276,11 @@ impl From<requests::CreateinvoiceRequest> for pb::CreateinvoiceRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::DatastoreRequest> for pb::DatastoreRequest {
     fn from(c: requests::DatastoreRequest) -> Self {
         Self {
-            key: c.key.into_iter().map(|i| i.into()).collect(), // Rule #3 for type string 
+            key: c.key.into_iter().map(|i| i.into()).collect(), // Rule #3 for type string
             string: c.string, // Rule #2 for type string?
             hex: c.hex.map(|v| hex::decode(v).unwrap()), // Rule #2 for type hex?
             mode: c.mode.map(|v| v as i32),
@@ -1289,7 +1289,7 @@ impl From<requests::DatastoreRequest> for pb::DatastoreRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::CreateonionHops> for pb::CreateonionHops {
     fn from(c: requests::CreateonionHops) -> Self {
         Self {
@@ -1299,11 +1299,11 @@ impl From<requests::CreateonionHops> for pb::CreateonionHops {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::CreateonionRequest> for pb::CreateonionRequest {
     fn from(c: requests::CreateonionRequest) -> Self {
         Self {
-            hops: c.hops.into_iter().map(|i| i.into()).collect(), // Rule #3 for type CreateonionHops 
+            hops: c.hops.into_iter().map(|i| i.into()).collect(), // Rule #3 for type CreateonionHops
             assocdata: hex::decode(&c.assocdata).unwrap(), // Rule #2 for type hex
             session_key: c.session_key.map(|v| v.to_vec()), // Rule #2 for type secret?
             onion_size: c.onion_size.map(|v| v.into()), // Rule #2 for type u16?
@@ -1311,17 +1311,17 @@ impl From<requests::CreateonionRequest> for pb::CreateonionRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::DeldatastoreRequest> for pb::DeldatastoreRequest {
     fn from(c: requests::DeldatastoreRequest) -> Self {
         Self {
-            key: c.key.into_iter().map(|i| i.into()).collect(), // Rule #3 for type string 
+            key: c.key.into_iter().map(|i| i.into()).collect(), // Rule #3 for type string
             generation: c.generation, // Rule #2 for type u64?
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::DelexpiredinvoiceRequest> for pb::DelexpiredinvoiceRequest {
     fn from(c: requests::DelexpiredinvoiceRequest) -> Self {
         Self {
@@ -1330,7 +1330,7 @@ impl From<requests::DelexpiredinvoiceRequest> for pb::DelexpiredinvoiceRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::DelinvoiceRequest> for pb::DelinvoiceRequest {
     fn from(c: requests::DelinvoiceRequest) -> Self {
         Self {
@@ -1341,7 +1341,7 @@ impl From<requests::DelinvoiceRequest> for pb::DelinvoiceRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::InvoiceRequest> for pb::InvoiceRequest {
     fn from(c: requests::InvoiceRequest) -> Self {
         Self {
@@ -1349,7 +1349,7 @@ impl From<requests::InvoiceRequest> for pb::InvoiceRequest {
             description: c.description, // Rule #2 for type string
             label: c.label, // Rule #2 for type string
             expiry: c.expiry, // Rule #2 for type u64?
-            fallbacks: c.fallbacks.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
+            fallbacks: c.fallbacks.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
             preimage: c.preimage.map(|v| hex::decode(v).unwrap()), // Rule #2 for type hex?
             exposeprivatechannels: c.exposeprivatechannels, // Rule #2 for type boolean?
             cltv: c.cltv, // Rule #2 for type u32?
@@ -1358,16 +1358,16 @@ impl From<requests::InvoiceRequest> for pb::InvoiceRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::ListdatastoreRequest> for pb::ListdatastoreRequest {
     fn from(c: requests::ListdatastoreRequest) -> Self {
         Self {
-            key: c.key.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
+            key: c.key.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::ListinvoicesRequest> for pb::ListinvoicesRequest {
     fn from(c: requests::ListinvoicesRequest) -> Self {
         Self {
@@ -1379,7 +1379,7 @@ impl From<requests::ListinvoicesRequest> for pb::ListinvoicesRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::SendonionFirst_hop> for pb::SendonionFirstHop {
     fn from(c: requests::SendonionFirst_hop) -> Self {
         Self {
@@ -1390,7 +1390,7 @@ impl From<requests::SendonionFirst_hop> for pb::SendonionFirstHop {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::SendonionRequest> for pb::SendonionRequest {
     fn from(c: requests::SendonionRequest) -> Self {
         Self {
@@ -1398,7 +1398,7 @@ impl From<requests::SendonionRequest> for pb::SendonionRequest {
             first_hop: Some(c.first_hop.into()),
             payment_hash: c.payment_hash.to_vec(), // Rule #2 for type hash
             label: c.label, // Rule #2 for type string?
-            shared_secrets: c.shared_secrets.map(|arr| arr.into_iter().map(|i| i.to_vec()).collect()).unwrap_or(vec![]), // Rule #3 
+            shared_secrets: c.shared_secrets.map(|arr| arr.into_iter().map(|i| i.to_vec()).collect()).unwrap_or(vec![]), // Rule #3
             partid: c.partid.map(|v| v.into()), // Rule #2 for type u16?
             bolt11: c.bolt11, // Rule #2 for type string?
             amount_msat: c.amount_msat.map(|f| f.into()), // Rule #2 for type msat?
@@ -1409,7 +1409,7 @@ impl From<requests::SendonionRequest> for pb::SendonionRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::ListsendpaysRequest> for pb::ListsendpaysRequest {
     fn from(c: requests::ListsendpaysRequest) -> Self {
         Self {
@@ -1420,7 +1420,7 @@ impl From<requests::ListsendpaysRequest> for pb::ListsendpaysRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::ListtransactionsRequest> for pb::ListtransactionsRequest {
     fn from(c: requests::ListtransactionsRequest) -> Self {
         Self {
@@ -1428,7 +1428,7 @@ impl From<requests::ListtransactionsRequest> for pb::ListtransactionsRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::PayRequest> for pb::PayRequest {
     fn from(c: requests::PayRequest) -> Self {
         Self {
@@ -1441,14 +1441,14 @@ impl From<requests::PayRequest> for pb::PayRequest {
             maxdelay: c.maxdelay.map(|v| v.into()), // Rule #2 for type u16?
             exemptfee: c.exemptfee.map(|f| f.into()), // Rule #2 for type msat?
             localofferid: c.localofferid.map(|v| hex::decode(v).unwrap()), // Rule #2 for type hex?
-            exclude: c.exclude.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
+            exclude: c.exclude.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
             maxfee: c.maxfee.map(|f| f.into()), // Rule #2 for type msat?
             description: c.description, // Rule #2 for type string?
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::ListnodesRequest> for pb::ListnodesRequest {
     fn from(c: requests::ListnodesRequest) -> Self {
         Self {
@@ -1457,7 +1457,7 @@ impl From<requests::ListnodesRequest> for pb::ListnodesRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::WaitanyinvoiceRequest> for pb::WaitanyinvoiceRequest {
     fn from(c: requests::WaitanyinvoiceRequest) -> Self {
         Self {
@@ -1467,7 +1467,7 @@ impl From<requests::WaitanyinvoiceRequest> for pb::WaitanyinvoiceRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::WaitinvoiceRequest> for pb::WaitinvoiceRequest {
     fn from(c: requests::WaitinvoiceRequest) -> Self {
         Self {
@@ -1476,7 +1476,7 @@ impl From<requests::WaitinvoiceRequest> for pb::WaitinvoiceRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::WaitsendpayRequest> for pb::WaitsendpayRequest {
     fn from(c: requests::WaitsendpayRequest) -> Self {
         Self {
@@ -1488,7 +1488,7 @@ impl From<requests::WaitsendpayRequest> for pb::WaitsendpayRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::NewaddrRequest> for pb::NewaddrRequest {
     fn from(c: requests::NewaddrRequest) -> Self {
         Self {
@@ -1497,7 +1497,7 @@ impl From<requests::NewaddrRequest> for pb::NewaddrRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::WithdrawRequest> for pb::WithdrawRequest {
     fn from(c: requests::WithdrawRequest) -> Self {
         Self {
@@ -1505,12 +1505,12 @@ impl From<requests::WithdrawRequest> for pb::WithdrawRequest {
             satoshi: c.satoshi.map(|o|o.into()), // Rule #2 for type msat_or_all?
             feerate: c.feerate.map(|o|o.into()), // Rule #2 for type feerate?
             minconf: c.minconf.map(|v| v.into()), // Rule #2 for type u16?
-            utxos: c.utxos.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
+            utxos: c.utxos.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::KeysendRequest> for pb::KeysendRequest {
     fn from(c: requests::KeysendRequest) -> Self {
         Self {
@@ -1527,7 +1527,7 @@ impl From<requests::KeysendRequest> for pb::KeysendRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::FundpsbtRequest> for pb::FundpsbtRequest {
     fn from(c: requests::FundpsbtRequest) -> Self {
         Self {
@@ -1543,7 +1543,7 @@ impl From<requests::FundpsbtRequest> for pb::FundpsbtRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::SendpsbtRequest> for pb::SendpsbtRequest {
     fn from(c: requests::SendpsbtRequest) -> Self {
         Self {
@@ -1553,24 +1553,24 @@ impl From<requests::SendpsbtRequest> for pb::SendpsbtRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::SignpsbtRequest> for pb::SignpsbtRequest {
     fn from(c: requests::SignpsbtRequest) -> Self {
         Self {
             psbt: c.psbt, // Rule #2 for type string
-            signonly: c.signonly.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
+            signonly: c.signonly.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::UtxopsbtRequest> for pb::UtxopsbtRequest {
     fn from(c: requests::UtxopsbtRequest) -> Self {
         Self {
             satoshi: Some(c.satoshi.into()), // Rule #2 for type msat
             feerate: Some(c.feerate.into()), // Rule #2 for type feerate
             startweight: c.startweight, // Rule #2 for type u32
-            utxos: c.utxos.into_iter().map(|i| i.into()).collect(), // Rule #3 for type outpoint 
+            utxos: c.utxos.into_iter().map(|i| i.into()).collect(), // Rule #3 for type outpoint
             reserve: c.reserve, // Rule #2 for type u32?
             reservedok: c.reservedok, // Rule #2 for type boolean?
             locktime: c.locktime, // Rule #2 for type u32?
@@ -1580,7 +1580,7 @@ impl From<requests::UtxopsbtRequest> for pb::UtxopsbtRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::TxdiscardRequest> for pb::TxdiscardRequest {
     fn from(c: requests::TxdiscardRequest) -> Self {
         Self {
@@ -1589,19 +1589,19 @@ impl From<requests::TxdiscardRequest> for pb::TxdiscardRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::TxprepareRequest> for pb::TxprepareRequest {
     fn from(c: requests::TxprepareRequest) -> Self {
         Self {
-            outputs: c.outputs.into_iter().map(|i| i.into()).collect(), // Rule #3 for type outputdesc 
+            outputs: c.outputs.into_iter().map(|i| i.into()).collect(), // Rule #3 for type outputdesc
             feerate: c.feerate.map(|o|o.into()), // Rule #2 for type feerate?
             minconf: c.minconf, // Rule #2 for type u32?
-            utxos: c.utxos.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
+            utxos: c.utxos.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::TxsendRequest> for pb::TxsendRequest {
     fn from(c: requests::TxsendRequest) -> Self {
         Self {
@@ -1610,7 +1610,7 @@ impl From<requests::TxsendRequest> for pb::TxsendRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::DisconnectRequest> for pb::DisconnectRequest {
     fn from(c: requests::DisconnectRequest) -> Self {
         Self {
@@ -1620,7 +1620,7 @@ impl From<requests::DisconnectRequest> for pb::DisconnectRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::FeeratesRequest> for pb::FeeratesRequest {
     fn from(c: requests::FeeratesRequest) -> Self {
         Self {
@@ -1629,7 +1629,7 @@ impl From<requests::FeeratesRequest> for pb::FeeratesRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::FundchannelRequest> for pb::FundchannelRequest {
     fn from(c: requests::FundchannelRequest) -> Self {
         Self {
@@ -1642,14 +1642,14 @@ impl From<requests::FundchannelRequest> for pb::FundchannelRequest {
             close_to: c.close_to, // Rule #2 for type string?
             request_amt: c.request_amt.map(|f| f.into()), // Rule #2 for type msat?
             compact_lease: c.compact_lease, // Rule #2 for type string?
-            utxos: c.utxos.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
+            utxos: c.utxos.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
             mindepth: c.mindepth, // Rule #2 for type u32?
             reserve: c.reserve.map(|f| f.into()), // Rule #2 for type msat?
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::GetrouteRequest> for pb::GetrouteRequest {
     fn from(c: requests::GetrouteRequest) -> Self {
         Self {
@@ -1659,13 +1659,13 @@ impl From<requests::GetrouteRequest> for pb::GetrouteRequest {
             cltv: c.cltv, // Rule #2 for type number?
             fromid: c.fromid.map(|v| v.serialize().to_vec()), // Rule #2 for type pubkey?
             fuzzpercent: c.fuzzpercent, // Rule #2 for type u32?
-            exclude: c.exclude.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
+            exclude: c.exclude.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
             maxhops: c.maxhops, // Rule #2 for type u32?
         }
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::ListforwardsRequest> for pb::ListforwardsRequest {
     fn from(c: requests::ListforwardsRequest) -> Self {
         Self {
@@ -1676,7 +1676,7 @@ impl From<requests::ListforwardsRequest> for pb::ListforwardsRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::ListpaysRequest> for pb::ListpaysRequest {
     fn from(c: requests::ListpaysRequest) -> Self {
         Self {
@@ -1687,7 +1687,7 @@ impl From<requests::ListpaysRequest> for pb::ListpaysRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::PingRequest> for pb::PingRequest {
     fn from(c: requests::PingRequest) -> Self {
         Self {
@@ -1698,7 +1698,7 @@ impl From<requests::PingRequest> for pb::PingRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::SendcustommsgRequest> for pb::SendcustommsgRequest {
     fn from(c: requests::SendcustommsgRequest) -> Self {
         Self {
@@ -1708,7 +1708,7 @@ impl From<requests::SendcustommsgRequest> for pb::SendcustommsgRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::SetchannelRequest> for pb::SetchannelRequest {
     fn from(c: requests::SetchannelRequest) -> Self {
         Self {
@@ -1722,7 +1722,7 @@ impl From<requests::SetchannelRequest> for pb::SetchannelRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::SigninvoiceRequest> for pb::SigninvoiceRequest {
     fn from(c: requests::SigninvoiceRequest) -> Self {
         Self {
@@ -1731,7 +1731,7 @@ impl From<requests::SigninvoiceRequest> for pb::SigninvoiceRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::SignmessageRequest> for pb::SignmessageRequest {
     fn from(c: requests::SignmessageRequest) -> Self {
         Self {
@@ -1740,7 +1740,7 @@ impl From<requests::SignmessageRequest> for pb::SignmessageRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<requests::StopRequest> for pb::StopRequest {
     fn from(c: requests::StopRequest) -> Self {
         Self {
@@ -1748,7 +1748,8 @@ impl From<requests::StopRequest> for pb::StopRequest {
     }
 }
 
-#[allow(unused_variables)]
+
+#[allow(unused_variables,deprecated)]
 impl From<pb::GetinfoRequest> for requests::GetinfoRequest {
     fn from(c: pb::GetinfoRequest) -> Self {
         Self {
@@ -1756,7 +1757,7 @@ impl From<pb::GetinfoRequest> for requests::GetinfoRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListpeersRequest> for requests::ListpeersRequest {
     fn from(c: pb::ListpeersRequest) -> Self {
         Self {
@@ -1766,7 +1767,7 @@ impl From<pb::ListpeersRequest> for requests::ListpeersRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListfundsRequest> for requests::ListfundsRequest {
     fn from(c: pb::ListfundsRequest) -> Self {
         Self {
@@ -1775,7 +1776,7 @@ impl From<pb::ListfundsRequest> for requests::ListfundsRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::SendpayRoute> for requests::SendpayRoute {
     fn from(c: pb::SendpayRoute) -> Self {
         Self {
@@ -1787,7 +1788,7 @@ impl From<pb::SendpayRoute> for requests::SendpayRoute {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::SendpayRequest> for requests::SendpayRequest {
     fn from(c: pb::SendpayRequest) -> Self {
         Self {
@@ -1804,7 +1805,7 @@ impl From<pb::SendpayRequest> for requests::SendpayRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListchannelsRequest> for requests::ListchannelsRequest {
     fn from(c: pb::ListchannelsRequest) -> Self {
         Self {
@@ -1815,7 +1816,7 @@ impl From<pb::ListchannelsRequest> for requests::ListchannelsRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::AddgossipRequest> for requests::AddgossipRequest {
     fn from(c: pb::AddgossipRequest) -> Self {
         Self {
@@ -1824,7 +1825,7 @@ impl From<pb::AddgossipRequest> for requests::AddgossipRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::AutocleaninvoiceRequest> for requests::AutocleaninvoiceRequest {
     fn from(c: pb::AutocleaninvoiceRequest) -> Self {
         Self {
@@ -1834,7 +1835,7 @@ impl From<pb::AutocleaninvoiceRequest> for requests::AutocleaninvoiceRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::CheckmessageRequest> for requests::CheckmessageRequest {
     fn from(c: pb::CheckmessageRequest) -> Self {
         Self {
@@ -1845,7 +1846,7 @@ impl From<pb::CheckmessageRequest> for requests::CheckmessageRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::CloseRequest> for requests::CloseRequest {
     fn from(c: pb::CloseRequest) -> Self {
         Self {
@@ -1860,7 +1861,7 @@ impl From<pb::CloseRequest> for requests::CloseRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ConnectRequest> for requests::ConnectRequest {
     fn from(c: pb::ConnectRequest) -> Self {
         Self {
@@ -1871,7 +1872,7 @@ impl From<pb::ConnectRequest> for requests::ConnectRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::CreateinvoiceRequest> for requests::CreateinvoiceRequest {
     fn from(c: pb::CreateinvoiceRequest) -> Self {
         Self {
@@ -1882,7 +1883,7 @@ impl From<pb::CreateinvoiceRequest> for requests::CreateinvoiceRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::DatastoreRequest> for requests::DatastoreRequest {
     fn from(c: pb::DatastoreRequest) -> Self {
         Self {
@@ -1895,7 +1896,7 @@ impl From<pb::DatastoreRequest> for requests::DatastoreRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::CreateonionHops> for requests::CreateonionHops {
     fn from(c: pb::CreateonionHops) -> Self {
         Self {
@@ -1905,7 +1906,7 @@ impl From<pb::CreateonionHops> for requests::CreateonionHops {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::CreateonionRequest> for requests::CreateonionRequest {
     fn from(c: pb::CreateonionRequest) -> Self {
         Self {
@@ -1917,7 +1918,7 @@ impl From<pb::CreateonionRequest> for requests::CreateonionRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::DeldatastoreRequest> for requests::DeldatastoreRequest {
     fn from(c: pb::DeldatastoreRequest) -> Self {
         Self {
@@ -1927,7 +1928,7 @@ impl From<pb::DeldatastoreRequest> for requests::DeldatastoreRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::DelexpiredinvoiceRequest> for requests::DelexpiredinvoiceRequest {
     fn from(c: pb::DelexpiredinvoiceRequest) -> Self {
         Self {
@@ -1936,7 +1937,7 @@ impl From<pb::DelexpiredinvoiceRequest> for requests::DelexpiredinvoiceRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::DelinvoiceRequest> for requests::DelinvoiceRequest {
     fn from(c: pb::DelinvoiceRequest) -> Self {
         Self {
@@ -1947,7 +1948,7 @@ impl From<pb::DelinvoiceRequest> for requests::DelinvoiceRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::InvoiceRequest> for requests::InvoiceRequest {
     fn from(c: pb::InvoiceRequest) -> Self {
         Self {
@@ -1964,7 +1965,7 @@ impl From<pb::InvoiceRequest> for requests::InvoiceRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListdatastoreRequest> for requests::ListdatastoreRequest {
     fn from(c: pb::ListdatastoreRequest) -> Self {
         Self {
@@ -1973,7 +1974,7 @@ impl From<pb::ListdatastoreRequest> for requests::ListdatastoreRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListinvoicesRequest> for requests::ListinvoicesRequest {
     fn from(c: pb::ListinvoicesRequest) -> Self {
         Self {
@@ -1985,7 +1986,7 @@ impl From<pb::ListinvoicesRequest> for requests::ListinvoicesRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::SendonionFirstHop> for requests::SendonionFirst_hop {
     fn from(c: pb::SendonionFirstHop) -> Self {
         Self {
@@ -1996,7 +1997,7 @@ impl From<pb::SendonionFirstHop> for requests::SendonionFirst_hop {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::SendonionRequest> for requests::SendonionRequest {
     fn from(c: pb::SendonionRequest) -> Self {
         Self {
@@ -2015,7 +2016,7 @@ impl From<pb::SendonionRequest> for requests::SendonionRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListsendpaysRequest> for requests::ListsendpaysRequest {
     fn from(c: pb::ListsendpaysRequest) -> Self {
         Self {
@@ -2026,7 +2027,7 @@ impl From<pb::ListsendpaysRequest> for requests::ListsendpaysRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListtransactionsRequest> for requests::ListtransactionsRequest {
     fn from(c: pb::ListtransactionsRequest) -> Self {
         Self {
@@ -2034,7 +2035,7 @@ impl From<pb::ListtransactionsRequest> for requests::ListtransactionsRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::PayRequest> for requests::PayRequest {
     fn from(c: pb::PayRequest) -> Self {
         Self {
@@ -2054,7 +2055,7 @@ impl From<pb::PayRequest> for requests::PayRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListnodesRequest> for requests::ListnodesRequest {
     fn from(c: pb::ListnodesRequest) -> Self {
         Self {
@@ -2063,7 +2064,7 @@ impl From<pb::ListnodesRequest> for requests::ListnodesRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::WaitanyinvoiceRequest> for requests::WaitanyinvoiceRequest {
     fn from(c: pb::WaitanyinvoiceRequest) -> Self {
         Self {
@@ -2073,7 +2074,7 @@ impl From<pb::WaitanyinvoiceRequest> for requests::WaitanyinvoiceRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::WaitinvoiceRequest> for requests::WaitinvoiceRequest {
     fn from(c: pb::WaitinvoiceRequest) -> Self {
         Self {
@@ -2082,7 +2083,7 @@ impl From<pb::WaitinvoiceRequest> for requests::WaitinvoiceRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::WaitsendpayRequest> for requests::WaitsendpayRequest {
     fn from(c: pb::WaitsendpayRequest) -> Self {
         Self {
@@ -2094,7 +2095,7 @@ impl From<pb::WaitsendpayRequest> for requests::WaitsendpayRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::NewaddrRequest> for requests::NewaddrRequest {
     fn from(c: pb::NewaddrRequest) -> Self {
         Self {
@@ -2103,7 +2104,7 @@ impl From<pb::NewaddrRequest> for requests::NewaddrRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::WithdrawRequest> for requests::WithdrawRequest {
     fn from(c: pb::WithdrawRequest) -> Self {
         Self {
@@ -2116,7 +2117,7 @@ impl From<pb::WithdrawRequest> for requests::WithdrawRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::KeysendRequest> for requests::KeysendRequest {
     fn from(c: pb::KeysendRequest) -> Self {
         Self {
@@ -2133,7 +2134,7 @@ impl From<pb::KeysendRequest> for requests::KeysendRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::FundpsbtRequest> for requests::FundpsbtRequest {
     fn from(c: pb::FundpsbtRequest) -> Self {
         Self {
@@ -2149,7 +2150,7 @@ impl From<pb::FundpsbtRequest> for requests::FundpsbtRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::SendpsbtRequest> for requests::SendpsbtRequest {
     fn from(c: pb::SendpsbtRequest) -> Self {
         Self {
@@ -2159,7 +2160,7 @@ impl From<pb::SendpsbtRequest> for requests::SendpsbtRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::SignpsbtRequest> for requests::SignpsbtRequest {
     fn from(c: pb::SignpsbtRequest) -> Self {
         Self {
@@ -2169,7 +2170,7 @@ impl From<pb::SignpsbtRequest> for requests::SignpsbtRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::UtxopsbtRequest> for requests::UtxopsbtRequest {
     fn from(c: pb::UtxopsbtRequest) -> Self {
         Self {
@@ -2186,7 +2187,7 @@ impl From<pb::UtxopsbtRequest> for requests::UtxopsbtRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::TxdiscardRequest> for requests::TxdiscardRequest {
     fn from(c: pb::TxdiscardRequest) -> Self {
         Self {
@@ -2195,7 +2196,7 @@ impl From<pb::TxdiscardRequest> for requests::TxdiscardRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::TxprepareRequest> for requests::TxprepareRequest {
     fn from(c: pb::TxprepareRequest) -> Self {
         Self {
@@ -2207,7 +2208,7 @@ impl From<pb::TxprepareRequest> for requests::TxprepareRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::TxsendRequest> for requests::TxsendRequest {
     fn from(c: pb::TxsendRequest) -> Self {
         Self {
@@ -2216,7 +2217,7 @@ impl From<pb::TxsendRequest> for requests::TxsendRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::DisconnectRequest> for requests::DisconnectRequest {
     fn from(c: pb::DisconnectRequest) -> Self {
         Self {
@@ -2226,7 +2227,7 @@ impl From<pb::DisconnectRequest> for requests::DisconnectRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::FeeratesRequest> for requests::FeeratesRequest {
     fn from(c: pb::FeeratesRequest) -> Self {
         Self {
@@ -2235,7 +2236,7 @@ impl From<pb::FeeratesRequest> for requests::FeeratesRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::FundchannelRequest> for requests::FundchannelRequest {
     fn from(c: pb::FundchannelRequest) -> Self {
         Self {
@@ -2255,7 +2256,7 @@ impl From<pb::FundchannelRequest> for requests::FundchannelRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::GetrouteRequest> for requests::GetrouteRequest {
     fn from(c: pb::GetrouteRequest) -> Self {
         Self {
@@ -2271,7 +2272,7 @@ impl From<pb::GetrouteRequest> for requests::GetrouteRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListforwardsRequest> for requests::ListforwardsRequest {
     fn from(c: pb::ListforwardsRequest) -> Self {
         Self {
@@ -2282,7 +2283,7 @@ impl From<pb::ListforwardsRequest> for requests::ListforwardsRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListpaysRequest> for requests::ListpaysRequest {
     fn from(c: pb::ListpaysRequest) -> Self {
         Self {
@@ -2293,7 +2294,7 @@ impl From<pb::ListpaysRequest> for requests::ListpaysRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::PingRequest> for requests::PingRequest {
     fn from(c: pb::PingRequest) -> Self {
         Self {
@@ -2304,7 +2305,7 @@ impl From<pb::PingRequest> for requests::PingRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::SendcustommsgRequest> for requests::SendcustommsgRequest {
     fn from(c: pb::SendcustommsgRequest) -> Self {
         Self {
@@ -2314,7 +2315,7 @@ impl From<pb::SendcustommsgRequest> for requests::SendcustommsgRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::SetchannelRequest> for requests::SetchannelRequest {
     fn from(c: pb::SetchannelRequest) -> Self {
         Self {
@@ -2328,7 +2329,7 @@ impl From<pb::SetchannelRequest> for requests::SetchannelRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::SigninvoiceRequest> for requests::SigninvoiceRequest {
     fn from(c: pb::SigninvoiceRequest) -> Self {
         Self {
@@ -2337,7 +2338,7 @@ impl From<pb::SigninvoiceRequest> for requests::SigninvoiceRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::SignmessageRequest> for requests::SignmessageRequest {
     fn from(c: pb::SignmessageRequest) -> Self {
         Self {
@@ -2346,7 +2347,7 @@ impl From<pb::SignmessageRequest> for requests::SignmessageRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::StopRequest> for requests::StopRequest {
     fn from(c: pb::StopRequest) -> Self {
         Self {
@@ -2354,7 +2355,7 @@ impl From<pb::StopRequest> for requests::StopRequest {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::GetinfoOurFeatures> for responses::GetinfoOur_features {
     fn from(c: pb::GetinfoOurFeatures) -> Self {
         Self {
@@ -2366,7 +2367,7 @@ impl From<pb::GetinfoOurFeatures> for responses::GetinfoOur_features {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::GetinfoAddress> for responses::GetinfoAddress {
     fn from(c: pb::GetinfoAddress) -> Self {
         Self {
@@ -2377,7 +2378,7 @@ impl From<pb::GetinfoAddress> for responses::GetinfoAddress {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::GetinfoBinding> for responses::GetinfoBinding {
     fn from(c: pb::GetinfoBinding) -> Self {
         Self {
@@ -2389,7 +2390,7 @@ impl From<pb::GetinfoBinding> for responses::GetinfoBinding {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::GetinfoResponse> for responses::GetinfoResponse {
     fn from(c: pb::GetinfoResponse) -> Self {
         Self {
@@ -2415,7 +2416,7 @@ impl From<pb::GetinfoResponse> for responses::GetinfoResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListpeersPeersLog> for responses::ListpeersPeersLog {
     fn from(c: pb::ListpeersPeersLog) -> Self {
         Self {
@@ -2430,7 +2431,7 @@ impl From<pb::ListpeersPeersLog> for responses::ListpeersPeersLog {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListpeersPeersChannelsFeerate> for responses::ListpeersPeersChannelsFeerate {
     fn from(c: pb::ListpeersPeersChannelsFeerate) -> Self {
         Self {
@@ -2440,7 +2441,7 @@ impl From<pb::ListpeersPeersChannelsFeerate> for responses::ListpeersPeersChanne
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListpeersPeersChannelsInflight> for responses::ListpeersPeersChannelsInflight {
     fn from(c: pb::ListpeersPeersChannelsInflight) -> Self {
         Self {
@@ -2454,7 +2455,7 @@ impl From<pb::ListpeersPeersChannelsInflight> for responses::ListpeersPeersChann
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListpeersPeersChannelsFunding> for responses::ListpeersPeersChannelsFunding {
     fn from(c: pb::ListpeersPeersChannelsFunding) -> Self {
         Self {
@@ -2469,7 +2470,7 @@ impl From<pb::ListpeersPeersChannelsFunding> for responses::ListpeersPeersChanne
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListpeersPeersChannelsAlias> for responses::ListpeersPeersChannelsAlias {
     fn from(c: pb::ListpeersPeersChannelsAlias) -> Self {
         Self {
@@ -2479,7 +2480,7 @@ impl From<pb::ListpeersPeersChannelsAlias> for responses::ListpeersPeersChannels
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListpeersPeersChannelsHtlcs> for responses::ListpeersPeersChannelsHtlcs {
     fn from(c: pb::ListpeersPeersChannelsHtlcs) -> Self {
         Self {
@@ -2494,7 +2495,7 @@ impl From<pb::ListpeersPeersChannelsHtlcs> for responses::ListpeersPeersChannels
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListpeersPeersChannels> for responses::ListpeersPeersChannels {
     fn from(c: pb::ListpeersPeersChannels) -> Self {
         Self {
@@ -2551,7 +2552,7 @@ state_changes: None,            status: Some(c.status.into_iter().map(|s| s.into
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListpeersPeers> for responses::ListpeersPeers {
     fn from(c: pb::ListpeersPeers) -> Self {
         Self {
@@ -2567,7 +2568,7 @@ impl From<pb::ListpeersPeers> for responses::ListpeersPeers {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListpeersResponse> for responses::ListpeersResponse {
     fn from(c: pb::ListpeersResponse) -> Self {
         Self {
@@ -2576,7 +2577,7 @@ impl From<pb::ListpeersResponse> for responses::ListpeersResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListfundsOutputs> for responses::ListfundsOutputs {
     fn from(c: pb::ListfundsOutputs) -> Self {
         Self {
@@ -2593,7 +2594,7 @@ impl From<pb::ListfundsOutputs> for responses::ListfundsOutputs {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListfundsChannels> for responses::ListfundsChannels {
     fn from(c: pb::ListfundsChannels) -> Self {
         Self {
@@ -2610,7 +2611,7 @@ impl From<pb::ListfundsChannels> for responses::ListfundsChannels {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListfundsResponse> for responses::ListfundsResponse {
     fn from(c: pb::ListfundsResponse) -> Self {
         Self {
@@ -2620,7 +2621,7 @@ impl From<pb::ListfundsResponse> for responses::ListfundsResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::SendpayResponse> for responses::SendpayResponse {
     fn from(c: pb::SendpayResponse) -> Self {
         Self {
@@ -2642,7 +2643,7 @@ impl From<pb::SendpayResponse> for responses::SendpayResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListchannelsChannels> for responses::ListchannelsChannels {
     fn from(c: pb::ListchannelsChannels) -> Self {
         Self {
@@ -2666,7 +2667,7 @@ impl From<pb::ListchannelsChannels> for responses::ListchannelsChannels {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListchannelsResponse> for responses::ListchannelsResponse {
     fn from(c: pb::ListchannelsResponse) -> Self {
         Self {
@@ -2675,7 +2676,7 @@ impl From<pb::ListchannelsResponse> for responses::ListchannelsResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::AddgossipResponse> for responses::AddgossipResponse {
     fn from(c: pb::AddgossipResponse) -> Self {
         Self {
@@ -2683,7 +2684,7 @@ impl From<pb::AddgossipResponse> for responses::AddgossipResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::AutocleaninvoiceResponse> for responses::AutocleaninvoiceResponse {
     fn from(c: pb::AutocleaninvoiceResponse) -> Self {
         Self {
@@ -2694,7 +2695,7 @@ impl From<pb::AutocleaninvoiceResponse> for responses::AutocleaninvoiceResponse 
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::CheckmessageResponse> for responses::CheckmessageResponse {
     fn from(c: pb::CheckmessageResponse) -> Self {
         Self {
@@ -2704,7 +2705,7 @@ impl From<pb::CheckmessageResponse> for responses::CheckmessageResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::CloseResponse> for responses::CloseResponse {
     fn from(c: pb::CloseResponse) -> Self {
         Self {
@@ -2715,7 +2716,7 @@ impl From<pb::CloseResponse> for responses::CloseResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ConnectAddress> for responses::ConnectAddress {
     fn from(c: pb::ConnectAddress) -> Self {
         Self {
@@ -2727,7 +2728,7 @@ impl From<pb::ConnectAddress> for responses::ConnectAddress {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ConnectResponse> for responses::ConnectResponse {
     fn from(c: pb::ConnectResponse) -> Self {
         Self {
@@ -2739,7 +2740,7 @@ impl From<pb::ConnectResponse> for responses::ConnectResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::CreateinvoiceResponse> for responses::CreateinvoiceResponse {
     fn from(c: pb::CreateinvoiceResponse) -> Self {
         Self {
@@ -2761,7 +2762,7 @@ impl From<pb::CreateinvoiceResponse> for responses::CreateinvoiceResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::DatastoreResponse> for responses::DatastoreResponse {
     fn from(c: pb::DatastoreResponse) -> Self {
         Self {
@@ -2773,7 +2774,7 @@ impl From<pb::DatastoreResponse> for responses::DatastoreResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::CreateonionResponse> for responses::CreateonionResponse {
     fn from(c: pb::CreateonionResponse) -> Self {
         Self {
@@ -2783,7 +2784,7 @@ impl From<pb::CreateonionResponse> for responses::CreateonionResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::DeldatastoreResponse> for responses::DeldatastoreResponse {
     fn from(c: pb::DeldatastoreResponse) -> Self {
         Self {
@@ -2795,7 +2796,7 @@ impl From<pb::DeldatastoreResponse> for responses::DeldatastoreResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::DelexpiredinvoiceResponse> for responses::DelexpiredinvoiceResponse {
     fn from(c: pb::DelexpiredinvoiceResponse) -> Self {
         Self {
@@ -2803,7 +2804,7 @@ impl From<pb::DelexpiredinvoiceResponse> for responses::DelexpiredinvoiceRespons
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::DelinvoiceResponse> for responses::DelinvoiceResponse {
     fn from(c: pb::DelinvoiceResponse) -> Self {
         Self {
@@ -2821,7 +2822,7 @@ impl From<pb::DelinvoiceResponse> for responses::DelinvoiceResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::InvoiceResponse> for responses::InvoiceResponse {
     fn from(c: pb::InvoiceResponse) -> Self {
         Self {
@@ -2838,7 +2839,7 @@ impl From<pb::InvoiceResponse> for responses::InvoiceResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListdatastoreDatastore> for responses::ListdatastoreDatastore {
     fn from(c: pb::ListdatastoreDatastore) -> Self {
         Self {
@@ -2850,7 +2851,7 @@ impl From<pb::ListdatastoreDatastore> for responses::ListdatastoreDatastore {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListdatastoreResponse> for responses::ListdatastoreResponse {
     fn from(c: pb::ListdatastoreResponse) -> Self {
         Self {
@@ -2859,7 +2860,7 @@ impl From<pb::ListdatastoreResponse> for responses::ListdatastoreResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListinvoicesInvoices> for responses::ListinvoicesInvoices {
     fn from(c: pb::ListinvoicesInvoices) -> Self {
         Self {
@@ -2881,7 +2882,7 @@ impl From<pb::ListinvoicesInvoices> for responses::ListinvoicesInvoices {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListinvoicesResponse> for responses::ListinvoicesResponse {
     fn from(c: pb::ListinvoicesResponse) -> Self {
         Self {
@@ -2890,7 +2891,7 @@ impl From<pb::ListinvoicesResponse> for responses::ListinvoicesResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::SendonionResponse> for responses::SendonionResponse {
     fn from(c: pb::SendonionResponse) -> Self {
         Self {
@@ -2911,7 +2912,7 @@ impl From<pb::SendonionResponse> for responses::SendonionResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListsendpaysPayments> for responses::ListsendpaysPayments {
     fn from(c: pb::ListsendpaysPayments) -> Self {
         Self {
@@ -2934,7 +2935,7 @@ impl From<pb::ListsendpaysPayments> for responses::ListsendpaysPayments {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListsendpaysResponse> for responses::ListsendpaysResponse {
     fn from(c: pb::ListsendpaysResponse) -> Self {
         Self {
@@ -2943,7 +2944,7 @@ impl From<pb::ListsendpaysResponse> for responses::ListsendpaysResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListtransactionsTransactionsInputs> for responses::ListtransactionsTransactionsInputs {
     fn from(c: pb::ListtransactionsTransactionsInputs) -> Self {
         Self {
@@ -2956,7 +2957,7 @@ impl From<pb::ListtransactionsTransactionsInputs> for responses::Listtransaction
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListtransactionsTransactionsOutputs> for responses::ListtransactionsTransactionsOutputs {
     fn from(c: pb::ListtransactionsTransactionsOutputs) -> Self {
         Self {
@@ -2969,7 +2970,7 @@ impl From<pb::ListtransactionsTransactionsOutputs> for responses::Listtransactio
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListtransactionsTransactions> for responses::ListtransactionsTransactions {
     fn from(c: pb::ListtransactionsTransactions) -> Self {
         Self {
@@ -2985,7 +2986,7 @@ impl From<pb::ListtransactionsTransactions> for responses::ListtransactionsTrans
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListtransactionsResponse> for responses::ListtransactionsResponse {
     fn from(c: pb::ListtransactionsResponse) -> Self {
         Self {
@@ -2994,7 +2995,7 @@ impl From<pb::ListtransactionsResponse> for responses::ListtransactionsResponse 
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::PayResponse> for responses::PayResponse {
     fn from(c: pb::PayResponse) -> Self {
         Self {
@@ -3011,7 +3012,7 @@ impl From<pb::PayResponse> for responses::PayResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListnodesNodesAddresses> for responses::ListnodesNodesAddresses {
     fn from(c: pb::ListnodesNodesAddresses) -> Self {
         Self {
@@ -3022,7 +3023,7 @@ impl From<pb::ListnodesNodesAddresses> for responses::ListnodesNodesAddresses {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListnodesNodes> for responses::ListnodesNodes {
     fn from(c: pb::ListnodesNodes) -> Self {
         Self {
@@ -3036,7 +3037,7 @@ impl From<pb::ListnodesNodes> for responses::ListnodesNodes {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListnodesResponse> for responses::ListnodesResponse {
     fn from(c: pb::ListnodesResponse) -> Self {
         Self {
@@ -3045,7 +3046,7 @@ impl From<pb::ListnodesResponse> for responses::ListnodesResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::WaitanyinvoiceResponse> for responses::WaitanyinvoiceResponse {
     fn from(c: pb::WaitanyinvoiceResponse) -> Self {
         Self {
@@ -3065,7 +3066,7 @@ impl From<pb::WaitanyinvoiceResponse> for responses::WaitanyinvoiceResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::WaitinvoiceResponse> for responses::WaitinvoiceResponse {
     fn from(c: pb::WaitinvoiceResponse) -> Self {
         Self {
@@ -3085,7 +3086,7 @@ impl From<pb::WaitinvoiceResponse> for responses::WaitinvoiceResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::WaitsendpayResponse> for responses::WaitsendpayResponse {
     fn from(c: pb::WaitsendpayResponse) -> Self {
         Self {
@@ -3106,7 +3107,7 @@ impl From<pb::WaitsendpayResponse> for responses::WaitsendpayResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::NewaddrResponse> for responses::NewaddrResponse {
     fn from(c: pb::NewaddrResponse) -> Self {
         Self {
@@ -3116,7 +3117,7 @@ impl From<pb::NewaddrResponse> for responses::NewaddrResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::WithdrawResponse> for responses::WithdrawResponse {
     fn from(c: pb::WithdrawResponse) -> Self {
         Self {
@@ -3127,7 +3128,7 @@ impl From<pb::WithdrawResponse> for responses::WithdrawResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::KeysendResponse> for responses::KeysendResponse {
     fn from(c: pb::KeysendResponse) -> Self {
         Self {
@@ -3144,7 +3145,7 @@ impl From<pb::KeysendResponse> for responses::KeysendResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::FundpsbtReservations> for responses::FundpsbtReservations {
     fn from(c: pb::FundpsbtReservations) -> Self {
         Self {
@@ -3157,7 +3158,7 @@ impl From<pb::FundpsbtReservations> for responses::FundpsbtReservations {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::FundpsbtResponse> for responses::FundpsbtResponse {
     fn from(c: pb::FundpsbtResponse) -> Self {
         Self {
@@ -3171,7 +3172,7 @@ impl From<pb::FundpsbtResponse> for responses::FundpsbtResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::SendpsbtResponse> for responses::SendpsbtResponse {
     fn from(c: pb::SendpsbtResponse) -> Self {
         Self {
@@ -3181,7 +3182,7 @@ impl From<pb::SendpsbtResponse> for responses::SendpsbtResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::SignpsbtResponse> for responses::SignpsbtResponse {
     fn from(c: pb::SignpsbtResponse) -> Self {
         Self {
@@ -3190,7 +3191,7 @@ impl From<pb::SignpsbtResponse> for responses::SignpsbtResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::UtxopsbtReservations> for responses::UtxopsbtReservations {
     fn from(c: pb::UtxopsbtReservations) -> Self {
         Self {
@@ -3203,7 +3204,7 @@ impl From<pb::UtxopsbtReservations> for responses::UtxopsbtReservations {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::UtxopsbtResponse> for responses::UtxopsbtResponse {
     fn from(c: pb::UtxopsbtResponse) -> Self {
         Self {
@@ -3217,7 +3218,7 @@ impl From<pb::UtxopsbtResponse> for responses::UtxopsbtResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::TxdiscardResponse> for responses::TxdiscardResponse {
     fn from(c: pb::TxdiscardResponse) -> Self {
         Self {
@@ -3227,7 +3228,7 @@ impl From<pb::TxdiscardResponse> for responses::TxdiscardResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::TxprepareResponse> for responses::TxprepareResponse {
     fn from(c: pb::TxprepareResponse) -> Self {
         Self {
@@ -3238,7 +3239,7 @@ impl From<pb::TxprepareResponse> for responses::TxprepareResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::TxsendResponse> for responses::TxsendResponse {
     fn from(c: pb::TxsendResponse) -> Self {
         Self {
@@ -3249,7 +3250,7 @@ impl From<pb::TxsendResponse> for responses::TxsendResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::DisconnectResponse> for responses::DisconnectResponse {
     fn from(c: pb::DisconnectResponse) -> Self {
         Self {
@@ -3257,7 +3258,7 @@ impl From<pb::DisconnectResponse> for responses::DisconnectResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::FeeratesPerkb> for responses::FeeratesPerkb {
     fn from(c: pb::FeeratesPerkb) -> Self {
         Self {
@@ -3273,7 +3274,7 @@ impl From<pb::FeeratesPerkb> for responses::FeeratesPerkb {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::FeeratesPerkw> for responses::FeeratesPerkw {
     fn from(c: pb::FeeratesPerkw) -> Self {
         Self {
@@ -3289,7 +3290,7 @@ impl From<pb::FeeratesPerkw> for responses::FeeratesPerkw {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::FeeratesOnchainFeeEstimates> for responses::FeeratesOnchain_fee_estimates {
     fn from(c: pb::FeeratesOnchainFeeEstimates) -> Self {
         Self {
@@ -3302,7 +3303,7 @@ impl From<pb::FeeratesOnchainFeeEstimates> for responses::FeeratesOnchain_fee_es
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::FeeratesResponse> for responses::FeeratesResponse {
     fn from(c: pb::FeeratesResponse) -> Self {
         Self {
@@ -3314,7 +3315,7 @@ impl From<pb::FeeratesResponse> for responses::FeeratesResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::FundchannelResponse> for responses::FundchannelResponse {
     fn from(c: pb::FundchannelResponse) -> Self {
         Self {
@@ -3328,7 +3329,7 @@ impl From<pb::FundchannelResponse> for responses::FundchannelResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::GetrouteRoute> for responses::GetrouteRoute {
     fn from(c: pb::GetrouteRoute) -> Self {
         Self {
@@ -3343,7 +3344,7 @@ impl From<pb::GetrouteRoute> for responses::GetrouteRoute {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::GetrouteResponse> for responses::GetrouteResponse {
     fn from(c: pb::GetrouteResponse) -> Self {
         Self {
@@ -3352,7 +3353,7 @@ impl From<pb::GetrouteResponse> for responses::GetrouteResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListforwardsForwards> for responses::ListforwardsForwards {
     fn from(c: pb::ListforwardsForwards) -> Self {
         Self {
@@ -3370,7 +3371,7 @@ impl From<pb::ListforwardsForwards> for responses::ListforwardsForwards {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListforwardsResponse> for responses::ListforwardsResponse {
     fn from(c: pb::ListforwardsResponse) -> Self {
         Self {
@@ -3379,7 +3380,7 @@ impl From<pb::ListforwardsResponse> for responses::ListforwardsResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListpaysPays> for responses::ListpaysPays {
     fn from(c: pb::ListpaysPays) -> Self {
         Self {
@@ -3398,7 +3399,7 @@ impl From<pb::ListpaysPays> for responses::ListpaysPays {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::ListpaysResponse> for responses::ListpaysResponse {
     fn from(c: pb::ListpaysResponse) -> Self {
         Self {
@@ -3407,7 +3408,7 @@ impl From<pb::ListpaysResponse> for responses::ListpaysResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::PingResponse> for responses::PingResponse {
     fn from(c: pb::PingResponse) -> Self {
         Self {
@@ -3416,7 +3417,7 @@ impl From<pb::PingResponse> for responses::PingResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::SendcustommsgResponse> for responses::SendcustommsgResponse {
     fn from(c: pb::SendcustommsgResponse) -> Self {
         Self {
@@ -3425,7 +3426,7 @@ impl From<pb::SendcustommsgResponse> for responses::SendcustommsgResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::SetchannelChannels> for responses::SetchannelChannels {
     fn from(c: pb::SetchannelChannels) -> Self {
         Self {
@@ -3442,7 +3443,7 @@ impl From<pb::SetchannelChannels> for responses::SetchannelChannels {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::SetchannelResponse> for responses::SetchannelResponse {
     fn from(c: pb::SetchannelResponse) -> Self {
         Self {
@@ -3451,7 +3452,7 @@ impl From<pb::SetchannelResponse> for responses::SetchannelResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::SigninvoiceResponse> for responses::SigninvoiceResponse {
     fn from(c: pb::SigninvoiceResponse) -> Self {
         Self {
@@ -3460,7 +3461,7 @@ impl From<pb::SigninvoiceResponse> for responses::SigninvoiceResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::SignmessageResponse> for responses::SignmessageResponse {
     fn from(c: pb::SignmessageResponse) -> Self {
         Self {
@@ -3471,7 +3472,7 @@ impl From<pb::SignmessageResponse> for responses::SignmessageResponse {
     }
 }
 
-#[allow(unused_variables)]
+#[allow(unused_variables,deprecated)]
 impl From<pb::StopResponse> for responses::StopResponse {
     fn from(c: pb::StopResponse) -> Self {
         Self {
