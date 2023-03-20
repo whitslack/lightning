@@ -202,13 +202,10 @@ static struct utxo *wallet_stmt2output(const tal_t *ctx, struct db_stmt *stmt)
 		utxo->close_info = tal(utxo, struct unilateral_close_info);
 		utxo->close_info->channel_id = db_col_u64(stmt, "channel_id");
 		db_col_node_id(stmt, "peer_id", &utxo->close_info->peer_id);
-		if (!db_col_is_null(stmt, "commitment_point")) {
-			utxo->close_info->commitment_point
-				= tal(utxo->close_info, struct pubkey);
-			db_col_pubkey(stmt, "commitment_point",
-				      utxo->close_info->commitment_point);
-		} else
-			utxo->close_info->commitment_point = NULL;
+		utxo->close_info->commitment_point
+			= db_col_optional(utxo->close_info, stmt,
+					  "commitment_point",
+					  pubkey);
 		utxo->close_info->option_anchor_outputs
 			= db_col_int(stmt, "option_anchor_outputs");
 		utxo->close_info->csv = db_col_int(stmt, "csv_lock");
@@ -1331,12 +1328,9 @@ static struct channel *wallet_stmt2channel(struct wallet *w, struct db_stmt *stm
 	db_col_ignore(stmt, "last_sent_commit_state");
 	db_col_ignore(stmt, "last_sent_commit_id");
 
-	if (!db_col_is_null(stmt, "future_per_commitment_point")) {
-		future_per_commitment_point = tal(tmpctx, struct pubkey);
-		db_col_pubkey(stmt, "future_per_commitment_point",
-			      future_per_commitment_point);
-	} else
-		future_per_commitment_point = NULL;
+	future_per_commitment_point = db_col_optional(tmpctx, stmt,
+						      "future_per_commitment_point",
+						      pubkey);
 
 	db_col_channel_id(stmt, "full_channel_id", &cid);
 	channel_config_id = db_col_u64(stmt, "channel_config_local");
@@ -2561,12 +2555,7 @@ static bool wallet_stmt2htlc_in(struct channel *channel,
 
 	db_col_sha256(stmt, "payment_hash", &in->payment_hash);
 
-	if (!db_col_is_null(stmt, "payment_key")) {
-		in->preimage = tal(in, struct preimage);
-		db_col_preimage(stmt, "payment_key", in->preimage);
-	} else {
-		in->preimage = NULL;
-	}
+	in->preimage = db_col_optional(in, stmt, "payment_key", preimage);
 
 	assert(db_col_bytes(stmt, "routing_onion")
 	       == sizeof(in->onion_routing_packet));
@@ -2578,18 +2567,12 @@ static bool wallet_stmt2htlc_in(struct channel *channel,
 	else
 		in->failonion = db_col_onionreply(in, stmt, "failuremsg");
 	in->badonion = db_col_int(stmt, "malformed_onion");
-	if (db_col_is_null(stmt, "shared_secret")) {
-		in->shared_secret = NULL;
-	} else {
-		assert(db_col_bytes(stmt, "shared_secret") == sizeof(struct secret));
-		in->shared_secret = tal(in, struct secret);
-		memcpy(in->shared_secret, db_col_blob(stmt, "shared_secret"),
-		       sizeof(struct secret));
+	in->shared_secret = db_col_optional(in, stmt, "shared_secret", secret);
 #ifdef COMPAT_V062
-		if (memeqzero(in->shared_secret, sizeof(*in->shared_secret)))
-			in->shared_secret = tal_free(in->shared_secret);
+	if (in->shared_secret
+	    && memeqzero(in->shared_secret, sizeof(*in->shared_secret)))
+		in->shared_secret = tal_free(in->shared_secret);
 #endif
-	}
 
 #ifdef COMPAT_V072
 	if (db_col_is_null(stmt, "received_time")) {
@@ -2642,12 +2625,7 @@ static bool wallet_stmt2htlc_out(struct wallet *wallet,
 	/* FIXME: save blinding in db !*/
 	out->blinding = NULL;
 
-	if (!db_col_is_null(stmt, "payment_key")) {
-		out->preimage = tal(out, struct preimage);
-		db_col_preimage(stmt, "payment_key", out->preimage);
-	} else {
-		out->preimage = NULL;
-	}
+	out->preimage = db_col_optional(out, stmt, "payment_key", preimage);
 
 	assert(db_col_bytes(stmt, "routing_onion")
 	       == sizeof(out->onion_routing_packet));
@@ -3164,24 +3142,15 @@ static struct wallet_payment *wallet_stmt2payment(const tal_t *ctx,
 	struct wallet_payment *payment = tal(ctx, struct wallet_payment);
 	payment->id = db_col_u64(stmt, "id");
 	payment->status = db_col_int(stmt, "status");
-
-	if (!db_col_is_null(stmt, "destination")) {
-		payment->destination = tal(payment, struct node_id);
-		db_col_node_id(stmt, "destination", payment->destination);
-	} else {
-		payment->destination = NULL;
-	}
-
+	payment->destination = db_col_optional(payment, stmt, "destination",
+					       node_id);
 	db_col_amount_msat(stmt, "msatoshi", &payment->msatoshi);
 	db_col_sha256(stmt, "payment_hash", &payment->payment_hash);
 
 	payment->timestamp = db_col_int(stmt, "timestamp");
-	if (!db_col_is_null(stmt, "payment_preimage")) {
-		payment->payment_preimage = tal(payment, struct preimage);
-		db_col_preimage(stmt, "payment_preimage",
-				payment->payment_preimage);
-	} else
-		payment->payment_preimage = NULL;
+	payment->payment_preimage = db_col_optional(payment, stmt,
+						    "payment_preimage",
+						    preimage);
 
 	/* We either used `sendpay` or `sendonion` with the `shared_secrets`
 	 * argument. */
@@ -3237,11 +3206,8 @@ static struct wallet_payment *wallet_stmt2payment(const tal_t *ctx,
 	else
 		payment->partid = 0;
 
-	if (!db_col_is_null(stmt, "local_offer_id")) {
-		payment->local_offer_id = tal(payment, struct sha256);
-		db_col_sha256(stmt, "local_offer_id", payment->local_offer_id);
-	} else
-		payment->local_offer_id = NULL;
+	payment->local_offer_id = db_col_optional(payment, stmt,
+						  "local_offer_id", sha256);
 
 	payment->groupid = db_col_u64(stmt, "groupid");
 
@@ -3390,12 +3356,7 @@ void wallet_payment_get_failinfo(const tal_t *ctx,
 	*faildestperm = db_col_int(stmt, "faildestperm") != 0;
 	*failindex = db_col_int(stmt, "failindex");
 	*failcode = (enum onion_wire) db_col_int(stmt, "failcode");
-	if (db_col_is_null(stmt, "failnode"))
-		*failnode = NULL;
-	else {
-		*failnode = tal(ctx, struct node_id);
-		db_col_node_id(stmt, "failnode", *failnode);
-	}
+	*failnode = db_col_optional(ctx, stmt, "failnode", node_id);
 	if (db_col_is_null(stmt, "failchannel")) {
 		db_col_ignore(stmt, "faildirection");
 		*failchannel = NULL;
