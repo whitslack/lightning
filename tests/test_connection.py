@@ -3733,11 +3733,13 @@ def test_upgrade_statickey_onchaind(node_factory, executor, bitcoind):
     l2.start()
 
     # They should both handle it fine.
-    l1.daemon.wait_for_log('Propose handling OUR_UNILATERAL/DELAYED_OUTPUT_TO_US by OUR_DELAYED_RETURN_TO_WALLET .* after 5 blocks')
+    ((_, txid, blocks),) = l1.wait_for_onchaind_tx('OUR_DELAYED_RETURN_TO_WALLET',
+                                                   'OUR_UNILATERAL/DELAYED_OUTPUT_TO_US')
+    assert blocks == 4
     l2.daemon.wait_for_logs(['Ignoring output .*: THEIR_UNILATERAL/OUTPUT_TO_US',
                              'Ignoring output .*: THEIR_UNILATERAL/DELAYED_OUTPUT_TO_THEM'])
-    bitcoind.generate_block(5)
-    bitcoind.generate_block(100, wait_for_mempool=1)
+    bitcoind.generate_block(4)
+    bitcoind.generate_block(100, wait_for_mempool=txid)
 
     # This works even if they disconnect and listpeers() is empty:
     wait_for(lambda: all([p['channels'] == [] for p in l2.rpc.listpeers()['peers']]))
@@ -3758,12 +3760,14 @@ def test_upgrade_statickey_onchaind(node_factory, executor, bitcoind):
     l2.start()
 
     # They should both handle it fine.
-    l1.daemon.wait_for_log('Propose handling OUR_UNILATERAL/DELAYED_OUTPUT_TO_US by OUR_DELAYED_RETURN_TO_WALLET .* after 5 blocks')
+    ((_, txid, blocks),) = l1.wait_for_onchaind_tx('OUR_DELAYED_RETURN_TO_WALLET',
+                                                   'OUR_UNILATERAL/DELAYED_OUTPUT_TO_US')
+    assert blocks == 4
     l2.daemon.wait_for_logs(['Ignoring output .*: THEIR_UNILATERAL/OUTPUT_TO_US',
                              'Ignoring output .*: THEIR_UNILATERAL/DELAYED_OUTPUT_TO_THEM'])
 
-    bitcoind.generate_block(5)
-    bitcoind.generate_block(100, wait_for_mempool=1)
+    bitcoind.generate_block(4)
+    bitcoind.generate_block(100, wait_for_mempool=txid)
 
     # This works even if they disconnect and listpeers() is empty:
     wait_for(lambda: all([p['channels'] == [] for p in l2.rpc.listpeers()['peers']]))
