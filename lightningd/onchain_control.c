@@ -899,6 +899,9 @@ enum watch_result onchaind_funding_spent(struct channel *channel,
 	channel_fail_permanent(channel, reason,
 			       "Funding transaction spent");
 
+	tal_free(channel->close_blockheight);
+	channel->close_blockheight = tal_dup(channel, u32, &blockheight);
+
 	/* We could come from almost any state. */
 	/* NOTE(mschmoock) above comment is wrong, since we failed above! */
 	channel_set_state(channel,
