@@ -102,6 +102,7 @@ On success, an object is returned, containing:
 - **accept-htlc-tlv-types** (string, optional): `accept-htlc-tlv-types` fields from config or cmdline, or not present
 - **tor-service-password** (string, optional): `tor-service-password` field from config or cmdline, if any
 - **announce-addr-dns** (boolean, optional): Whether we put DNS entries into node\_announcement *(added v22.11.1)*
+- **commit-fee** (u64, optional): The percentage of the 6-block fee estimate to use for commitment transactions *(added v23.05)*
 
 [comment]: # (GENERATE-FROM-SCHEMA-END)
 
@@ -220,4 +221,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:9f59ba7aabd653df13482e47b9c58b78f2e86932ebba58331f697426c49b9c65)
+[comment]: # ( SHA256STAMP:7b322e5ae63c898407a4b8949495041424b18fd7ca76f7fd2e698490306a9dd3)

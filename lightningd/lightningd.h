@@ -76,6 +76,13 @@ struct config {
 
 	/* EXPERIMENTAL: offers support */
 	bool exp_offers;
+
+	/* The factor to time the urgent feerate by to get the maximum
+	 * acceptable feerate.  (10, but can be overridden by dev-max-fee-multiplier) */
+	u32 max_fee_multiplier;
+
+	/* Percent of CONSERVATIVE/2 feerate we'll use for commitment txs. */
+	u64 commit_fee_percent;
 };
 
 typedef STRMAP(const char *) alt_subdaemon_map;
