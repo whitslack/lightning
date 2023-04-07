@@ -925,6 +925,7 @@ impl From<responses::FeeratesPerkb> for pb::FeeratesPerkb {
         Self {
             min_acceptable: c.min_acceptable, // Rule #2 for type u32
             max_acceptable: c.max_acceptable, // Rule #2 for type u32
+            floor: c.floor, // Rule #2 for type u32?
             estimates: c.estimates.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
             opening: c.opening, // Rule #2 for type u32?
             mutual_close: c.mutual_close, // Rule #2 for type u32?
@@ -955,6 +956,7 @@ impl From<responses::FeeratesPerkw> for pb::FeeratesPerkw {
         Self {
             min_acceptable: c.min_acceptable, // Rule #2 for type u32
             max_acceptable: c.max_acceptable, // Rule #2 for type u32
+            floor: c.floor, // Rule #2 for type u32?
             estimates: c.estimates.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
             opening: c.opening, // Rule #2 for type u32?
             mutual_close: c.mutual_close, // Rule #2 for type u32?
@@ -3281,6 +3283,7 @@ impl From<pb::FeeratesPerkb> for responses::FeeratesPerkb {
         Self {
             min_acceptable: c.min_acceptable, // Rule #1 for type u32
             max_acceptable: c.max_acceptable, // Rule #1 for type u32
+            floor: c.floor, // Rule #1 for type u32?
             estimates: Some(c.estimates.into_iter().map(|s| s.into()).collect()), // Rule #4
             opening: c.opening, // Rule #1 for type u32?
             mutual_close: c.mutual_close, // Rule #1 for type u32?
@@ -3309,6 +3312,7 @@ impl From<pb::FeeratesPerkw> for responses::FeeratesPerkw {
         Self {
             min_acceptable: c.min_acceptable, // Rule #1 for type u32
             max_acceptable: c.max_acceptable, // Rule #1 for type u32
+            floor: c.floor, // Rule #1 for type u32?
             estimates: Some(c.estimates.into_iter().map(|s| s.into()).collect()), // Rule #4
             opening: c.opening, // Rule #1 for type u32?
             mutual_close: c.mutual_close, // Rule #1 for type u32?
