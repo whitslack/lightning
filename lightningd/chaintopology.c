@@ -121,6 +121,9 @@ struct txs_to_broadcast {
 
 	/* IDs to attach to each tx (could be NULL!) */
 	const char **cmd_id;
+
+	/* allowhighfees flags for each tx */
+	bool *allowhighfees;
 };
 
 /* We just sent the last entry in txs[].  Shrink and send the next last. */
@@ -142,7 +145,7 @@ static void broadcast_remainder(struct bitcoind *bitcoind,
 	/* Broadcast next one. */
 	bitcoind_sendrawtx(bitcoind,
 			   txs->cmd_id[txs->cursor], txs->txs[txs->cursor],
-			   false,
+			   txs->allowhighfees[txs->cursor],
 			   broadcast_remainder, txs);
 }
 
@@ -161,6 +164,7 @@ static void rebroadcast_txs(struct chain_topology *topo)
 
 	/* Put any txs we want to broadcast in ->txs. */
 	txs->txs = tal_arr(txs, const char *, 0);
+	txs->allowhighfees = tal_arr(txs, bool, 0);
 
 	for (otx = outgoing_tx_map_first(topo->outgoing_txs, &it); otx;
 	     otx = outgoing_tx_map_next(topo->outgoing_txs, &it)) {
@@ -180,6 +184,7 @@ static void rebroadcast_txs(struct chain_topology *topo)
 		}
 
 		tal_arr_expand(&txs->txs, fmt_bitcoin_tx(txs->txs, otx->tx));
+		tal_arr_expand(&txs->allowhighfees, otx->allowhighfees);
 		tal_arr_expand(&txs->cmd_id,
 			       otx->cmd_id ? tal_strdup(txs, otx->cmd_id) : NULL);
 	}
@@ -251,6 +256,7 @@ void broadcast_tx_(struct chain_topology *topo,
 	bitcoin_txid(tx, &otx->txid);
 	otx->tx = clone_bitcoin_tx(otx, tx);
 	otx->minblock = minblock;
+	otx->allowhighfees = allowhighfees;
 	otx->finished = finished;
 	otx->refresh = refresh;
 	otx->refresh_arg = refresh_arg;
