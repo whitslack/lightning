@@ -313,8 +313,13 @@
     },
     "announce-addr-dns": {
       "type": "boolean",
-      "description": "Whether we put DNS entries into node_announcement",
-      "added": "v22.11.1"
+      "added": "v22.11.1",
+      "description": "Whether we put DNS entries into node_announcement"
+    },
+    "commit-fee": {
+      "type": "u64",
+      "added": "v23.05",
+      "description": "The percentage of the 6-block fee estimate to use for commitment transactions"
     }
   }
 }
