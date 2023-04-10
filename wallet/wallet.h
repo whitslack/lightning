@@ -1621,4 +1621,11 @@ struct db_stmt *wallet_datastore_next(const tal_t *ctx,
 				      const u8 **data,
 				      u64 *generation);
 
+/* Make a PSBT from these utxos, or enhance @base if non-NULL. */
+struct wally_psbt *psbt_using_utxos(const tal_t *ctx,
+				    struct wallet *wallet,
+				    struct utxo **utxos,
+				    u32 nlocktime,
+				    u32 nsequence,
+				    struct wally_psbt *base);
 #endif /* LIGHTNING_WALLET_WALLET_H */
