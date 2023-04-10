@@ -617,7 +617,7 @@ bool psbt_finalize(struct wally_psbt *psbt)
 		struct wally_psbt_input *input = &psbt->inputs[i];
 		struct wally_tx_witness_stack *stack;
 
-		if (!is_anchor_witness_script(input->witness_script,
+		if (!is_to_remote_anchored_witness_script(input->witness_script,
 					      input->witness_script_len))
 			continue;
 
