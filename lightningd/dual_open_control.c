@@ -1462,7 +1462,7 @@ static void handle_tx_broadcast(struct channel_send *cs)
 	/* This might have spent UTXOs from our wallet */
 	num_utxos = wallet_extract_owned_outputs(ld->wallet,
 						 /* FIXME: what txindex? */
-						 wtx, false, NULL,
+						 wtx, 1, NULL,
 						 &unused);
 	if (num_utxos)
 		wallet_transaction_add(ld->wallet, wtx, 0, 0);
