@@ -1482,8 +1482,7 @@ static const struct json_command delexpiredinvoice_command = {
 	"delexpiredinvoice",
 	"payment",
 	json_delexpiredinvoice,
-	"Delete all expired invoices that expired as of given {maxexpirytime} (a UNIX epoch time), or all expired invoices if not specified",
-	true /*deprecated*/
+	"Delete all expired invoices that expired as of given {maxexpirytime} (a UNIX epoch time), or all expired invoices if not specified"
 };
 AUTODATA(json_command, &delexpiredinvoice_command);
 
