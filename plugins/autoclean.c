@@ -45,31 +45,22 @@ static bool json_to_subsystem(const char *buffer, const jsmntok_t *tok,
 	return false;
 }
 
-/* Usually this refers to the global one, but for autoclean-once
- * it's a temporary. */
-struct clean_info {
-	struct command *cmd;
-	size_t cleanup_reqs_remaining;
-	u64 subsystem_age[NUM_SUBSYSTEM];
-	u64 num_cleaned[NUM_SUBSYSTEM];
-	u64 num_uncleaned;
-};
-
 /* For deprecated API, setting this to zero disabled autoclean */
 static u64 deprecated_cycle_seconds = UINT64_MAX;
 static u64 cycle_seconds = 3600;
-static struct clean_info timer_cinfo;
-static u64 total_cleaned[NUM_SUBSYSTEM];
+static u64 subsystem_age[NUM_SUBSYSTEM];
+static u64 num_cleaned[NUM_SUBSYSTEM];
+static size_t cleanup_reqs_remaining;
 static struct plugin *plugin;
 static struct plugin_timer *cleantimer;
 
-static void do_clean_timer(void *unused);
+static void do_clean(void *cb_arg);
 
 /* Fatal failures */
 static struct command_result *cmd_failed(struct command *cmd,
 					 const char *buf,
 					 const jsmntok_t *result,
-					 const char *cmdname)
+					 char *cmdname)
 {
 	plugin_err(plugin, "Failed '%s': '%.*s'", cmdname,
 		   json_tok_full_len(result),
@@ -84,103 +75,58 @@ static const char *datastore_path(const tal_t *ctx,
 		       subsystem_to_str(subsystem), field);
 }
 
-static struct command_result *clean_finished(struct clean_info *cinfo)
+static struct command_result *set_next_timer(struct plugin *plugin)
 {
+	plugin_log(plugin, LOG_DBG, "setting next timer");
+	cleantimer = plugin_timer(plugin, time_from_sec(cycle_seconds), do_clean, plugin);
+	return timer_complete(plugin);
+}
+
+static struct command_result *clean_finished_one(struct command *cmd)
+{
+	assert(cleanup_reqs_remaining != 0);
+	if (--cleanup_reqs_remaining > 0)
+		return command_still_pending(cmd);
+
 	for (enum subsystem i = 0; i < NUM_SUBSYSTEM; i++) {
-		if (!cinfo->num_cleaned[i])
+		if (num_cleaned[i] == 0)
 			continue;
 
-		plugin_log(plugin, LOG_DBG, "cleaned %"PRIu64" from %s",
-			   cinfo->num_cleaned[i], subsystem_to_str(i));
-		total_cleaned[i] += cinfo->num_cleaned[i];
-		jsonrpc_set_datastore_string(plugin, cinfo->cmd,
+		jsonrpc_set_datastore_string(plugin, cmd,
 					     datastore_path(tmpctx, i, "num"),
-					     tal_fmt(tmpctx, "%"PRIu64, total_cleaned[i]),
+					     tal_fmt(tmpctx, "%"PRIu64, num_cleaned[i]),
 					     "create-or-replace", NULL, NULL, NULL);
 
 	}
 
-	/* autoclean-once? */
-	if (cinfo->cmd) {
-		struct json_stream *response = jsonrpc_stream_success(cinfo->cmd);
-
-		json_object_start(response, "autoclean");
-		for (enum subsystem i = 0; i < NUM_SUBSYSTEM; i++) {
-			if (cinfo->subsystem_age[i] == 0)
-				continue;
-			json_object_start(response, subsystem_to_str(i));
-			json_add_u64(response, "cleaned", cinfo->num_cleaned[i]);
-			json_add_u64(response, "uncleaned", cinfo->num_uncleaned);
-			json_object_end(response);
-		}
-		json_object_end(response);
-		return command_finished(cinfo->cmd, response);
-	} else { /* timer */
-		plugin_log(plugin, LOG_DBG, "setting next timer");
-		cleantimer = plugin_timer(plugin, time_from_sec(cycle_seconds),
-					  do_clean_timer, NULL);
-		return timer_complete(plugin);
-	}
+	return set_next_timer(plugin);
 }
-
-static struct command_result *clean_finished_one(struct clean_info *cinfo)
-{
-	assert(cinfo->cleanup_reqs_remaining != 0);
-	if (--cinfo->cleanup_reqs_remaining > 0)
-		return command_still_pending(cinfo->cmd);
-
-	return clean_finished(cinfo);
-}
-
-struct del_data {
-	enum subsystem subsystem;
-	struct clean_info *cinfo;
-};
 
 static struct command_result *del_done(struct command *cmd,
 				       const char *buf,
 				       const jsmntok_t *result,
-				       struct del_data *del_data)
+				       ptrint_t *subsystemp)
 {
-	struct clean_info *cinfo = del_data->cinfo;
-
-	cinfo->num_cleaned[del_data->subsystem]++;
-	tal_free(del_data);
-	return clean_finished_one(cinfo);
+	num_cleaned[ptr2int(subsystemp)]++;
+	return clean_finished_one(cmd);
 }
 
 static struct command_result *del_failed(struct command *cmd,
-					 const char *buf,
-					 const jsmntok_t *result,
-					 struct del_data *del_data)
+					   const char *buf,
+					   const jsmntok_t *result,
+					   ptrint_t *subsystemp)
 {
-	struct clean_info *cinfo = del_data->cinfo;
-
 	plugin_log(plugin, LOG_UNUSUAL, "%s del failed: %.*s",
-		   subsystem_to_str(del_data->subsystem),
+		   subsystem_to_str(ptr2int(subsystemp)),
 		   json_tok_full_len(result),
 		   json_tok_full(buf, result));
-	tal_free(del_data);
-	return clean_finished_one(cinfo);
-}
-
-static struct out_req *del_request_start(const char *method,
-					 struct clean_info *cinfo,
-					 enum subsystem subsystem)
-{
-	struct del_data *del_data = tal(plugin, struct del_data);
-
-	del_data->cinfo = cinfo;
-	del_data->subsystem = subsystem;
-	cinfo->cleanup_reqs_remaining++;
-	return jsonrpc_request_start(plugin, NULL, method,
-				     del_done, del_failed, del_data);
+	return clean_finished_one(cmd);
 }
 
 static struct command_result *listinvoices_done(struct command *cmd,
 						const char *buf,
 						const jsmntok_t *result,
-						struct clean_info *cinfo)
+						char *unused)
 {
 	const jsmntok_t *t, *inv = json_get_member(buf, result, "invoices");
 	size_t i;
@@ -198,16 +144,12 @@ static struct command_result *listinvoices_done(struct command *cmd,
 		} else if (json_tok_streq(buf, status, "paid")) {
 			subsys = PAIDINVOICES;
 			time = json_get_member(buf, t, "paid_at");
-		} else {
-			cinfo->num_uncleaned++;
+		} else
 			continue;
-		}
 
 		/* Continue if we don't care. */
-		if (cinfo->subsystem_age[subsys] == 0) {
-			cinfo->num_uncleaned++;
+		if (subsystem_age[subsys] == 0)
 			continue;
-		}
 
 		if (!json_to_u64(buf, time, &invtime)) {
 			plugin_err(plugin, "Bad time '%.*s'",
@@ -215,28 +157,31 @@ static struct command_result *listinvoices_done(struct command *cmd,
 				   json_tok_full(buf, time));
 		}
 
-		if (invtime <= now - cinfo->subsystem_age[subsys]) {
+		if (invtime <= now - subsystem_age[subsys]) {
 			struct out_req *req;
 			const jsmntok_t *label = json_get_member(buf, t, "label");
 
-			req = del_request_start("delinvoice", cinfo, subsys);
+			req = jsonrpc_request_start(plugin, NULL, "delinvoice",
+						    del_done, del_failed,
+						    int2ptr(subsys));
 			json_add_tok(req->js, "label", label, buf);
 			json_add_tok(req->js, "status", status, buf);
 			send_outreq(plugin, req);
 			plugin_log(plugin, LOG_DBG, "Cleaning up %.*s",
 				   json_tok_full_len(label), json_tok_full(buf, label));
+			cleanup_reqs_remaining++;
 		}
 	}
 
-	if (cinfo->cleanup_reqs_remaining)
+	if (cleanup_reqs_remaining)
 		return command_still_pending(cmd);
-	return clean_finished(cinfo);
+	return set_next_timer(plugin);
 }
 
 static struct command_result *listsendpays_done(struct command *cmd,
 						const char *buf,
 						const jsmntok_t *result,
-						struct clean_info *cinfo)
+						char *unused)
 {
 	const jsmntok_t *t, *pays = json_get_member(buf, result, "payments");
 	size_t i;
@@ -252,16 +197,12 @@ static struct command_result *listsendpays_done(struct command *cmd,
 			subsys = FAILEDPAYS;
 		} else if (json_tok_streq(buf, status, "complete")) {
 			subsys = SUCCEEDEDPAYS;
-		} else {
-			cinfo->num_uncleaned++;
+		} else
 			continue;
-		}
 
 		/* Continue if we don't care. */
-		if (cinfo->subsystem_age[subsys] == 0) {
-			cinfo->num_uncleaned++;
+		if (subsystem_age[subsys] == 0)
 			continue;
-		}
 
 		time = json_get_member(buf, t, "created_at");
 		if (!json_to_u64(buf, time, &paytime)) {
@@ -270,28 +211,31 @@ static struct command_result *listsendpays_done(struct command *cmd,
 				   json_tok_full(buf, time));
 		}
 
-		if (paytime <= now - cinfo->subsystem_age[subsys]) {
+		if (paytime <= now - subsystem_age[subsys]) {
 			struct out_req *req;
 			const jsmntok_t *phash = json_get_member(buf, t, "payment_hash");
 
-			req = del_request_start("delpay", cinfo, subsys);
+			req = jsonrpc_request_start(plugin, NULL, "delpay",
+						    del_done, del_failed,
+						    int2ptr(subsys));
 			json_add_tok(req->js, "payment_hash", phash, buf);
 			json_add_tok(req->js, "status", status, buf);
 			send_outreq(plugin, req);
 			plugin_log(plugin, LOG_DBG, "Cleaning up %.*s",
 				   json_tok_full_len(phash), json_tok_full(buf, phash));
+			cleanup_reqs_remaining++;
 		}
 	}
 
- 	if (cinfo->cleanup_reqs_remaining)
+	if (cleanup_reqs_remaining)
 		return command_still_pending(cmd);
-	return clean_finished(cinfo);
+	return set_next_timer(plugin);
 }
 
 static struct command_result *listforwards_done(struct command *cmd,
 						const char *buf,
 						const jsmntok_t *result,
-						struct clean_info *cinfo)
+						char *unused)
 {
 	const jsmntok_t *t, *fwds = json_get_member(buf, result, "forwards");
 	size_t i;
@@ -308,16 +252,12 @@ static struct command_result *listforwards_done(struct command *cmd,
 		} else if (json_tok_streq(buf, status, "failed")
 			   || json_tok_streq(buf, status, "local_failed")) {
 			subsys = FAILEDFORWARDS;
-		} else {
-			cinfo->num_uncleaned++;
+		} else
 			continue;
-		}
 
 		/* Continue if we don't care. */
-		if (cinfo->subsystem_age[subsys] == 0) {
-			cinfo->num_uncleaned++;
+		if (subsystem_age[subsys] == 0)
 			continue;
-		}
 
 		time = *json_get_member(buf, t, "resolved_time");
 		/* This is a float, so truncate at '.' */
@@ -331,14 +271,16 @@ static struct command_result *listforwards_done(struct command *cmd,
 				   json_tok_full(buf, &time));
 		}
 
-		if (restime <= now - cinfo->subsystem_age[subsys]) {
+		if (restime <= now - subsystem_age[subsys]) {
 			struct out_req *req;
 			const jsmntok_t *inchan, *inid;
 
 			inchan = json_get_member(buf, t, "in_channel");
 			inid = json_get_member(buf, t, "in_htlc_id");
 
-			req = del_request_start("delforward", cinfo, subsys);
+			req = jsonrpc_request_start(plugin, NULL, "delforward",
+						    del_done, del_failed,
+						    int2ptr(subsys));
 			json_add_tok(req->js, "in_channel", inchan, buf);
 			json_add_tok(req->js, "in_htlc_id", inid, buf);
 			json_add_tok(req->js, "status", status, buf);
@@ -348,81 +290,46 @@ static struct command_result *listforwards_done(struct command *cmd,
 				   json_tok_full(buf, inchan),
 				   json_tok_full_len(inid),
 				   json_tok_full(buf, inid));
+			cleanup_reqs_remaining++;
 		}
 	}
 
- 	if (cinfo->cleanup_reqs_remaining)
+	if (cleanup_reqs_remaining)
 		return command_still_pending(cmd);
-	return clean_finished(cinfo);
+	return set_next_timer(plugin);
 }
 
-static struct command_result *listsendpays_failed(struct command *cmd,
-						  const char *buf,
-						  const jsmntok_t *result,
-						  void *unused)
-{
-	return cmd_failed(cmd, buf, result, "listsendpays");
-}
-
-static struct command_result *listinvoices_failed(struct command *cmd,
-						  const char *buf,
-						  const jsmntok_t *result,
-						  void *unused)
-{
-	return cmd_failed(cmd, buf, result, "listinvoices");
-}
-
-static struct command_result *listforwards_failed(struct command *cmd,
-						  const char *buf,
-						  const jsmntok_t *result,
-						  void *unused)
-{
-	return cmd_failed(cmd, buf, result, "listforwards");
-}
-
-static struct command_result *do_clean(struct clean_info *cinfo)
+static void do_clean(void *unused)
 {
 	struct out_req *req = NULL;
 
-	cinfo->cleanup_reqs_remaining = 0;
-	cinfo->num_uncleaned = 0;
-	memset(cinfo->num_cleaned, 0, sizeof(cinfo->num_cleaned));
-
-	if (cinfo->subsystem_age[SUCCEEDEDPAYS] != 0
-	    || cinfo->subsystem_age[FAILEDPAYS] != 0) {
+	assert(cleanup_reqs_remaining == 0);
+	if (subsystem_age[SUCCEEDEDPAYS] != 0
+	    || subsystem_age[FAILEDPAYS] != 0) {
 		req = jsonrpc_request_start(plugin, NULL, "listsendpays",
-					    listsendpays_done, listsendpays_failed,
-					    cinfo);
+					    listsendpays_done, cmd_failed,
+					    (char *)"listsendpays");
 		send_outreq(plugin, req);
 	}
 
-	if (cinfo->subsystem_age[EXPIREDINVOICES] != 0
-	    || cinfo->subsystem_age[PAIDINVOICES] != 0) {
+	if (subsystem_age[EXPIREDINVOICES] != 0
+	    || subsystem_age[PAIDINVOICES] != 0) {
 		req = jsonrpc_request_start(plugin, NULL, "listinvoices",
-					    listinvoices_done, listinvoices_failed,
-					    cinfo);
+					    listinvoices_done, cmd_failed,
+					    (char *)"listinvoices");
 		send_outreq(plugin, req);
 	}
 
-	if (cinfo->subsystem_age[SUCCEEDEDFORWARDS] != 0
-	    || cinfo->subsystem_age[FAILEDFORWARDS] != 0) {
+	if (subsystem_age[SUCCEEDEDFORWARDS] != 0
+	    || subsystem_age[FAILEDFORWARDS] != 0) {
 		req = jsonrpc_request_start(plugin, NULL, "listforwards",
-					    listforwards_done, listforwards_failed,
-					    cinfo);
+					    listforwards_done, cmd_failed,
+					    (char *)"listforwards");
 		send_outreq(plugin, req);
 	}
 
-	if (req)
-		return command_still_pending(NULL);
-	else
-		return clean_finished(cinfo);
-}
-
-/* Needs a different signature than do_clean */
-static void do_clean_timer(void *unused)
-{
-	assert(timer_cinfo.cleanup_reqs_remaining == 0);
-	do_clean(&timer_cinfo);
+	if (!req)
+		set_next_timer(plugin);
 }
 
 static struct command_result *json_autocleaninvoice(struct command *cmd,
@@ -442,21 +349,21 @@ static struct command_result *json_autocleaninvoice(struct command *cmd,
 	cleantimer = tal_free(cleantimer);
 
 	if (*cycle == 0) {
-		timer_cinfo.subsystem_age[EXPIREDINVOICES] = 0;
+		subsystem_age[EXPIREDINVOICES] = 0;
 		response = jsonrpc_stream_success(cmd);
 		json_add_bool(response, "enabled", false);
 		return command_finished(cmd, response);
 	}
 
 	cycle_seconds = *cycle;
-	timer_cinfo.subsystem_age[EXPIREDINVOICES] = *exby;
+	subsystem_age[EXPIREDINVOICES] = *exby;
 	cleantimer = plugin_timer(cmd->plugin, time_from_sec(cycle_seconds),
-				  do_clean_timer, NULL);
+				  do_clean, cmd->plugin);
 
 	response = jsonrpc_stream_success(cmd);
 	json_add_bool(response, "enabled", true);
 	json_add_u64(response, "cycle_seconds", cycle_seconds);
-	json_add_u64(response, "expired_by", timer_cinfo.subsystem_age[EXPIREDINVOICES]);
+	json_add_u64(response, "expired_by", subsystem_age[EXPIREDINVOICES]);
 	return command_finished(cmd, response);
 }
 
@@ -484,10 +391,10 @@ static struct command_result *json_success_subsystems(struct command *cmd,
 		if (subsystem && i != *subsystem)
 			continue;
 		json_object_start(response, subsystem_to_str(i));
-		json_add_bool(response, "enabled", timer_cinfo.subsystem_age[i] != 0);
-		if (timer_cinfo.subsystem_age[i] != 0)
-			json_add_u64(response, "age", timer_cinfo.subsystem_age[i]);
-		json_add_u64(response, "cleaned", total_cleaned[i]);
+		json_add_bool(response, "enabled", subsystem_age[i] != 0);
+		if (subsystem_age[i] != 0)
+			json_add_u64(response, "age", subsystem_age[i]);
+		json_add_u64(response, "cleaned", num_cleaned[i]);
 		json_object_end(response);
 	}
 	json_object_end(response);
@@ -508,41 +415,6 @@ static struct command_result *json_autoclean_status(struct command *cmd,
 	return json_success_subsystems(cmd, subsystem);
 }
 
-static struct command_result *param_u64_nonzero(struct command *cmd,
-						const char *name,
-						const char *buffer,
-						const jsmntok_t *tok,
-						u64 **val)
-{
-	struct command_result *res = param_u64(cmd, name, buffer, tok, val);
-	if (res == NULL && *val == 0)
-		res = command_fail_badparam(cmd, name, buffer, tok,
-					    "Must be non-zero");
-	return res;
-}
-
-static struct command_result *json_autoclean_once(struct command *cmd,
-						  const char *buffer,
-						  const jsmntok_t *params)
-{
-	enum subsystem *subsystem;
-	u64 *age;
-	struct clean_info *cinfo;
-
-	if (!param(cmd, buffer, params,
-		   p_req("subsystem", param_subsystem, &subsystem),
-		   p_req("age", param_u64_nonzero, &age),
-		   NULL))
-		return command_param_failed();
-
-	cinfo = tal(cmd, struct clean_info);
-	cinfo->cmd = cmd;
-	memset(cinfo->subsystem_age, 0, sizeof(cinfo->subsystem_age));
-	cinfo->subsystem_age[*subsystem] = *age;
-
-	return do_clean(cinfo);
-}
-
 static const char *init(struct plugin *p,
 			const char *buf UNUSED, const jsmntok_t *config UNUSED)
 {
@@ -555,11 +427,11 @@ static const char *init(struct plugin *p,
 			cycle_seconds = deprecated_cycle_seconds;
 	}
 
-	cleantimer = plugin_timer(p, time_from_sec(cycle_seconds), do_clean_timer, NULL);
+	cleantimer = plugin_timer(p, time_from_sec(cycle_seconds), do_clean, p);
 
 	for (enum subsystem i = 0; i < NUM_SUBSYSTEM; i++) {
 		rpc_scan_datastore_str(plugin, datastore_path(tmpctx, i, "num"),
-				       JSON_SCAN(json_to_u64, &total_cleaned[i]));
+				       JSON_SCAN(json_to_u64, &num_cleaned[i]));
 	}
 	return NULL;
 }
@@ -578,12 +450,6 @@ static const struct plugin_command commands[] = { {
 	"Show status of autocleaning",
 	"Takes optional {subsystem}",
 	json_autoclean_status,
-	}, {
-	"autoclean-once",
-	"utility",
-	"Perform a single run of autocleaning on one subsystem",
-	"Requires {subsystem} and {age}",
-	json_autoclean_once,
 	},
 };
 
@@ -602,7 +468,7 @@ int main(int argc, char *argv[])
 				  "If expired invoice autoclean enabled,"
 				  " invoices that have expired for at least"
 				  " this given seconds are cleaned",
-				  u64_option, &timer_cinfo.subsystem_age[EXPIREDINVOICES]),
+				  u64_option, &subsystem_age[EXPIREDINVOICES]),
 		    plugin_option("autoclean-cycle",
 				  "int",
 				  "Perform cleanup every"
@@ -611,26 +477,26 @@ int main(int argc, char *argv[])
 		    plugin_option("autoclean-succeededforwards-age",
 				  "int",
 				  "How old do successful forwards have to be before deletion (0 = never)",
-				  u64_option, &timer_cinfo.subsystem_age[SUCCEEDEDFORWARDS]),
+				  u64_option, &subsystem_age[SUCCEEDEDFORWARDS]),
 		    plugin_option("autoclean-failedforwards-age",
 				  "int",
 				  "How old do failed forwards have to be before deletion (0 = never)",
-				  u64_option, &timer_cinfo.subsystem_age[FAILEDFORWARDS]),
+				  u64_option, &subsystem_age[FAILEDFORWARDS]),
 		    plugin_option("autoclean-succeededpays-age",
 				  "int",
 				  "How old do successful pays have to be before deletion (0 = never)",
-				  u64_option, &timer_cinfo.subsystem_age[SUCCEEDEDPAYS]),
+				  u64_option, &subsystem_age[SUCCEEDEDPAYS]),
 		    plugin_option("autoclean-failedpays-age",
 				  "int",
 				  "How old do failed pays have to be before deletion (0 = never)",
-				  u64_option, &timer_cinfo.subsystem_age[FAILEDPAYS]),
+				  u64_option, &subsystem_age[FAILEDPAYS]),
 		    plugin_option("autoclean-paidinvoices-age",
 				  "int",
 				  "How old do paid invoices have to be before deletion (0 = never)",
-				  u64_option, &timer_cinfo.subsystem_age[PAIDINVOICES]),
+				  u64_option, &subsystem_age[PAIDINVOICES]),
 		    plugin_option("autoclean-expiredinvoices-age",
 				  "int",
 				  "How old do expired invoices have to be before deletion (0 = never)",
-				  u64_option, &timer_cinfo.subsystem_age[EXPIREDINVOICES]),
+				  u64_option, &subsystem_age[EXPIREDINVOICES]),
 		    NULL);
 }
