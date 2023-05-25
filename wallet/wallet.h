@@ -1389,7 +1389,7 @@ const struct forwarding *wallet_forwarded_payments_get(struct wallet *w,
  */
 bool wallet_forward_delete(struct wallet *w,
 			   const struct short_channel_id *chan_in,
-			   const u64 *htlc_id,
+			   u64 htlc_id,
 			   enum forward_status state);
 
 /**
