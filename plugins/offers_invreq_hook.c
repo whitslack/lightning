@@ -624,13 +624,7 @@ static struct command_result *check_previous_invoice(struct command *cmd,
 }
 
 /* BOLT-offers #12:
-
- * - MUST fail the request if `signature` is not correct as detailed in
- *   [Signature Calculation](#signature-calculation) using the
- *   `invreq_payer_id`.
- *...
- * - MUST reject the invoice if `signature` is not a valid signature using
- *   `invoice_node_id` as described in [Signature Calculation](#signature-calculation).
+ *  - MUST fail the request if `signature` is not correct.
  */
 static bool check_payer_sig(struct command *cmd,
 			    const struct tlv_invoice_request *invreq,
@@ -651,12 +645,12 @@ static struct command_result *invreq_amount_by_quantity(struct command *cmd,
 	assert(ir->invreq->offer_amount);
 
 	/* BOLT-offers #12:
-	 *     - MUST calculate the *expected amount* using the `offer_amount`:
+	 *     - MUST calculate the *base invoice amount* using the offer `amount`:
 	 */
 	*raw_amt = *ir->invreq->offer_amount;
 
 	/* BOLT-offers #12:
-	 * - if `invreq_quantity` is present, multiply by `invreq_quantity`.`quantity`.
+	 * - if request contains `quantity`, multiply by `quantity`.
 	 */
 	if (ir->invreq->invreq_quantity) {
 		if (mul_overflows_u64(*ir->invreq->invreq_quantity, *raw_amt)) {
@@ -709,9 +703,11 @@ static struct command_result *handle_amount_and_recurrence(struct command *cmd,
 							   struct amount_msat base_inv_amount)
 {
 	/* BOLT-offers #12:
-	 * - if `invreq_amount` is present:
-	 *    - MUST fail the request if `invreq_amount`.`msat` is less than the
-	 *      *expected amount*.
+	 * - if the offer included `amount`:
+	 *...
+	 *   - if the request contains `amount`:
+	 *     - MUST fail the request if its `amount` is less than the
+	 *       *base invoice amount*.
 	 */
 	if (ir->invreq->offer_amount && ir->invreq->invreq_amount) {
 		if (amount_msat_less(amount_msat(*ir->invreq->invreq_amount), base_inv_amount)) {
@@ -720,8 +716,8 @@ static struct command_result *handle_amount_and_recurrence(struct command *cmd,
 							  &base_inv_amount));
 		}
 		/* BOLT-offers #12:
-		 *    - MAY fail the request if `invreq_amount`.`msat` greatly exceeds
-		 *      the *expected amount*.
+		 * - MAY fail the request if its `amount` is much greater than
+		 *   the *base invoice amount*.
 		 */
 		/* Much == 5? Easier to divide and compare, than multiply. */
 		if (amount_msat_greater(amount_msat_div(amount_msat(*ir->invreq->invreq_amount), 5),
@@ -730,15 +726,13 @@ static struct command_result *handle_amount_and_recurrence(struct command *cmd,
 					   type_to_string(tmpctx, struct amount_msat,
 							  &base_inv_amount));
 		}
+		/* BOLT-offers #12:
+		 * - MUST use the request's `amount` as the *base invoice
+		 *   amount*.
+		 */
 		base_inv_amount = amount_msat(*ir->invreq->invreq_amount);
 	}
 
-	/* BOLT-offers #12:
-	 * - if `invreq_amount` is present:
-	 *   - MUST set `invoice_amount` to `invreq_amount`
-	 * - otherwise:
-	 *   - MUST set `invoice_amount` to the *expected amount*.
-	 */
 	/* This may be adjusted by recurrence if proportional_amount set */
 	ir->inv->invoice_amount = tal_dup(ir->inv, u64,
 					  &base_inv_amount.millisatoshis); /* Raw: wire protocol */
@@ -800,9 +794,10 @@ static struct command_result *convert_currency(struct command *cmd,
 		return err;
 
 	/* BOLT-offers #12:
-	 * - MUST calculate the *expected amount* using the `offer_amount`:
-	 *   - if `offer_currency` is not the `invreq_chain` currency, convert to the
-	 *     `invreq_chain` currency.
+	 * - MUST calculate the *base invoice amount* using the offer
+	 *  `amount`:
+	 *   - if offer `currency` is not the invoice currency, convert
+	 *     to the invoice currency.
 	 */
 	iso4217 = find_iso4217(ir->invreq->offer_currency,
 			       tal_bytelen(ir->invreq->offer_currency));
@@ -905,7 +900,7 @@ static struct command_result *listoffers_done(struct command *cmd,
 	}
 
 	/* BOLT-offers #12:
-	 * - MUST fail the request if `signature` is not correct as
+	 * - MUST fail the request if `invreq_signature` is not correct as
 	 *   detailed in [Signature Calculation](#signature-calculation) using
 	 *   the `invreq_payer_id`.
 	 */
@@ -945,10 +940,10 @@ static struct command_result *listoffers_done(struct command *cmd,
 	}
 
 	/* BOLT-offers #12:
-	 * A writer of an invoice:
+	 * The writer of an invoice:
 	 *...
 	 *  - if the invoice is in response to an `invoice_request`:
-	 *    - MUST copy all non-signature fields from the `invoice_request` (including
+	 *    - MUST copy all non-signature fields from the invreq (including
 	 *      unknown fields).
 	 */
 	ir->inv = invoice_for_invreq(cmd, ir->invreq);
@@ -1040,7 +1035,7 @@ struct command_result *handle_invoice_request(struct command *cmd,
 
 	/* BOLT-offers #12:
 	 *
-	 * The reader:
+	 * The reader of an invreq:
 	 *...
 	 * - if `invreq_features` contains unknown _even_ bits that are non-zero:
 	 *   - MUST fail the request.
