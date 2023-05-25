@@ -23,7 +23,6 @@ On success, an object containing **pays** is returned.  It is an array of object
 - **status** (string): status of the payment (one of "pending", "failed", "complete")
 - **created\_at** (u64): the UNIX timestamp showing when this payment was initiated
 - **destination** (pubkey, optional): the final destination of the payment if known
-- **completed\_at** (u64, optional): the UNIX timestamp showing when this payment was completed
 - **label** (string, optional): the label, if given to sendpay
 - **bolt11** (string, optional): the bolt11 string (if pay supplied one)
 - **description** (string, optional): the description matching the bolt11 description hash (if pay supplied one)

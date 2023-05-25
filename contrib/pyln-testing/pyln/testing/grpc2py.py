@@ -241,7 +241,6 @@ def sendpay2py(m):
         "amount_msat": amount2msat(m.amount_msat),  # PrimitiveField in generate_composite
         "destination": hexlify(m.destination),  # PrimitiveField in generate_composite
         "created_at": m.created_at,  # PrimitiveField in generate_composite
-        "completed_at": m.completed_at,  # PrimitiveField in generate_composite
         "amount_sent_msat": amount2msat(m.amount_sent_msat),  # PrimitiveField in generate_composite
         "label": m.label,  # PrimitiveField in generate_composite
         "partid": m.partid,  # PrimitiveField in generate_composite
@@ -607,7 +606,6 @@ def waitsendpay2py(m):
         "amount_msat": amount2msat(m.amount_msat),  # PrimitiveField in generate_composite
         "destination": hexlify(m.destination),  # PrimitiveField in generate_composite
         "created_at": m.created_at,  # PrimitiveField in generate_composite
-        "completed_at": m.completed_at,  # PrimitiveField in generate_composite
         "amount_sent_msat": amount2msat(m.amount_sent_msat),  # PrimitiveField in generate_composite
         "label": m.label,  # PrimitiveField in generate_composite
         "partid": m.partid,  # PrimitiveField in generate_composite
@@ -825,7 +823,6 @@ def listpays_pays2py(m):
         "status": str(m.status),  # EnumField in generate_composite
         "destination": hexlify(m.destination),  # PrimitiveField in generate_composite
         "created_at": m.created_at,  # PrimitiveField in generate_composite
-        "completed_at": m.completed_at,  # PrimitiveField in generate_composite
         "label": m.label,  # PrimitiveField in generate_composite
         "bolt11": m.bolt11,  # PrimitiveField in generate_composite
         "description": m.description,  # PrimitiveField in generate_composite
