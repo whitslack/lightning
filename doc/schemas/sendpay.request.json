@@ -54,7 +54,7 @@
     "partid": {
       "type": "u16"
     },
-    "localinvreqid": {
+    "localofferid": {
       "type": "hex"
     },
     "groupid": {

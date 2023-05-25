@@ -341,9 +341,8 @@ void payment_succeeded(struct lightningd *ld, struct htlc_out *hout,
 					 hout->partid, hout->groupid);
 	assert(payment);
 
-	if (payment->local_invreq_id)
-		wallet_invoice_request_mark_used(ld->wallet->db,
-						 payment->local_invreq_id);
+	if (payment->local_offer_id)
+		wallet_offer_mark_used(ld->wallet->db, payment->local_offer_id);
 	tell_waiters_success(ld, &hout->payment_hash, payment);
 }
 
@@ -778,48 +777,46 @@ static const u8 *send_onion(const tal_t *ctx, struct lightningd *ld,
 			     blinding, partid, groupid, onion, NULL, hout);
 }
 
-static struct command_result *check_invoice_request_usage(struct command *cmd,
-							  const struct sha256 *local_invreq_id)
+static struct command_result *check_offer_usage(struct command *cmd,
+						const struct sha256 *local_offer_id)
 {
 	enum offer_status status;
 	const struct wallet_payment **payments;
 
-	if (!local_invreq_id)
+	if (!local_offer_id)
 		return NULL;
 
-	if (!wallet_invoice_request_find(tmpctx, cmd->ld->wallet,
-					 local_invreq_id,
-					 NULL, &status))
-		return command_fail(cmd, PAY_INVOICE_REQUEST_INVALID,
-				    "Unknown invoice_request %s",
+	if (!wallet_offer_find(tmpctx, cmd->ld->wallet, local_offer_id,
+			       NULL, &status))
+		return command_fail(cmd, PAY_OFFER_INVALID,
+				    "Unknown offer %s",
 				    type_to_string(tmpctx, struct sha256,
-						   local_invreq_id));
+						   local_offer_id));
 
 	if (!offer_status_active(status))
-		return command_fail(cmd, PAY_INVOICE_REQUEST_INVALID,
-				    "Inactive invoice_request %s",
+		return command_fail(cmd, PAY_OFFER_INVALID,
+				    "Inactive offer %s",
 				    type_to_string(tmpctx, struct sha256,
-						   local_invreq_id));
+						   local_offer_id));
 
 	if (!offer_status_single(status))
 		return NULL;
 
 	/* OK, we must not attempt more than one payment at once for
-	 * single_use invoice_request we publish! */
-	payments = wallet_payments_by_invoice_request(tmpctx, cmd->ld->wallet,
-						      local_invreq_id);
+	 * single_use offer */
+	payments = wallet_payments_by_offer(tmpctx, cmd->ld->wallet, local_offer_id);
 	for (size_t i = 0; i < tal_count(payments); i++) {
 		switch (payments[i]->status) {
 		case PAYMENT_COMPLETE:
-			return command_fail(cmd, PAY_INVOICE_REQUEST_INVALID,
-					    "Single-use invoice_request already paid"
+			return command_fail(cmd, PAY_OFFER_INVALID,
+					    "Single-use offer already paid"
 					    " with %s",
 					    type_to_string(tmpctx, struct sha256,
 							   &payments[i]
 							   ->payment_hash));
 		case PAYMENT_PENDING:
-			return command_fail(cmd, PAY_INVOICE_REQUEST_INVALID,
-					    "Single-use invoice_request already"
+			return command_fail(cmd, PAY_OFFER_INVALID,
+					    "Single-use offer already"
 					    " in progress with %s",
 					    type_to_string(tmpctx, struct sha256,
 							   &payments[i]
@@ -875,7 +872,7 @@ send_payment_core(struct lightningd *ld,
 		  struct node_id *route_nodes TAKES,
 		  struct short_channel_id *route_channels TAKES,
 		  struct secret *path_secrets,
-		  const struct sha256 *local_invreq_id)
+		  const struct sha256 *local_offer_id)
 {
 	const struct wallet_payment **payments, *old_payment = NULL;
 	struct channel *channel;
@@ -884,7 +881,6 @@ send_payment_core(struct lightningd *ld,
 	struct routing_failure *fail;
 	struct amount_msat msat_already_pending = AMOUNT_MSAT(0);
 	bool have_complete = false;
-	struct command_result *invreq_err;
 
 	/* Now, do we already have one or more payments? */
 	payments = wallet_payment_list(tmpctx, ld->wallet, rhash);
@@ -1041,9 +1037,10 @@ send_payment_core(struct lightningd *ld,
 						   &total_msat));
 	}
 
-	invreq_err = check_invoice_request_usage(cmd, local_invreq_id);
-	if (invreq_err)
-		return invreq_err;
+	struct command_result *offer_err;
+	offer_err = check_offer_usage(cmd, local_offer_id);
+	if (offer_err)
+		return offer_err;
 
 	channel = find_channel_for_htlc_add(ld, &first_hop->node_id,
 					    &first_hop->scid);
@@ -1120,8 +1117,8 @@ send_payment_core(struct lightningd *ld,
 		payment->description = tal_strdup(payment, description);
 	else
 		payment->description = NULL;
-	payment->local_invreq_id = tal_dup_or_null(payment, struct sha256,
-						   local_invreq_id);
+	payment->local_offer_id = tal_dup_or_null(payment, struct sha256,
+						  local_offer_id);
 
 	/* We write this into db when HTLC is actually sent. */
 	wallet_payment_setup(ld->wallet, payment);
@@ -1142,7 +1139,7 @@ send_payment(struct lightningd *ld,
 	     const char *label TAKES,
 	     const char *invstring TAKES,
 	     const char *description TAKES,
-	     const struct sha256 *local_invreq_id,
+	     const struct sha256 *local_offer_id,
 	     const struct secret *payment_secret,
 	     const u8 *payment_metadata)
 {
@@ -1215,7 +1212,7 @@ send_payment(struct lightningd *ld,
 				 msat, total_msat,
 				 label, invstring, description,
 				 packet, &ids[n_hops - 1], ids,
-				 channels, path_secrets, local_invreq_id);
+				 channels, path_secrets, local_offer_id);
 }
 
 static struct command_result *
@@ -1289,7 +1286,7 @@ static struct command_result *json_sendonion(struct command *cmd,
 	struct secret *path_secrets;
 	struct amount_msat *msat;
 	u64 *partid, *group;
-	struct sha256 *local_invreq_id = NULL;
+	struct sha256 *local_offer_id = NULL;
 
 	if (!param(cmd, buffer, params,
 		   p_req("onion", param_bin_from_hex, &onion),
@@ -1302,7 +1299,7 @@ static struct command_result *json_sendonion(struct command *cmd,
 		   p_opt("bolt11", param_string, &invstring),
 		   p_opt_def("amount_msat|msatoshi", param_msat, &msat, AMOUNT_MSAT(0)),
 		   p_opt("destination", param_node_id, &destination),
-		   p_opt("localinvreqid", param_sha256, &local_invreq_id),
+		   p_opt("localofferid", param_sha256, &local_offer_id),
 		   p_opt("groupid", param_u64, &group),
 		   p_opt("description", param_string, &description),
 		   NULL))
@@ -1328,7 +1325,7 @@ static struct command_result *json_sendonion(struct command *cmd,
 				 first_hop, *msat, AMOUNT_MSAT(0),
 				 label, invstring, description,
 				 packet, destination, NULL, NULL,
-				 path_secrets, local_invreq_id);
+				 path_secrets, local_offer_id);
 }
 
 static const struct json_command sendonion_command = {
@@ -1415,7 +1412,7 @@ static struct command_result *json_sendpay(struct command *cmd,
 	const char *invstring, *label, *description;
 	u64 *partid, *group;
 	struct secret *payment_secret;
-	struct sha256 *local_invreq_id;
+	struct sha256 *local_offer_id;
 	u8 *payment_metadata;
 
 	/* For generating help, give new-style. */
@@ -1428,7 +1425,7 @@ static struct command_result *json_sendpay(struct command *cmd,
 		   p_opt("bolt11", param_string, &invstring),
 		   p_opt("payment_secret", param_secret, &payment_secret),
 		   p_opt_def("partid", param_u64, &partid, 0),
-		   p_opt("localinvreqid", param_sha256, &local_invreq_id),
+		   p_opt("localofferid", param_sha256, &local_offer_id),
 		   p_opt("groupid", param_u64, &group),
 		   p_opt("payment_metadata", param_bin_from_hex, &payment_metadata),
 		   p_opt("description", param_string, &description),
@@ -1481,7 +1478,7 @@ static struct command_result *json_sendpay(struct command *cmd,
 			    route,
 			    final_amount,
 			    msat ? *msat : final_amount,
-			    label, invstring, description, local_invreq_id,
+			    label, invstring, description, local_offer_id,
 			    payment_secret, payment_metadata);
 }
 

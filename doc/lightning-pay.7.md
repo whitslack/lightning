@@ -6,7 +6,7 @@ SYNOPSIS
 
 **pay** *bolt11* [*msatoshi*] [*label*] [*riskfactor*]
 [*maxfeepercent*] [*retry_for*] [*maxdelay*] [*exemptfee*]
-[*localinvreqid*] [*exclude*] [*maxfee*] [*description*]
+[*localofferid*] [*exclude*] [*maxfee*] [*description*]
 
 DESCRIPTION
 -----------
@@ -32,8 +32,8 @@ leveraged by forwarding nodes. Setting `exemptfee` allows the
 `maxfeepercent` check to be skipped on fees that are smaller than
 `exemptfee` (default: 5000 millisatoshi).
 
-`localinvreqid` is used by offers to link a payment attempt to a local
-`invoice_request` offer created by lightningd-invoicerequest(7).  This ensures
+`localofferid` is used by offers to link a payment attempt to a local
+`send_invoice` offer created by lightningd-offerout(7).  This ensures
 that we only make a single payment for an offer, and that the offer is
 marked `used` once paid.
 

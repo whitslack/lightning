@@ -54,7 +54,7 @@
     "destination": {
       "type": "pubkey"
     },
-    "localinvreqid": {
+    "localofferid": {
       "type": "hash"
     },
     "groupid": {
