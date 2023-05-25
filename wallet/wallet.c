@@ -511,9 +511,15 @@ static bool deep_enough(u32 maxheight, const struct utxo *utxo,
 			return false;
 	}
 
-	bool immature = utxo_is_immature(utxo, current_blockheight);
-	if (immature)
-		return false;
+	/* If the utxo is a coinbase, we over-write the maxheight
+	 * to the coinbase maxheight (current - 99) */
+	if (utxo->is_in_coinbase) {
+		/* Nothing is spendable the first 100 blocks */
+		if (current_blockheight < 100)
+			return false;
+		if (maxheight > current_blockheight - 99)
+			maxheight = current_blockheight - 99;
+	}
 
 	/* If we require confirmations check that we have a
 	 * confirmation height and that it is below the required
