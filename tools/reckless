@@ -51,7 +51,12 @@ class InstInfo:
         Populate installation details from a github repo url.
         Return True if all data is found.
         """
-        r = urlopen(self.git_url, timeout=5)
+        if "api.github.com" in self.git_url:
+            # This lets us redirect to handle blackbox testing
+            redir_addr = API_GITHUB_COM + self.git_url.split("api.github.com")[-1]
+            r = urlopen(redir_addr, timeout=5)
+        else:
+            r = urlopen(self.git_url, timeout=5)
         if r.status != 200:
             return False
         if 'git/tree' in self.git_url:
@@ -278,7 +283,7 @@ def _search_repo(name: str, url: str) -> InstInfo:
     repo_name = parsed_url.path.split('/')[start + 1]
 
     # Get details from the github API.
-    api_url = f'https://api.github.com/repos/{repo_user}/{repo_name}/contents/'
+    api_url = f'{API_GITHUB_COM}/repos/{repo_user}/{repo_name}/contents/'
     plugins_cont = api_url
     r = urlopen(plugins_cont, timeout=5)
     if r.status != 200:
@@ -311,6 +316,7 @@ def _search_repo(name: str, url: str) -> InstInfo:
                     MyPlugin.repo = MyPlugin.repo.split('/tree/')[0]
                     logging.debug(f'repo using commit: {MyPlugin.commit}')
             if not MyPlugin.get_inst_details():
+                logging.debug(f"Found plugin in {url}, but missing install details")
                 return False
             return MyPlugin
     return False
@@ -337,12 +343,16 @@ def _install_plugin(src: InstInfo) -> bool:
         shutil.rmtree(clone_path)
     # clone git repository to /tmp/reckless-...
     if ('http' in src.repo[:4]) or ('github.com' in src.repo):
+        if 'github.com' in src.repo:
+            url = f"{GITHUB_COM}" + src.repo.split("github.com")[-1]
+        else:
+            url = src.repo
         # Ugly, but interactively handling stderr gets hairy.
         if logging.root.level < logging.WARNING:
-            git = Popen(['git', 'clone',  src.repo, str(clone_path)],
-                        stdout=PIPE)
+            git = Popen(['git', 'clone', url, str(clone_path)],
+                        stdout=PIPE, stderr=PIPE)
         else:
-            git = Popen(['git', 'clone',  src.repo, str(clone_path)],
+            git = Popen(['git', 'clone', url, str(clone_path)],
                         stdout=PIPE, stderr=PIPE)
         git.wait()
         if git.returncode != 0:
@@ -358,7 +368,7 @@ def _install_plugin(src: InstInfo) -> bool:
     if src.commit:
         logging.debug(f"Checking out commit {src.commit}")
         checkout = Popen(['git', 'checkout', src.commit],
-                         cwd=plugin_path, stdout=PIPE, stderr=PIPE)
+                         cwd=str(plugin_path), stdout=PIPE, stderr=PIPE)
         checkout.wait()
         if checkout.returncode != 0:
             print(f'failed to checkout referenced commit {src.commit}')
@@ -378,9 +388,9 @@ def _install_plugin(src: InstInfo) -> bool:
         procedure = install_methods[src.deps]
         # Verbose output requested.
         if logging.root.level < logging.WARNING:
-            pip = Popen(procedure, cwd=plugin_path)
+            pip = Popen(procedure, cwd=str(plugin_path))
         else:
-            pip = Popen(procedure, cwd=plugin_path, stdout=PIPE, stderr=PIPE)
+            pip = Popen(procedure, cwd=str(plugin_path), stdout=PIPE, stderr=PIPE)
         pip.wait()
         if pip.returncode == 0:
             print('dependencies installed successfully')
@@ -388,7 +398,7 @@ def _install_plugin(src: InstInfo) -> bool:
             print('error encountered installing dependencies')
             logging.debug(pip.stdout.read())
             return False
-    test = Popen([Path(plugin_path).joinpath(src.entry)], cwd=plugin_path,
+    test = Popen([Path(plugin_path).joinpath(src.entry)], cwd=str(plugin_path),
                  stdout=PIPE, stderr=PIPE, universal_newlines=True)
     test_log = []
     with test.stderr:
@@ -404,7 +414,7 @@ def _install_plugin(src: InstInfo) -> bool:
         return False
 
     # Find this cute little plugin a forever home
-    shutil.copytree(plugin_path, inst_path)
+    shutil.copytree(str(plugin_path), inst_path)
     print(f'plugin installed: {inst_path}')
     remove_dir(clone_path)
     return True
@@ -664,7 +674,8 @@ if __name__ == '__main__':
                         type=str,
                         default=None)
     parser.add_argument('-r', '--regtest', action='store_true')
-    # parser.add_argument('-v', '--verbose', action='store_true')
+    parser.add_argument('--network', help="specify a network to use (default: bitcoin)",
+                        type=str)
     parser.add_argument('-v', '--verbose', action="store_const",
                         dest="loglevel", const=logging.DEBUG, default=logging.WARNING)
     cmd1 = parser.add_subparsers(dest='cmd1', help='command',
@@ -716,8 +727,18 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     NETWORK = 'regtest' if args.regtest else 'bitcoin'
+    SUPPORTED_NETWORKS = ['bitcoin', 'regtest', 'liquid', 'liquid-regtest',
+                          'litecoin', 'signet', 'testnet']
+    if args.network:
+        if args.network in SUPPORTED_NETWORKS:
+            NETWORK = args.network
+        else:
+            print(f"Error: {args.network} network not supported")
     LIGHTNING_DIR = Path(args.lightning)
-    LIGHTNING_CLI_CALL = ['lightning-cli']
+    # This env variable is set under CI testing
+    LIGHTNING_CLI_CALL = [os.environ.get('LIGHTNING_CLI')]
+    if LIGHTNING_CLI_CALL is None:
+        LIGHTNING_CLI_CALL = ['lightning-cli']
     if NETWORK != 'bitcoin':
         LIGHTNING_CLI_CALL.append(f'--network={NETWORK}')
     if LIGHTNING_DIR != Path.home().joinpath('.lightning'):
@@ -730,6 +751,13 @@ if __name__ == '__main__':
     RECKLESS_CONFIG = load_config(reckless_dir=RECKLESS_DIR,
                                   network=NETWORK)
     RECKLESS_SOURCES = loadSources()
+    API_GITHUB_COM = 'https://api.github.com'
+    GITHUB_COM = 'https://github.com'
+    # Used for blackbox testing to avoid hitting github servers
+    if 'REDIR_GITHUB_API' in os.environ:
+        API_GITHUB_COM = os.environ['REDIR_GITHUB_API']
+    if 'REDIR_GITHUB' in os.environ:
+        GITHUB_COM = os.environ['REDIR_GITHUB']
     logging.root.setLevel(args.loglevel)
 
     if 'targets' in args:

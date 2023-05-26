@@ -1728,7 +1728,8 @@ pub mod responses {
 	pub struct ListpeersPeers {
 	    pub id: PublicKey,
 	    pub connected: bool,
-	    pub num_channels: u32,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub num_channels: Option<u32>,
 	    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
 	    pub log: Option<Vec<ListpeersPeersLog>>,
 	    #[deprecated]
@@ -1809,7 +1810,8 @@ pub mod responses {
 	    pub connected: bool,
 	    // Path `ListFunds.channels[].state`
 	    pub state: ChannelState,
-	    pub channel_id: Sha256,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub channel_id: Option<Sha256>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub short_channel_id: Option<ShortChannelId>,
 	}
@@ -3216,17 +3218,33 @@ pub mod responses {
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct FeeratesPerkbEstimates {
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub blockcount: Option<u32>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub feerate: Option<u32>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub smoothed_feerate: Option<u32>,
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct FeeratesPerkb {
 	    pub min_acceptable: u32,
 	    pub max_acceptable: u32,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub floor: Option<u32>,
+	    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
+	    pub estimates: Option<Vec<FeeratesPerkbEstimates>>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub opening: Option<u32>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub mutual_close: Option<u32>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub unilateral_close: Option<u32>,
+	    #[deprecated]
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub delayed_to_us: Option<u32>,
+	    #[deprecated]
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub htlc_resolution: Option<u32>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
@@ -3234,17 +3252,33 @@ pub mod responses {
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct FeeratesPerkwEstimates {
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub blockcount: Option<u32>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub feerate: Option<u32>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub smoothed_feerate: Option<u32>,
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct FeeratesPerkw {
 	    pub min_acceptable: u32,
 	    pub max_acceptable: u32,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub floor: Option<u32>,
+	    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
+	    pub estimates: Option<Vec<FeeratesPerkwEstimates>>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub opening: Option<u32>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub mutual_close: Option<u32>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub unilateral_close: Option<u32>,
+	    #[deprecated]
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub delayed_to_us: Option<u32>,
+	    #[deprecated]
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub htlc_resolution: Option<u32>,
 	    #[serde(skip_serializing_if = "Option::is_none")]

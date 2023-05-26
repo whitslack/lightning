@@ -86,11 +86,11 @@ def test_bitcoin_failure(node_factory, bitcoind):
     l1.daemon.rpcproxy.mock_rpc('getblockhash', crash_bitcoincli)
 
     # This should cause both estimatefee and getblockhash fail
-    l1.daemon.wait_for_logs(['Unable to estimate .* fee',
+    l1.daemon.wait_for_logs(['Unable to estimate any fees',
                              'getblockhash .* exited with status 1'])
 
     # And they should retry!
-    l1.daemon.wait_for_logs(['Unable to estimate .* fee',
+    l1.daemon.wait_for_logs(['Unable to estimate any fees',
                              'getblockhash .* exited with status 1'])
 
     # Restore, then it should recover and get blockheight.
@@ -293,14 +293,15 @@ def test_htlc_sig_persistence(node_factory, bitcoind, executor):
     l1.start()
 
     assert l1.daemon.is_in_log(r'Loaded 1 HTLC signatures from DB')
-    l1.daemon.wait_for_logs([
-        r'Peer permanent failure in CHANNELD_NORMAL: Funding transaction spent',
-        r'Propose handling THEIR_UNILATERAL/OUR_HTLC by OUR_HTLC_TIMEOUT_TO_US'
-    ])
+
+    # Could happen in either order!
+    l1.daemon.wait_for_log(r'Peer permanent failure in CHANNELD_NORMAL: Funding transaction spent')
+
+    _, txid, blocks = l1.wait_for_onchaind_tx('OUR_HTLC_TIMEOUT_TO_US',
+                                              'THEIR_UNILATERAL/OUR_HTLC')
+    assert blocks == 5
     bitcoind.generate_block(5)
-    l1.daemon.wait_for_log("Broadcasting OUR_HTLC_TIMEOUT_TO_US")
-    time.sleep(3)
-    bitcoind.generate_block(1)
+    bitcoind.generate_block(1, wait_for_mempool=txid)
     l1.daemon.wait_for_logs([
         r'Owning output . (\d+)sat .SEGWIT. txid',
     ])
@@ -357,22 +358,28 @@ def test_htlc_out_timeout(node_factory, bitcoind, executor):
     l2.daemon.wait_for_log(' to ONCHAIN')
 
     # L1 will timeout HTLC immediately
-    l1.daemon.wait_for_logs(['Propose handling OUR_UNILATERAL/OUR_HTLC by OUR_HTLC_TIMEOUT_TX .* after 0 blocks',
-                             'Propose handling OUR_UNILATERAL/DELAYED_OUTPUT_TO_US by OUR_DELAYED_RETURN_TO_WALLET .* after 5 blocks'])
+    ((_, _, blocks1), (_, txid, blocks2)) = \
+        l1.wait_for_onchaind_txs(('OUR_DELAYED_RETURN_TO_WALLET',
+                                  'OUR_UNILATERAL/DELAYED_OUTPUT_TO_US'),
+                                 ('OUR_HTLC_TIMEOUT_TX',
+                                  'OUR_UNILATERAL/OUR_HTLC'))
+    assert blocks1 == 4
+    # We hit deadline (we give 1 block grace), then mined another.
+    assert blocks2 == -2
 
-    l1.daemon.wait_for_log('sendrawtx exit 0')
-    bitcoind.generate_block(1)
+    bitcoind.generate_block(1, wait_for_mempool=txid)
 
-    l1.daemon.wait_for_log('Propose handling OUR_HTLC_TIMEOUT_TX/DELAYED_OUTPUT_TO_US by OUR_DELAYED_RETURN_TO_WALLET .* after 5 blocks')
+    rawtx, txid, blocks = l1.wait_for_onchaind_tx('OUR_DELAYED_RETURN_TO_WALLET',
+                                                  'OUR_HTLC_TIMEOUT_TX/DELAYED_OUTPUT_TO_US')
+    assert blocks == 4
     bitcoind.generate_block(4)
+
     # It should now claim both the to-local and htlc-timeout-tx outputs.
-    l1.daemon.wait_for_logs(['Broadcasting OUR_DELAYED_RETURN_TO_WALLET',
-                             'Broadcasting OUR_DELAYED_RETURN_TO_WALLET',
-                             'sendrawtx exit 0',
+    l1.daemon.wait_for_logs(['sendrawtx exit 0.*{}'.format(rawtx),
                              'sendrawtx exit 0'])
 
     # Now, 100 blocks it should be done.
-    bitcoind.generate_block(100)
+    bitcoind.generate_block(100, wait_for_mempool=txid)
     l1.daemon.wait_for_log('onchaind complete, forgetting peer')
     l2.daemon.wait_for_log('onchaind complete, forgetting peer')
 
@@ -422,16 +429,18 @@ def test_htlc_in_timeout(node_factory, bitcoind, executor):
     l1.daemon.wait_for_log(' to ONCHAIN')
 
     # L2 will collect HTLC (iff no shadow route)
-    l2.daemon.wait_for_log('Propose handling OUR_UNILATERAL/THEIR_HTLC by OUR_HTLC_SUCCESS_TX .* after 0 blocks')
-    l2.daemon.wait_for_log('sendrawtx exit 0')
-    bitcoind.generate_block(1)
-    l2.daemon.wait_for_log('Propose handling OUR_HTLC_SUCCESS_TX/DELAYED_OUTPUT_TO_US by OUR_DELAYED_RETURN_TO_WALLET .* after 5 blocks')
+    _, txid, blocks = l2.wait_for_onchaind_tx('OUR_HTLC_SUCCESS_TX',
+                                              'OUR_UNILATERAL/THEIR_HTLC')
+    assert blocks == 0
+    bitcoind.generate_block(1, wait_for_mempool=txid)
+    rawtx, txid, blocks = l2.wait_for_onchaind_tx('OUR_DELAYED_RETURN_TO_WALLET',
+                                                  'OUR_HTLC_SUCCESS_TX/DELAYED_OUTPUT_TO_US')
+    assert blocks == 4
     bitcoind.generate_block(4)
-    l2.daemon.wait_for_log('Broadcasting OUR_DELAYED_RETURN_TO_WALLET')
-    l2.daemon.wait_for_log('sendrawtx exit 0')
+    l2.daemon.wait_for_log('sendrawtx exit 0.*{}'.format(rawtx))
 
     # Now, 100 blocks it should be both done.
-    bitcoind.generate_block(100)
+    bitcoind.generate_block(100, wait_for_mempool=txid)
     l1.daemon.wait_for_log('onchaind complete, forgetting peer')
     l2.daemon.wait_for_log('onchaind complete, forgetting peer')
 
@@ -1515,8 +1524,7 @@ def test_feerates(node_factory):
     l1.start()
 
     # All estimation types
-    types = ["opening", "mutual_close", "unilateral_close", "delayed_to_us",
-             "htlc_resolution", "penalty"]
+    types = ["opening", "mutual_close", "unilateral_close", "penalty"]
 
     # Try parsing the feerates, won't work because can't estimate
     for t in types:
@@ -1524,21 +1532,26 @@ def test_feerates(node_factory):
             feerate = l1.rpc.parsefeerate(t)
 
     # Query feerates (shouldn't give any!)
-    wait_for(lambda: len(l1.rpc.feerates('perkw')['perkw']) == 2)
+    wait_for(lambda: len(l1.rpc.feerates('perkw')['perkw']) == 4)
     feerates = l1.rpc.feerates('perkw')
     assert feerates['warning_missing_feerates'] == 'Some fee estimates unavailable: bitcoind startup?'
     assert 'perkb' not in feerates
     assert feerates['perkw']['max_acceptable'] == 2**32 - 1
     assert feerates['perkw']['min_acceptable'] == 253
+    assert feerates['perkw']['min_acceptable'] == 253
+    assert feerates['perkw']['floor'] == 253
+    assert feerates['perkw']['estimates'] == []
     for t in types:
         assert t not in feerates['perkw']
 
-    wait_for(lambda: len(l1.rpc.feerates('perkb')['perkb']) == 2)
     feerates = l1.rpc.feerates('perkb')
     assert feerates['warning_missing_feerates'] == 'Some fee estimates unavailable: bitcoind startup?'
     assert 'perkw' not in feerates
     assert feerates['perkb']['max_acceptable'] == (2**32 - 1)
     assert feerates['perkb']['min_acceptable'] == 253 * 4
+    # Note: This is floored at the FEERATE_FLOOR constant (253)
+    assert feerates['perkb']['floor'] == 1012
+    assert feerates['perkb']['estimates'] == []
     for t in types:
         assert t not in feerates['perkb']
 
@@ -1547,56 +1560,87 @@ def test_feerates(node_factory):
     l1.set_feerates((15000, 0, 0, 0), True)
     wait_for(lambda: l1.rpc.feerates('perkw')['perkw']['max_acceptable'] == 15000 * 10)
     feerates = l1.rpc.feerates('perkw')
-    assert feerates['warning_missing_feerates'] == 'Some fee estimates unavailable: bitcoind startup?'
+    # We only get the warning if *no* feerates are avail.
+    assert 'warning_missing_feerates' not in feerates
     assert 'perkb' not in feerates
-    assert feerates['perkw']['min_acceptable'] == 253
+    # With only one data point, this is a terrible guess!
+    assert feerates['perkw']['min_acceptable'] == 15000 // 2
+    assert feerates['perkw']['estimates'] == [{'blockcount': 2,
+                                               'feerate': 15000,
+                                               'smoothed_feerate': 15000}]
 
     # Set ECONOMICAL/6 feerate, for unilateral_close and htlc_resolution
     l1.set_feerates((15000, 11000, 0, 0), True)
-    wait_for(lambda: len(l1.rpc.feerates('perkw')['perkw']) == 4)
     feerates = l1.rpc.feerates('perkw')
     assert feerates['perkw']['unilateral_close'] == 11000
-    assert feerates['perkw']['htlc_resolution'] == 11000
-    assert feerates['warning_missing_feerates'] == 'Some fee estimates unavailable: bitcoind startup?'
+    assert 'warning_missing_feerates' not in feerates
     assert 'perkb' not in feerates
     assert feerates['perkw']['max_acceptable'] == 15000 * 10
-    assert feerates['perkw']['min_acceptable'] == 253
+    # With only two data points, this is a terrible guess!
+    assert feerates['perkw']['min_acceptable'] == 11000 // 2
+    assert feerates['perkw']['estimates'] == [{'blockcount': 2,
+                                               'feerate': 15000,
+                                               'smoothed_feerate': 15000},
+                                              {'blockcount': 6,
+                                               'feerate': 11000,
+                                               'smoothed_feerate': 11000}]
 
     # Set ECONOMICAL/12 feerate, for all but min (so, no mutual_close feerate)
     l1.set_feerates((15000, 11000, 6250, 0), True)
-    wait_for(lambda: len(l1.rpc.feerates('perkb')['perkb']) == len(types) - 1 + 2)
     feerates = l1.rpc.feerates('perkb')
     assert feerates['perkb']['unilateral_close'] == 11000 * 4
-    assert feerates['perkb']['htlc_resolution'] == 11000 * 4
-    assert 'mutual_close' not in feerates['perkb']
+    # We dont' extrapolate, so it uses the same for mutual_close
+    assert feerates['perkb']['mutual_close'] == 6250 * 4
     for t in types:
         if t not in ("unilateral_close", "htlc_resolution", "mutual_close"):
             assert feerates['perkb'][t] == 25000
-    assert feerates['warning_missing_feerates'] == 'Some fee estimates unavailable: bitcoind startup?'
+    assert 'warning_missing_feerates' not in feerates
     assert 'perkw' not in feerates
     assert feerates['perkb']['max_acceptable'] == 15000 * 4 * 10
-    assert feerates['perkb']['min_acceptable'] == 253 * 4
+    # With only three data points, this is a terrible guess!
+    assert feerates['perkb']['min_acceptable'] == 6250 // 2 * 4
+    assert feerates['perkb']['estimates'] == [{'blockcount': 2,
+                                               'feerate': 15000 * 4,
+                                               'smoothed_feerate': 15000 * 4},
+                                              {'blockcount': 6,
+                                               'feerate': 11000 * 4,
+                                               'smoothed_feerate': 11000 * 4},
+                                              {'blockcount': 12,
+                                               'feerate': 6250 * 4,
+                                               'smoothed_feerate': 6250 * 4}]
 
     # Set ECONOMICAL/100 feerate for min and mutual_close
     l1.set_feerates((15000, 11000, 6250, 5000), True)
     wait_for(lambda: len(l1.rpc.feerates('perkw')['perkw']) >= len(types) + 2)
     feerates = l1.rpc.feerates('perkw')
     assert feerates['perkw']['unilateral_close'] == 11000
-    assert feerates['perkw']['htlc_resolution'] == 11000
     assert feerates['perkw']['mutual_close'] == 5000
     for t in types:
         if t not in ("unilateral_close", "htlc_resolution", "mutual_close"):
             assert feerates['perkw'][t] == 25000 // 4
-    assert 'warning' not in feerates
+    assert 'warning_missing_feerates' not in feerates
     assert 'perkb' not in feerates
     assert feerates['perkw']['max_acceptable'] == 15000 * 10
     assert feerates['perkw']['min_acceptable'] == 5000 // 2
+    assert feerates['perkw']['estimates'] == [{'blockcount': 2,
+                                               'feerate': 15000,
+                                               'smoothed_feerate': 15000},
+                                              {'blockcount': 6,
+                                               'feerate': 11000,
+                                               'smoothed_feerate': 11000},
+                                              {'blockcount': 12,
+                                               'feerate': 6250,
+                                               'smoothed_feerate': 6250},
+                                              {'blockcount': 100,
+                                               'feerate': 5000,
+                                               'smoothed_feerate': 5000}]
 
     assert len(feerates['onchain_fee_estimates']) == 5
     assert feerates['onchain_fee_estimates']['opening_channel_satoshis'] == feerates['perkw']['opening'] * 702 // 1000
     assert feerates['onchain_fee_estimates']['mutual_close_satoshis'] == feerates['perkw']['mutual_close'] * 673 // 1000
     assert feerates['onchain_fee_estimates']['unilateral_close_satoshis'] == feerates['perkw']['unilateral_close'] * 598 // 1000
-    htlc_feerate = feerates["perkw"]["htlc_resolution"]
+    # htlc resolution currently uses 6 block estimate
+    htlc_feerate = [f['feerate'] for f in feerates['perkw']['estimates'] if f['blockcount'] == 6][0]
     htlc_timeout_cost = feerates["onchain_fee_estimates"]["htlc_timeout_satoshis"]
     htlc_success_cost = feerates["onchain_fee_estimates"]["htlc_success_satoshis"]
 
@@ -1883,12 +1927,14 @@ def test_bitcoind_fail_first(node_factory, bitcoind):
     def mock_fail(*args):
         raise ValueError()
 
+    # If any of these succeed, they reset fail timeout.
     l1.daemon.rpcproxy.mock_rpc('getblockhash', mock_fail)
     l1.daemon.rpcproxy.mock_rpc('estimatesmartfee', mock_fail)
+    l1.daemon.rpcproxy.mock_rpc('getmempoolinfo', mock_fail)
 
     l1.daemon.start(wait_for_initialized=False, stderr_redir=True)
     l1.daemon.wait_for_logs([r'getblockhash [a-z0-9]* exited with status 1',
-                             r'Unable to estimate opening fees',
+                             r'Unable to estimate any fees',
                              r'BROKEN.*we have been retrying command for --bitcoin-retry-timeout={} seconds'.format(timeout)])
     # Will exit with failure code.
     assert l1.daemon.wait() == 1
@@ -1896,6 +1942,128 @@ def test_bitcoind_fail_first(node_factory, bitcoind):
     # Now unset the mock, so calls go through again
     l1.daemon.rpcproxy.mock_rpc('getblockhash', None)
     l1.daemon.rpcproxy.mock_rpc('estimatesmartfee', None)
+
+
+@unittest.skipIf(TEST_NETWORK == 'liquid-regtest', "Fees on elements are different")
+def test_bitcoind_feerate_floor(node_factory, bitcoind):
+    """Don't return a feerate less than minrelaytxfee/mempoolminfee."""
+    l1 = node_factory.get_node()
+
+    anchors = EXPERIMENTAL_FEATURES
+    assert l1.rpc.feerates('perkb') == {
+        "perkb": {
+            "opening": 30000,
+            "mutual_close": 15000,
+            "unilateral_close": 44000,
+            "penalty": 30000,
+            "min_acceptable": 7500,
+            "max_acceptable": 600000,
+            "floor": 1012,
+            "estimates": [{"blockcount": 2,
+                           "feerate": 60000,
+                           "smoothed_feerate": 60000},
+                          {"blockcount": 6,
+                           "feerate": 44000,
+                           "smoothed_feerate": 44000},
+                          {"blockcount": 12,
+                           "feerate": 30000,
+                           "smoothed_feerate": 30000},
+                          {"blockcount": 100,
+                           "feerate": 15000,
+                           "smoothed_feerate": 15000}],
+        },
+        "onchain_fee_estimates": {
+            "opening_channel_satoshis": 5265,
+            "mutual_close_satoshis": 2523,
+            "unilateral_close_satoshis": 6578,
+            "htlc_timeout_satoshis": 7326 if anchors else 7293,
+            "htlc_success_satoshis": 7766 if anchors else 7733,
+        }
+    }
+
+    l1.daemon.rpcproxy.mock_rpc('getmempoolinfo',
+                                {
+                                    "mempoolminfee": 0.00010001,
+                                    "minrelaytxfee": 0.00020001
+                                })
+    l1.restart()
+    assert l1.rpc.feerates('perkb') == {
+        "perkb": {
+            "opening": 30000,
+            # This has increased (rounded up)
+            "mutual_close": 20004,
+            "unilateral_close": 44000,
+            "penalty": 30000,
+            # This has increased (rounded up)
+            "min_acceptable": 20004,
+            "max_acceptable": 600000,
+            "floor": 20004,
+            "estimates": [{"blockcount": 2,
+                           "feerate": 60000,
+                           "smoothed_feerate": 60000},
+                          {"blockcount": 6,
+                           "feerate": 44000,
+                           "smoothed_feerate": 44000},
+                          {"blockcount": 12,
+                           "feerate": 30000,
+                           "smoothed_feerate": 30000},
+                          {"blockcount": 100,
+                           "feerate": 20004,
+                           "smoothed_feerate": 20004}],
+        },
+        "onchain_fee_estimates": {
+            "opening_channel_satoshis": 5265,
+            # This increases too
+            "mutual_close_satoshis": 3365,
+            "unilateral_close_satoshis": 6578,
+            "htlc_timeout_satoshis": 7326 if anchors else 7293,
+            "htlc_success_satoshis": 7766 if anchors else 7733,
+        }
+    }
+
+    l1.daemon.rpcproxy.mock_rpc('getmempoolinfo',
+                                {
+                                    "mempoolminfee": 0.00030001,
+                                    "minrelaytxfee": 0.00010001
+                                })
+    l1.restart()
+    assert l1.rpc.feerates('perkb') == {
+        "perkb": {
+            # This has increased (rounded up!)
+            "opening": 30004,
+            # This has increased (rounded up!)
+            "mutual_close": 30004,
+            "unilateral_close": 44000,
+            # This has increased (rounded up!)
+            "penalty": 30004,
+            # This has increased (rounded up)
+            "min_acceptable": 30004,
+            "max_acceptable": 600000,
+            "floor": 30004,
+            "estimates": [{"blockcount": 2,
+                           "feerate": 60000,
+                           "smoothed_feerate": 60000},
+                          {"blockcount": 6,
+                           "feerate": 44000,
+                           "smoothed_feerate": 44000},
+                          # This has increased (rounded up!)
+                          {"blockcount": 12,
+                           "feerate": 30004,
+                           "smoothed_feerate": 30004},
+                          # This has increased (rounded up!)
+                          {"blockcount": 100,
+                           "feerate": 30004,
+                           "smoothed_feerate": 30004}],
+        },
+        "onchain_fee_estimates": {
+            "opening_channel_satoshis": 5265,
+            # This increases too
+            "mutual_close_satoshis": 5048,
+            "unilateral_close_satoshis": 6578,
+            "htlc_timeout_satoshis": 7326 if anchors else 7293,
+            "htlc_success_satoshis": 7766 if anchors else 7733,
+        }
+    }
 
 
 @pytest.mark.developer("needs --dev-force-bip32-seed")
@@ -1982,6 +2150,7 @@ def test_list_features_only(node_factory):
                 ]
     if EXPERIMENTAL_FEATURES:
         expected += ['option_anchor_outputs/odd']
+        expected += ['option_route_blinding/odd']
         expected += ['option_shutdown_anysegwit/odd']
         expected += ['option_quiesce/odd']
         expected += ['option_onion_messages/odd']
@@ -1990,6 +2159,7 @@ def test_list_features_only(node_factory):
         expected += ['option_zeroconf/odd']
         expected += ['supports_open_accept_channel_type']
     else:
+        expected += ['option_route_blinding/odd']
         expected += ['option_shutdown_anysegwit/odd']
         expected += ['option_channel_type/odd']
         expected += ['option_scid_alias/odd']
@@ -2552,15 +2722,24 @@ def test_restorefrompeer(node_factory, bitcoind):
 
 def test_commitfee_option(node_factory):
     """Sanity check for the --commit-fee startup option."""
-    l1, l2 = node_factory.get_nodes(2, opts=[{"commit-fee": "200"}, {}])
+    l1, l2 = node_factory.get_nodes(2, opts=[{"commit-fee": "200",
+                                              "start": False},
+                                             {"start": False}])
 
+    # set_feerates multiplies this by 4 to get perkb; but we divide.
     mock_wu = 5000
     for l in [l1, l2]:
-        l.set_feerates((0, mock_wu, 0, 0), True)
-    l1_commit_fees = l1.rpc.call("estimatefees")["unilateral_close"]
-    l2_commit_fees = l2.rpc.call("estimatefees")["unilateral_close"]
+        l.set_feerates((0, mock_wu, 0, 0), False)
+        l.start()
 
-    assert l1_commit_fees == 2 * l2_commit_fees == 2 * 4 * mock_wu  # WU->VB
+    # plugin gives same results:
+    assert l1.rpc.call("estimatefees") == l2.rpc.call("estimatefees")
+
+    # But feerates differ.
+    l1_commit_fees = l1.rpc.feerates("perkw")['perkw']['unilateral_close']
+    l2_commit_fees = l2.rpc.feerates("perkw")['perkw']['unilateral_close']
+
+    assert l1_commit_fees == 2 * l2_commit_fees == 2 * mock_wu
 
 
 def test_listtransactions(node_factory):
@@ -2793,15 +2972,29 @@ def test_force_feerates(node_factory):
     l1 = node_factory.get_node(options={'force-feerates': 1111})
     assert l1.rpc.listconfigs()['force-feerates'] == '1111'
 
+    # Note that estimates are still valid here, despite "force-feerates"
+    estimates = [{"blockcount": 2,
+                  "feerate": 15000,
+                  "smoothed_feerate": 15000},
+                 {"blockcount": 6,
+                  "feerate": 11000,
+                  "smoothed_feerate": 11000},
+                 {"blockcount": 12,
+                  "feerate": 7500,
+                  "smoothed_feerate": 7500},
+                 {"blockcount": 100,
+                  "feerate": 3750,
+                  "smoothed_feerate": 3750}]
+
     assert l1.rpc.feerates('perkw')['perkw'] == {
         "opening": 1111,
         "mutual_close": 1111,
         "unilateral_close": 1111,
-        "delayed_to_us": 1111,
-        "htlc_resolution": 1111,
         "penalty": 1111,
         "min_acceptable": 1875,
-        "max_acceptable": 150000}
+        "max_acceptable": 150000,
+        "estimates": estimates,
+        "floor": 253}
 
     l1.stop()
     l1.daemon.opts['force-feerates'] = '1111/2222'
@@ -2812,11 +3005,11 @@ def test_force_feerates(node_factory):
         "opening": 1111,
         "mutual_close": 2222,
         "unilateral_close": 2222,
-        "delayed_to_us": 2222,
-        "htlc_resolution": 2222,
         "penalty": 2222,
         "min_acceptable": 1875,
-        "max_acceptable": 150000}
+        "max_acceptable": 150000,
+        "estimates": estimates,
+        "floor": 253}
 
     l1.stop()
     l1.daemon.opts['force-feerates'] = '1111/2222/3333/4444/5555/6666'
@@ -2827,11 +3020,11 @@ def test_force_feerates(node_factory):
         "opening": 1111,
         "mutual_close": 2222,
         "unilateral_close": 3333,
-        "delayed_to_us": 4444,
-        "htlc_resolution": 5555,
         "penalty": 6666,
         "min_acceptable": 1875,
-        "max_acceptable": 150000}
+        "max_acceptable": 150000,
+        "estimates": estimates,
+        "floor": 253}
 
 
 def test_datastore_escapeing(node_factory):
@@ -3102,3 +3295,111 @@ def test_hsm_capabilities(node_factory):
     l1 = node_factory.get_node()
     # This appears before the start message, so it'll already be present.
     assert l1.daemon.is_in_log(r"hsmd: capability \+WIRE_HSMD_CHECK_PUBKEY")
+
+
+def test_feerate_arg(node_factory):
+    """Make sure our variants of feerate argument work!"""
+    l1 = node_factory.get_node()
+
+    # These are the get_node() defaults
+    by_blocks = {2: 15000,
+                 6: 11000,
+                 12: 7500,
+                 100: 3750}
+
+    # Literal values:
+    fees = {"9999perkw": 9999,
+            "10000perkb": 10000 // 4,
+            10000: 10000 // 4}
+
+    fees["urgent"] = by_blocks[6]
+    fees["normal"] = by_blocks[12]
+    fees["slow"] = by_blocks[100]
+
+    fees["opening"] = by_blocks[12]
+    fees["mutual_close"] = by_blocks[100]
+    fees["penalty"] = by_blocks[12]
+    fees["unilateral_close"] = by_blocks[6]
+
+    fees["2blocks"] = by_blocks[2]
+    fees["6blocks"] = by_blocks[6]
+    fees["12blocks"] = by_blocks[12]
+    fees["100blocks"] = by_blocks[100]
+
+    # Simple interpolation
+    fees["9blocks"] = (by_blocks[6] + by_blocks[12]) // 2
+
+    for fee, expect in fees.items():
+        # Put arg in assertion, so it gets printed on failure!
+        assert (l1.rpc.parsefeerate(fee), fee) == ({'perkw': expect}, fee)
+
+    # More thorough interpolation
+    for block in range(12, 100):
+        # y = y1 + (x-x1)(y2-y1)/(x2-x1)
+        fee = by_blocks[12] + (block - 12) * (by_blocks[100] - by_blocks[12]) // (100 - 12)
+        # Rounding error is a thing!
+        assert abs(l1.rpc.parsefeerate(f"{block}blocks")['perkw'] - fee) <= 1
+
+
+@pytest.mark.skip(reason="Fails by intention for creating test gossip stores")
+def test_create_gossip_mesh(node_factory, bitcoind):
+    """
+    Feel free to modify this test and remove the '@pytest.mark.skip' above.
+    Run it to get a customized gossip store. It fails on purpose, see below.
+
+    This builds a small mesh
+
+      l1--l2--l3
+      |   |   |
+      l4--l5--l6
+      |   |   |
+      l7--l8--l9
+    """
+    nodes = node_factory.get_nodes(9)
+    nodeids = [n.info['id'] for n in nodes]
+
+    [l1, l2, l3, l4, l5, l6, l7, l8, l9] = nodes
+    scid12, _ = l1.fundchannel(l2, wait_for_active=False, connect=True)
+    scid14, _ = l1.fundchannel(l4, wait_for_active=False, connect=True)
+    scid23, _ = l2.fundchannel(l3, wait_for_active=False, connect=True)
+    scid25, _ = l2.fundchannel(l5, wait_for_active=False, connect=True)
+    scid36, _ = l3.fundchannel(l6, wait_for_active=False, connect=True)
+    scid45, _ = l4.fundchannel(l5, wait_for_active=False, connect=True)
+    scid47, _ = l4.fundchannel(l7, wait_for_active=False, connect=True)
+    scid56, _ = l5.fundchannel(l6, wait_for_active=False, connect=True)
+    scid58, _ = l5.fundchannel(l8, wait_for_active=False, connect=True)
+    scid69, _ = l6.fundchannel(l9, wait_for_active=False, connect=True)
+    scid78, _ = l7.fundchannel(l8, wait_for_active=False, connect=True)
+    scid89, _ = l8.fundchannel(l9, wait_for_active=False, connect=True)
+    bitcoind.generate_block(10)
+
+    scids = [scid12, scid14, scid23, scid25, scid36, scid45, scid47, scid56,
+             scid58, scid69, scid78, scid89]
+
+    # waits for all nodes to have all scids gossip active
+    for n in nodes:
+        for scid in scids:
+            n.wait_channel_active(scid)
+
+    print("nodeids", nodeids)
+    print("scids", scids)
+    assert False, "Test failed on purpose, grab the gossip store from /tmp/ltests-..."
+
+
+def test_fast_shutdown(node_factory):
+    l1 = node_factory.get_node(start=False)
+
+    l1.daemon.start(wait_for_initialized=False)
+
+    start_time = time.time()
+    # Keep trying until this succeeds (socket may not exist yet!)
+    while True:
+        if time.time() > start_time + TIMEOUT:
+            raise ValueError("Timeout while waiting for stop to work!")
+        try:
+            l1.rpc.stop()
+        except FileNotFoundError:
+            continue
+        except ConnectionRefusedError:
+            continue
+        break

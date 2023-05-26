@@ -1198,9 +1198,13 @@ wallet_stmt2inflight(struct wallet *w, struct db_stmt *stmt,
 
 	/* last_tx is null for stub channels used for recovering funds through
 	 * Static channel backups. */
-	if (!db_col_is_null(stmt, "last_tx"))
+	if (!db_col_is_null(stmt, "last_tx")) {
 		last_tx = db_col_psbt_to_tx(tmpctx, stmt, "last_tx");
-	else
+		if (!last_tx)
+			db_fatal("Failed to decode inflight psbt %s",
+				 tal_hex(tmpctx, db_col_arr(tmpctx, stmt,
+							    "last_tx", u8)));
+	} else
 		last_tx = NULL;
 
 	inflight = new_inflight(chan, &funding,
@@ -1485,9 +1489,14 @@ static struct channel *wallet_stmt2channel(struct wallet *w, struct db_stmt *stm
 
 	/* last_tx is null for stub channels used for recovering funds through
 	 * Static channel backups. */
-	if (!db_col_is_null(stmt, "last_tx"))
+	if (!db_col_is_null(stmt, "last_tx")) {
 		last_tx = db_col_psbt_to_tx(tmpctx, stmt, "last_tx");
-	else
+		if (!last_tx)
+			db_fatal("Failed to decode channel %s psbt %s",
+				 type_to_string(tmpctx, struct channel_id, &cid),
+				 tal_hex(tmpctx, db_col_arr(tmpctx, stmt,
+							    "last_tx", u8)));
+	} else
 		last_tx = NULL;
 
 	chan = new_channel(peer, db_col_u64(stmt, "id"),
@@ -3285,24 +3294,30 @@ u64 wallet_payment_get_groupid(struct wallet *wallet,
 
 void wallet_payment_delete(struct wallet *wallet,
 			   const struct sha256 *payment_hash,
-			   const u64 *groupid,
-			   const u64 *partid)
+			   const u64 *groupid, const u64 *partid,
+			   const enum wallet_payment_status *status)
 {
 	struct db_stmt *stmt;
+
+	assert(status);
 	if (groupid) {
 		assert(partid);
 		stmt = db_prepare_v2(wallet->db,
 				     SQL("DELETE FROM payments"
 					 " WHERE payment_hash = ?"
 					 "   AND groupid = ?"
-					 "   AND partid = ?"));
+					 "   AND partid = ?"
+					 "   AND status = ?"));
 		db_bind_u64(stmt, 1, *groupid);
 		db_bind_u64(stmt, 2, *partid);
+		db_bind_u64(stmt, 3, *status);
 	} else {
 		assert(!partid);
 		stmt = db_prepare_v2(wallet->db,
 				     SQL("DELETE FROM payments"
-					 " WHERE payment_hash = ?"));
+					 " WHERE payment_hash = ?"
+					 "     AND status = ?"));
+		db_bind_u64(stmt, 1, *status);
 	}
 	db_bind_sha256(stmt, 0, payment_hash);
 	db_exec_prepared_v2(take(stmt));

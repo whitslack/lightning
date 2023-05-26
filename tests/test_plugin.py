@@ -1332,13 +1332,13 @@ def test_forward_event_notification(node_factory, bitcoind, executor):
     l2.daemon.wait_for_log(' to ONCHAIN')
     l5.daemon.wait_for_log(' to ONCHAIN')
 
-    l2.daemon.wait_for_log('Propose handling THEIR_UNILATERAL/OUR_HTLC by OUR_HTLC_TIMEOUT_TO_US .* after 6 blocks')
-    bitcoind.generate_block(6)
+    _, txid, blocks = l2.wait_for_onchaind_tx('OUR_HTLC_TIMEOUT_TO_US',
+                                              'THEIR_UNILATERAL/OUR_HTLC')
+    assert blocks == 5
+    bitcoind.generate_block(5)
 
-    l2.wait_for_onchaind_broadcast('OUR_HTLC_TIMEOUT_TO_US',
-                                   'THEIR_UNILATERAL/OUR_HTLC')
-
-    bitcoind.generate_block(1)
+    # Could be RBF!
+    l2.mine_txid_or_rbf(txid)
     l2.daemon.wait_for_log('Resolved THEIR_UNILATERAL/OUR_HTLC by our proposal OUR_HTLC_TIMEOUT_TO_US')
     l5.daemon.wait_for_log('Ignoring output.*: OUR_UNILATERAL/THEIR_HTLC')
 
@@ -1744,10 +1744,8 @@ def test_bcli(node_factory, bitcoind, chainparams):
 
     # Failure case of feerate is tested in test_misc.py
     estimates = l1.rpc.call("estimatefees")
-    for est in ["opening", "mutual_close", "unilateral_close", "delayed_to_us",
-                "htlc_resolution", "penalty", "min_acceptable",
-                "max_acceptable"]:
-        assert est in estimates
+    assert 'feerate_floor' in estimates
+    assert [f['blocks'] for f in estimates['feerates']] == [2, 6, 12, 100]
 
     resp = l1.rpc.call("getchaininfo")
     assert resp["chain"] == chainparams['name']
@@ -2943,6 +2941,124 @@ def test_commando_rune(node_factory):
                              'rune': rune['rune'],
                              'method': cmd,
                              'params': params})
+
+
+def test_commando_listrunes(node_factory):
+    l1 = node_factory.get_node()
+    rune = l1.rpc.commando_rune()
+    assert rune == {
+        'rune': 'OSqc7ixY6F-gjcigBfxtzKUI54uzgFSA6YfBQoWGDV89MA==',
+        'unique_id': '0',
+        'warning_unrestricted_rune': 'WARNING: This rune has no restrictions! Anyone who has access to this rune could drain funds from your node. Be careful when giving this to apps that you don\'t trust. Consider using the restrictions parameter to only allow access to specific rpc methods.'
+    }
+    listrunes = l1.rpc.commando_listrunes()
+    assert len(l1.rpc.commando_listrunes()) == 1
+    rune = l1.rpc.commando_rune()
+    listrunes = l1.rpc.commando_listrunes()
+    assert len(listrunes['runes']) == 2
+    assert listrunes == {
+        'runes': [
+            {
+                'rune': 'OSqc7ixY6F-gjcigBfxtzKUI54uzgFSA6YfBQoWGDV89MA==',
+                'unique_id': '0',
+                'restrictions': [],
+                'restrictions_as_english': ''
+            },
+            {
+                'rune': 'geZmO6U7yqpHn-moaX93FVMVWrDRfSNY4AXx9ypLcqg9MQ==',
+                'unique_id': '1',
+                'restrictions': [],
+                'restrictions_as_english': ''
+            }
+        ]
+    }
+    our_unstored_rune = l1.rpc.commando_listrunes(rune='M8f4jNx9gSP2QoiRbr10ybwzFxUgd-rS4CR4yofMSuA9Mg==')['runes'][0]
+    assert our_unstored_rune['stored'] is False
+
+    not_our_rune = l1.rpc.commando_listrunes(rune='Am3W_wI0PRn4qVNEsJ2iInHyFPQK8wfdqEXztm8-icQ9MA==')['runes'][0]
+    assert not_our_rune['stored'] is False
+    assert not_our_rune['our_rune'] is False
+
+
+def test_commando_blacklist(node_factory):
+    l1, l2 = node_factory.get_nodes(2)
+
+    l2.connect(l1)
+    rune0 = l1.rpc.commando_rune()
+    assert rune0['unique_id'] == '0'
+    rune1 = l1.rpc.commando_rune()
+    assert rune1['unique_id'] == '1'
+
+    # Make sure runes work!
+    assert l2.rpc.call(method='commando',
+                       payload={'peer_id': l1.info['id'],
+                                'rune': rune0['rune'],
+                                'method': 'getinfo',
+                                'params': []})['id'] == l1.info['id']
+
+    assert l2.rpc.call(method='commando',
+                       payload={'peer_id': l1.info['id'],
+                                'rune': rune1['rune'],
+                                'method': 'getinfo',
+                                'params': []})['id'] == l1.info['id']
+
+    blacklist = l1.rpc.commando_blacklist(start=1)
+    assert blacklist == {'blacklist': [{'start': 1, 'end': 1}]}
+
+    # Make sure rune id 1 does not work!
+    with pytest.raises(RpcError, match='Not authorized: Blacklisted rune'):
+        assert l2.rpc.call(method='commando',
+                           payload={'peer_id': l1.info['id'],
+                                    'rune': rune1['rune'],
+                                    'method': 'getinfo',
+                                    'params': []})['id'] == l1.info['id']
+
+    # But, other rune still works!
+    assert l2.rpc.call(method='commando',
+                       payload={'peer_id': l1.info['id'],
+                                'rune': rune0['rune'],
+                                'method': 'getinfo',
+                                'params': []})['id'] == l1.info['id']
+
+    blacklist = l1.rpc.commando_blacklist(start=2)
+    assert blacklist == {'blacklist': [{'start': 1, 'end': 2}]}
+
+    blacklist = l1.rpc.commando_blacklist(start=6)
+    assert blacklist == {'blacklist': [{'start': 1, 'end': 2},
+                                       {'start': 6, 'end': 6}]}
+
+    blacklist = l1.rpc.commando_blacklist(start=3, end=5)
+    assert blacklist == {'blacklist': [{'start': 1, 'end': 6}]}
+
+    blacklist = l1.rpc.commando_blacklist(start=9)
+    assert blacklist == {'blacklist': [{'start': 1, 'end': 6},
+                                       {'start': 9, 'end': 9}]}
+
+    blacklist = l1.rpc.commando_blacklist(start=0)
+    assert blacklist == {'blacklist': [{'start': 0, 'end': 6},
+                                       {'start': 9, 'end': 9}]}
+
+    # Now both runes fail!
+    with pytest.raises(RpcError, match='Not authorized: Blacklisted rune'):
+        assert l2.rpc.call(method='commando',
+                           payload={'peer_id': l1.info['id'],
+                                    'rune': rune0['rune'],
+                                    'method': 'getinfo',
+                                    'params': []})['id'] == l1.info['id']
+
+    with pytest.raises(RpcError, match='Not authorized: Blacklisted rune'):
+        assert l2.rpc.call(method='commando',
+                           payload={'peer_id': l1.info['id'],
+                                    'rune': rune1['rune'],
+                                    'method': 'getinfo',
+                                    'params': []})['id'] == l1.info['id']
+
+    blacklist = l1.rpc.commando_blacklist()
+    assert blacklist == {'blacklist': [{'start': 0, 'end': 6},
+                                       {'start': 9, 'end': 9}]}
+
+    blacklisted_rune = l1.rpc.commando_listrunes(rune='geZmO6U7yqpHn-moaX93FVMVWrDRfSNY4AXx9ypLcqg9MQ==')['runes'][0]['blacklisted']
+    assert blacklisted_rune is True
 
 
 def test_commando_stress(node_factory, executor):

@@ -131,7 +131,7 @@ message ListpeersResponse {
 message ListpeersPeers {
 	bytes id = 1;
 	bool connected = 2;
-	uint32 num_channels = 8;
+	optional uint32 num_channels = 8;
 	repeated ListpeersPeersLog log = 3;
 	repeated ListpeersPeersChannels channels = 4;
 	repeated string netaddr = 5;
@@ -303,7 +303,7 @@ message ListfundsChannels {
 	uint32 funding_output = 5;
 	bool connected = 6;
 	ChannelState state = 7;
-	bytes channel_id = 9;
+	optional bytes channel_id = 9;
 	optional string short_channel_id = 8;
 }
 
@@ -1130,6 +1130,8 @@ message FeeratesResponse {
 message FeeratesPerkb {
 	uint32 min_acceptable = 1;
 	uint32 max_acceptable = 2;
+	optional uint32 floor = 10;
+	repeated FeeratesPerkbEstimates estimates = 9;
 	optional uint32 opening = 3;
 	optional uint32 mutual_close = 4;
 	optional uint32 unilateral_close = 5;
@@ -1138,15 +1140,29 @@ message FeeratesPerkb {
 	optional uint32 penalty = 8;
 }
 
+message FeeratesPerkbEstimates {
+	optional uint32 blockcount = 1;
+	optional uint32 feerate = 2;
+	optional uint32 smoothed_feerate = 3;
+}
+
 message FeeratesPerkw {
 	uint32 min_acceptable = 1;
 	uint32 max_acceptable = 2;
+	optional uint32 floor = 10;
+	repeated FeeratesPerkwEstimates estimates = 9;
 	optional uint32 opening = 3;
 	optional uint32 mutual_close = 4;
 	optional uint32 unilateral_close = 5;
 	optional uint32 delayed_to_us = 6;
 	optional uint32 htlc_resolution = 7;
 	optional uint32 penalty = 8;
+}
+
+message FeeratesPerkwEstimates {
+	optional uint32 blockcount = 1;
+	optional uint32 feerate = 2;
+	optional uint32 smoothed_feerate = 3;
 }
 
 message FeeratesOnchain_fee_estimates {

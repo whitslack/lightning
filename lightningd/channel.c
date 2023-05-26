@@ -12,13 +12,13 @@
 #include <lightningd/channel.h>
 #include <lightningd/channel_state_names_gen.h>
 #include <lightningd/connect_control.h>
+#include <lightningd/hsm_control.h>
 #include <lightningd/notification.h>
 #include <lightningd/opening_common.h>
 #include <lightningd/peer_control.h>
 #include <lightningd/subd.h>
 #include <wallet/txfilter.h>
 #include <wire/peer_wire.h>
-#include <wire/wire_sync.h>
 
 void channel_set_owner(struct channel *channel, struct subd *owner)
 {
@@ -103,14 +103,11 @@ void get_channel_basepoints(struct lightningd *ld,
 			    struct basepoints *local_basepoints,
 			    struct pubkey *local_funding_pubkey)
 {
-	u8 *msg;
+	const u8 *msg;
 
 	assert(dbid != 0);
 	msg = towire_hsmd_get_channel_basepoints(NULL, peer_id, dbid);
-	if (!wire_sync_write(ld->hsm_fd, take(msg)))
-		fatal("Could not write to HSM: %s", strerror(errno));
-
-	msg = wire_sync_read(tmpctx, ld->hsm_fd);
+	msg = hsm_sync_req(tmpctx, ld, take(msg));
 	if (!fromwire_hsmd_get_channel_basepoints_reply(msg, local_basepoints,
 						       local_funding_pubkey))
 		fatal("HSM gave bad hsm_get_channel_basepoints_reply %s",
@@ -199,7 +196,7 @@ struct channel *new_unsaved_channel(struct peer *peer,
 {
 	struct lightningd *ld = peer->ld;
 	struct channel *channel = tal(ld, struct channel);
-	u8 *msg;
+	const u8 *msg;
 
 	channel->peer = peer;
 	/* Not saved to the database yet! */
@@ -248,6 +245,7 @@ struct channel *new_unsaved_channel(struct peer *peer,
 	channel->old_feerate_timeout.ts.tv_nsec = 0;
 	/* closer not yet known */
 	channel->closer = NUM_SIDES;
+	channel->close_blockheight = NULL;
 
 	/* BOLT-7b04b1461739c5036add61782d58ac490842d98b #9
 	 * | 222/223 | `option_dual_fund`
@@ -265,9 +263,7 @@ struct channel *new_unsaved_channel(struct peer *peer,
 	shachain_init(&channel->their_shachain.chain);
 
 	msg = towire_hsmd_new_channel(NULL, &peer->id, channel->unsaved_dbid);
-	if (!wire_sync_write(ld->hsm_fd, take(msg)))
-		fatal("Could not write to HSM: %s", strerror(errno));
-	msg = wire_sync_read(tmpctx, ld->hsm_fd);
+	msg = hsm_sync_req(tmpctx, ld, take(msg));
 	if (!fromwire_hsmd_new_channel_reply(msg))
 		fatal("HSM gave bad hsm_new_channel_reply %s",
 		      tal_hex(msg, msg));
@@ -523,6 +519,7 @@ struct channel *new_channel(struct peer *peer, u64 dbid,
 	list_head_init(&channel->inflights);
 
 	channel->closer = closer;
+	channel->close_blockheight = NULL;
 	channel->state_change_cause = reason;
 
 	/* Make sure we see any spends using this key */
@@ -617,7 +614,7 @@ struct channel *any_channel_by_scid(struct lightningd *ld,
 	     p;
 	     p = peer_node_id_map_next(ld->peers, &it)) {
 		list_for_each(&p->channels, chan, list) {
-			/* BOLT-channel-type #2:
+			/* BOLT #2:
 			 * - MUST always recognize the `alias` as a
 			 *   `short_channel_id` for incoming HTLCs to this
 			 *   channel.
@@ -625,7 +622,7 @@ struct channel *any_channel_by_scid(struct lightningd *ld,
 			if (chan->alias[LOCAL] &&
 			    short_channel_id_eq(scid, chan->alias[LOCAL]))
 				return chan;
-			/* BOLT-channel-type #2:
+			/* BOLT #2:
 			 * - if `channel_type` has `option_scid_alias` set:
 			 *   - MUST NOT allow incoming HTLCs to this channel
 			 *     using the real `short_channel_id`
@@ -963,6 +960,10 @@ void channel_set_billboard(struct channel *channel, bool perm, const char *str)
 
 static void channel_err(struct channel *channel, const char *why)
 {
+	/* Nothing to do if channel isn't actually owned! */
+	if (!channel->owner)
+		return;
+
 	log_info(channel->log, "Peer transient failure in %s: %s",
 		 channel_state_name(channel), why);
 

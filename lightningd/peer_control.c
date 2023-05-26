@@ -224,12 +224,13 @@ static void sign_last_tx(struct channel *channel,
 {
 	struct lightningd *ld = channel->peer->ld;
 	struct bitcoin_signature sig;
-	u8 *msg, **witness;
+	const u8 *msg;
+	u8 **witness;
 
 	u64 commit_index = channel->next_index[LOCAL] - 1;
 
 	assert(!last_tx->wtx->inputs[0].witness);
-	msg = towire_hsmd_sign_commitment_tx(tmpctx,
+	msg = towire_hsmd_sign_commitment_tx(NULL,
 					     &channel->peer->id,
 					     channel->dbid,
 					     last_tx,
@@ -237,10 +238,7 @@ static void sign_last_tx(struct channel *channel,
 					     .remote_fundingkey,
 					     commit_index);
 
-	if (!wire_sync_write(ld->hsm_fd, take(msg)))
-		fatal("Could not write to HSM: %s", strerror(errno));
-
-	msg = wire_sync_read(tmpctx, ld->hsm_fd);
+	msg = hsm_sync_req(tmpctx, ld, take(msg));
 	if (!fromwire_hsmd_sign_commitment_tx_reply(msg, &sig))
 		fatal("HSM gave bad sign_commitment_tx_reply %s",
 		      tal_hex(tmpctx, msg));
@@ -284,7 +282,8 @@ static void sign_and_send_last(struct lightningd *ld,
 
 	/* Keep broadcasting until we say stop (can fail due to dup,
 	 * if they beat us to the broadcast). */
-	broadcast_tx(ld->topology, channel, last_tx, cmd_id, false, NULL);
+	broadcast_tx(ld->topology, channel, last_tx, cmd_id, false, 0, NULL,
+		     NULL, NULL);
 
 	remove_sig(last_tx);
 }
@@ -867,6 +866,8 @@ static void json_add_channel(struct lightningd *ld,
 		json_add_string(response, NULL, "option_anchor_outputs");
 	if (channel_has(channel, OPT_ZEROCONF))
 		json_add_string(response, NULL, "option_zeroconf");
+	if (channel_has(channel, OPT_SCID_ALIAS))
+		json_add_string(response, NULL, "option_scid_alias");
 	json_array_end(response);
 
 	if (!amount_sat_sub(&peer_funded_sats, channel->funding_sats,

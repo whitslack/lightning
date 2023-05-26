@@ -10,6 +10,7 @@
 #include <common/node_id.h>
 #include <common/pseudorand.h>
 #include <common/wireaddr.h>
+#include <connectd/handshake.h>
 
 struct io_conn;
 struct connecting;
@@ -44,6 +45,9 @@ enum pong_expect_type {
 struct peer {
 	/* Main daemon */
 	struct daemon *daemon;
+
+	/* Are we connected via a websocket? */
+	enum is_websocket is_websocket;
 
 	/* The pubkey of the node */
 	struct node_id id;
@@ -197,6 +201,8 @@ struct daemon {
 	bool dev_no_ping_timer;
 	/* Hack to no longer send gossip */
 	bool dev_suppress_gossip;
+	/* dev_disconnect file */
+	int dev_disconnect_fd;
 #endif
 };
 
@@ -214,6 +220,7 @@ struct io_plan *peer_connected(struct io_conn *conn,
 			       const struct wireaddr *remote_addr,
 			       struct crypto_state *cs,
 			       const u8 *their_features TAKES,
+			       enum is_websocket is_websocket,
 			       bool incoming);
 
 /* Removes peer from hash table, tells gossipd and lightningd. */

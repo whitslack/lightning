@@ -244,17 +244,21 @@ static bool inputs_sufficient(struct amount_sat input,
 	return false;
 }
 
-static struct wally_psbt *psbt_using_utxos(const tal_t *ctx,
-					   struct wallet *wallet,
-					   struct utxo **utxos,
-					   u32 nlocktime,
-					   u32 nsequence)
+struct wally_psbt *psbt_using_utxos(const tal_t *ctx,
+				    struct wallet *wallet,
+				    struct utxo **utxos,
+				    u32 nlocktime,
+				    u32 nsequence,
+				    struct wally_psbt *base)
 {
 	struct pubkey key;
 	u8 *scriptSig, *scriptPubkey, *redeemscript;
 	struct wally_psbt *psbt;
 
-	psbt = create_psbt(ctx, tal_count(utxos), 0, nlocktime);
+	if (base)
+		psbt = base;
+	else
+		psbt = create_psbt(ctx, tal_count(utxos), 0, nlocktime);
 
 	for (size_t i = 0; i < tal_count(utxos); i++) {
 		u32 this_nsequence;
@@ -338,26 +342,14 @@ static struct command_result *finish_psbt(struct command *cmd,
 	size_t change_outnum COMPILER_WANTS_INIT("gcc 9.4.0 -Og");
 	u32 current_height = get_block_height(cmd->ld->topology);
 
-	/* Setting the locktime to the next block to be mined has multiple
-	 * benefits:
-	 * - anti fee-snipping (even if not yet likely)
-	 * - less distinguishable transactions (with this we create
-	 *   general-purpose transactions which looks like bitcoind:
-	 *   native segwit, nlocktime set to tip, and sequence set to
-	 *   0xFFFFFFFD by default. Other wallets are likely to implement
-	 *   this too).
-	 */
 	if (!locktime) {
 		locktime = tal(cmd, u32);
-		*locktime = current_height;
-
-		/* Eventually fuzz it too. */
-		if (*locktime > 100 && pseudorand(10) == 0)
-			*locktime -= pseudorand(100);
+		*locktime = default_locktime(cmd->ld->topology);
 	}
 
 	psbt = psbt_using_utxos(cmd, cmd->ld->wallet, utxos,
-				*locktime, BITCOIN_TX_RBF_SEQUENCE);
+				*locktime, BITCOIN_TX_RBF_SEQUENCE,
+				NULL);
 
 	/* Should we add a change output for the excess? */
 	if (excess_as_change) {
