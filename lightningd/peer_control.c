@@ -130,7 +130,7 @@ static void delete_peer(struct peer *peer)
 	/* If it only ever existed because of uncommitted channel, it won't
 	 * be in the database */
 	if (peer->dbid != 0)
-		wallet_peer_delete(peer->ld->wallet, peer->dbid);
+		wallet_delete_peer_if_unused(peer->ld->wallet, peer->dbid);
 	tal_free(peer);
 }
 
@@ -142,7 +142,7 @@ void maybe_delete_peer(struct peer *peer)
 	if (peer->uncommitted_channel) {
 		/* This isn't sufficient to keep it in db! */
 		if (peer->dbid != 0) {
-			wallet_peer_delete(peer->ld->wallet, peer->dbid);
+			wallet_delete_peer_if_unused(peer->ld->wallet, peer->dbid);
 			peer_dbid_map_del(peer->ld->peers_by_dbid, peer);
 			peer->dbid = 0;
 		}
@@ -692,6 +692,29 @@ struct amount_msat channel_amount_receivable(const struct channel *channel)
 	return receivable;
 }
 
+void json_add_channel_type(struct json_stream *response,
+			   const char *fieldname,
+			   const struct channel_type *channel_type)
+{
+	const char **fnames;
+
+	json_object_start(response, fieldname);
+	json_array_start(response, "bits");
+	for (size_t i = 0; i < tal_bytelen(channel_type->features) * CHAR_BIT; i++) {
+		if (!feature_is_set(channel_type->features, i))
+			continue;
+		json_add_u64(response, NULL, i);
+	}
+	json_array_end(response);
+
+	json_array_start(response, "names");
+	fnames = channel_type_name(tmpctx, channel_type);
+	for (size_t i = 0; i < tal_count(fnames); i++)
+		json_add_string(response, NULL, fnames[i]);
+	json_array_end(response);
+	json_object_end(response);
+}
+
 static void json_add_channel(struct lightningd *ld,
 			     struct json_stream *response, const char *key,
 			     const struct channel *channel,
@@ -708,6 +731,7 @@ static void json_add_channel(struct lightningd *ld,
 	if (peer) {
 		json_add_node_id(response, "peer_id", &peer->id);
 		json_add_bool(response, "peer_connected", peer->connected == PEER_CONNECTED);
+		json_add_channel_type(response, "channel_type", channel->type);
 	}
 	json_add_string(response, "state", channel_state_name(channel));
 	if (channel->last_tx && !invalid_last_tx(channel->last_tx)) {

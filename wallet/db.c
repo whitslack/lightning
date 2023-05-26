@@ -96,6 +96,8 @@ static struct migration dbmigrations[] = {
      NULL},
     {SQL("CREATE TABLE channels ("
 	 "  id BIGSERIAL," /* chan->id */
+	 /* FIXME: We deliberately never delete a peer with channels, so this constraint is
+	  * unnecessary! */
 	 "  peer_id BIGINT REFERENCES peers(id) ON DELETE CASCADE,"
 	 "  short_channel_id TEXT,"
 	 "  channel_config_local BIGINT,"
@@ -1099,11 +1101,7 @@ void fillin_missing_scriptpubkeys(struct lightningd *ld, struct db *db)
 
 			channel_id = db_col_u64(stmt, "channel_id");
 			db_col_node_id(stmt, "peer_id", &peer_id);
-			if (!db_col_is_null(stmt, "commitment_point")) {
-				commitment_point = tal(stmt, struct pubkey);
-				db_col_pubkey(stmt, "commitment_point", commitment_point);
-			} else
-				commitment_point = NULL;
+			commitment_point = db_col_optional(stmt, stmt, "commitment_point", pubkey);
 
 			/* Have to go ask the HSM to derive the pubkey for us */
 			msg = towire_hsmd_get_output_scriptpubkey(NULL,
@@ -1483,7 +1481,7 @@ static void migrate_channels_scids_as_integers(struct lightningd *ld,
 		stmt = db_prepare_v2(db, SQL("UPDATE channels"
 					     " SET scid = ?"
 					     " WHERE short_channel_id = ?"));
-		db_bind_scid(stmt, 0, &scid);
+		db_bind_short_channel_id(stmt, 0, &scid);
 		db_bind_text(stmt, 1, scids[i]);
 		db_exec_prepared_v2(stmt);
 
@@ -1538,7 +1536,7 @@ static void migrate_payments_scids_as_integers(struct lightningd *ld,
 		update_stmt = db_prepare_v2(db, SQL("UPDATE payments SET"
 						    " failscid = ?"
 						    " WHERE id = ?"));
-		db_bind_scid(update_stmt, 0, &scid);
+		db_bind_short_channel_id(update_stmt, 0, &scid);
 		db_bind_u64(update_stmt, 1, db_col_u64(stmt, "id"));
 		db_exec_prepared_v2(update_stmt);
 		tal_free(update_stmt);

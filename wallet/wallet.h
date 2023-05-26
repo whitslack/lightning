@@ -630,9 +630,9 @@ struct state_change_entry *wallet_state_change_get(struct wallet *w,
 						   u64 channel_id);
 
 /**
- * wallet_peer_delete -- After no more channels in peer, forget about it
+ * wallet_delete_peer_if_unused -- After no more channels in peer, forget about it
  */
-void wallet_peer_delete(struct wallet *w, u64 peer_dbid);
+void wallet_delete_peer_if_unused(struct wallet *w, u64 peer_dbid);
 
 /**
  * wallet_init_channels -- Loads active channels into peers
@@ -644,6 +644,16 @@ void wallet_peer_delete(struct wallet *w, u64 peer_dbid);
  * loaded from the database to the list without checking.
  */
 bool wallet_init_channels(struct wallet *w);
+
+/**
+ * wallet_load_closed_channels -- Loads dead channels.
+ * @ctx: context to allocate returned array from
+ * @w: wallet to load from
+ *
+ * These will be all state CLOSED.
+ */
+struct closed_channel **wallet_load_closed_channels(const tal_t *ctx,
+						    struct wallet *w);
 
 /**
  * wallet_channel_stats_incr_* - Increase channel statistics.
