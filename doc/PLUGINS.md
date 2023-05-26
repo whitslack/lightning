@@ -1257,8 +1257,7 @@ the v2 protocol, and it has passed basic sanity checks:
     "channel_max_msat": 16777215000,
     "requested_lease_msat": 100000000,
     "lease_blockheight_start": 683990,
-    "node_blockheight": 683990,
-    "require_confirmed_inputs": false
+    "node_blockheight": 683990
   }
 }
 ```
@@ -1390,7 +1389,6 @@ requests an RBF for a channel funding transaction.
     "channel_max_msat": 16777215000,
     "locktime": 2453,
     "requested_lease_msat": 100000000,
-    "require_confirmed_inputs": false
   }
 }
 ```
