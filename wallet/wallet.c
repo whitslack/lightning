@@ -4620,6 +4620,8 @@ const struct forwarding *wallet_forwarded_payments_get(struct wallet *w,
 			cur->fee =  AMOUNT_MSAT(0);
 		}
 
+		/* FIXME: This now requires complex join to determine! */
+		cur->payment_hash = NULL;
 		db_col_scid(stmt, "in_channel_scid", &cur->channel_in);
 		cur->htlc_id_in = db_col_u64(stmt, "in_htlc_id");
 

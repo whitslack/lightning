@@ -2686,6 +2686,8 @@ pub mod responses {
 	    pub out_channel: Option<ShortChannelId>,
 	    #[serde(alias = "out_htlc_id", skip_serializing_if = "Option::is_none")]
 	    pub out_htlc_id: Option<u64>,
+	    #[serde(alias = "payment_hash", skip_serializing_if = "Option::is_none")]
+	    pub payment_hash: Option<String>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub style: Option<ListforwardsForwardsStyle>,
 	    #[serde(alias = "fee_msat", skip_serializing_if = "Option::is_none")]

@@ -56,6 +56,12 @@
             "type": "u64",
             "description": "the unique HTLC id we gave this when sending"
           },
+          "payment_hash": {
+            "type": "hex",
+            "description": "payment hash sought by HTLC",
+            "maxLength": 64,
+            "minLength": 64
+          },
           "style": {
             "type": "string",
             "enum": [
@@ -91,6 +97,7 @@
                 "resolved_time": {},
                 "out_channel": {},
                 "out_htlc_id": {},
+                "payment_hash": {},
                 "failcode": {},
                 "failreason": {},
                 "fee": {
@@ -121,6 +128,7 @@
                 "style": {},
                 "received_time": {},
                 "resolved_time": {},
+                "payment_hash": {},
                 "failcode": {},
                 "failreason": {},
                 "out_channel": {}
@@ -154,6 +162,7 @@
                 "received_time": {},
                 "out_channel": {},
                 "out_htlc_id": {},
+                "payment_hash": {},
                 "fee": {},
                 "fee_msat": {},
                 "out_msatoshi": {},
@@ -178,6 +187,7 @@
                 "received_time": {},
                 "out_channel": {},
                 "out_htlc_id": {},
+                "payment_hash": {},
                 "fee": {},
                 "fee_msat": {},
                 "failcode": {},
@@ -212,6 +222,7 @@
                 "received_time": {},
                 "out_channel": {},
                 "out_htlc_id": {},
+                "payment_hash": {},
                 "fee": {},
                 "fee_msat": {},
                 "out_msatoshi": {},
@@ -240,6 +251,7 @@
                 "received_time": {},
                 "out_channel": {},
                 "out_htlc_id": {},
+                "payment_hash": {},
                 "fee": {},
                 "fee_msat": {},
                 "out_msatoshi": {},

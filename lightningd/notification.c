@@ -329,6 +329,7 @@ static void forward_event_notification_serialize(struct json_stream *stream,
 		cur->fee = AMOUNT_MSAT(0);
 	}
 	cur->htlc_id_out = NULL;
+	cur->payment_hash = tal_dup(cur, struct sha256, &in->payment_hash);
 	cur->status = state;
 	cur->failcode = failcode;
 	cur->received_time = in->received_time;

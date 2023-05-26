@@ -2840,7 +2840,7 @@ static void listforwardings_add_forwardings(struct json_stream *response,
 	json_array_start(response, "forwards");
 	for (size_t i=0; i<tal_count(forwardings); i++) {
 		const struct forwarding *cur = &forwardings[i];
-		json_add_forwarding_object(response, NULL, cur, NULL);
+		json_add_forwarding_object(response, NULL, cur, cur->payment_hash);
 	}
 	json_array_end(response);
 

@@ -808,6 +808,7 @@ def listforwards_forwards2py(m):
         "received_time": m.received_time,  # PrimitiveField in generate_composite
         "out_channel": m.out_channel,  # PrimitiveField in generate_composite
         "out_htlc_id": m.out_htlc_id,  # PrimitiveField in generate_composite
+        "payment_hash": hexlify(m.payment_hash),  # PrimitiveField in generate_composite
         "style": str(m.style),  # EnumField in generate_composite
         "fee_msat": amount2msat(m.fee_msat),  # PrimitiveField in generate_composite
         "out_msat": amount2msat(m.out_msat),  # PrimitiveField in generate_composite

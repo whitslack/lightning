@@ -31,6 +31,7 @@ On success, an object containing **forwards** is returned.  It is an array of ob
 - **received\_time** (number): the UNIX timestamp when this was received
 - **out\_channel** (short\_channel\_id, optional): the channel that the HTLC (trying to) forward to
 - **out\_htlc\_id** (u64, optional): the unique HTLC id we gave this when sending
+- **payment\_hash** (hex, optional): payment hash sought by HTLC (always 64 characters)
 - **style** (string, optional): Either a legacy onion format or a modern tlv format (one of "legacy", "tlv")
 
 If **out\_msat** is present:
@@ -64,4 +65,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:5b2da52b7f3a28563d0103d3853b9d8f717dc41a9e9c6b395ff19f1b975ca5fd)
+[comment]: # ( SHA256STAMP:e47c6ea912156d07bc628e86fe271c4e8395d73dae670fde69e6621275f24c79)
