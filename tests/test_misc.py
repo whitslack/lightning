@@ -436,7 +436,7 @@ def test_htlc_in_timeout(node_factory, bitcoind, executor):
     l2.daemon.wait_for_log('onchaind complete, forgetting peer')
 
 
-@unittest.skipIf(not TEST_NETWORK == 'regtest', 'must be on bitcoin network')
+@unittest.skipIf(TEST_NETWORK == 'liquid-regtest', 'must be on bitcoin network')
 @pytest.mark.developer("needs DEVELOPER=1")
 def test_bech32_funding(node_factory, chainparams):
     # Don't get any funds from previous runs.
