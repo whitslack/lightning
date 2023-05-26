@@ -185,7 +185,7 @@ struct rbf_channel_payload {
 	struct amount_sat our_last_funding;
 	u32 funding_feerate_per_kw;
 	u32 locktime;
-	bool req_confirmed_ins_remote;
+	bool req_confirmed_ins;
 
 	/* General info */
 	u32 feerate_our_max;
@@ -230,7 +230,7 @@ static void rbf_channel_hook_serialize(struct rbf_channel_payload *payload,
 		json_add_amount_sat_msat(stream, "requested_lease_msat",
 					 *payload->requested_lease_amt);
 	json_add_bool(stream, "require_confirmed_inputs",
-		      payload->req_confirmed_ins_remote);
+		      payload->req_confirmed_ins);
 	json_object_end(stream);
 }
 
@@ -273,7 +273,7 @@ struct openchannel2_payload {
 	struct amount_sat *requested_lease_amt;
 	u32 lease_blockheight_start;
 	u32 node_blockheight;
-	bool req_confirmed_ins_remote;
+	bool req_confirmed_ins;
 
 	struct amount_sat accepter_funding;
 	struct wally_psbt *psbt;
@@ -324,7 +324,7 @@ static void openchannel2_hook_serialize(struct openchannel2_payload *payload,
 			     payload->node_blockheight);
 	}
 	json_add_bool(stream, "require_confirmed_inputs",
-		      payload->req_confirmed_ins_remote);
+		      payload->req_confirmed_ins);
 	json_object_end(stream);
 }
 
@@ -346,7 +346,7 @@ openchannel2_changed_hook_serialize(struct openchannel2_psbt_payload *payload,
 			type_to_string(tmpctx, struct channel_id,
 				       &payload->channel->cid));
 	json_add_bool(stream, "require_confirmed_inputs",
-		      payload->channel->req_confirmed_ins[REMOTE]);
+		      payload->channel->req_confirmed_ins);
 	json_object_end(stream);
 }
 
@@ -700,8 +700,7 @@ openchannel2_hook_cb(struct openchannel2_payload *payload STEALS)
 	channel->cid = payload->channel_id;
 	channel->opener = REMOTE;
 	channel->open_attempt = new_channel_open_attempt(channel);
-	channel->req_confirmed_ins[REMOTE] =
-		payload->req_confirmed_ins_remote;
+	channel->req_confirmed_ins = payload->req_confirmed_ins;
 	msg = towire_dualopend_got_offer_reply(NULL,
 					       payload->accepter_funding,
 					       payload->psbt,
@@ -1253,8 +1252,6 @@ wallet_commit_channel(struct lightningd *ld,
 	channel->push = lease_fee_msat;
 	channel->msat_to_us_min = our_msat;
 	channel->msat_to_us_max = our_msat;
-	channel->req_confirmed_ins[LOCAL] =
-		ld->config.require_confirmed_inputs;
 
 	channel->last_tx = tal_steal(channel, remote_commit);
 	channel->last_sig = *remote_commit_sig;
@@ -1891,8 +1888,7 @@ static void rbf_got_offer(struct subd *dualopend, const u8 *msg)
 	payload->peer_id = channel->peer->id;
 	payload->feerate_our_max = feerate_max(dualopend->ld, NULL);
 	payload->feerate_our_min = feerate_min(dualopend->ld, NULL);
-	payload->req_confirmed_ins_remote =
-		channel->req_confirmed_ins[REMOTE];
+	payload->req_confirmed_ins = channel->req_confirmed_ins;
 
 	payload->psbt = NULL;
 
@@ -1948,7 +1944,7 @@ static void accepter_got_offer(struct subd *dualopend,
 					  &payload->shutdown_scriptpubkey,
 					  &payload->requested_lease_amt,
 					  &payload->lease_blockheight_start,
-					  &payload->req_confirmed_ins_remote)) {
+					  &payload->req_confirmed_ins)) {
 		channel_internal_error(channel, "Bad DUALOPEND_GOT_OFFER: %s",
 				       tal_hex(tmpctx, msg));
 		return;
@@ -2730,7 +2726,7 @@ static struct command_result *json_openchannel_update(struct command *cmd,
 	pv->success = openchannel_update_valid_psbt;
 	pv->invalid_input = openchannel_invalid_psbt;
 
-	if (channel->req_confirmed_ins[REMOTE]) {
+	if (channel->req_confirmed_ins) {
 		/* We might fail/terminate in validate's first call,
 		 * which expects us to be at "command still pending" */
 		ret = command_still_pending(cmd);
@@ -3058,7 +3054,7 @@ static void handle_psbt_changed(struct subd *dualopend,
 
 	if (!fromwire_dualopend_psbt_changed(tmpctx, msg,
 					     &cid,
-					     &channel->req_confirmed_ins[REMOTE],
+					     &channel->req_confirmed_ins,
 					     &funding_serial,
 					     &psbt)) {
 		channel_internal_error(channel,
@@ -3087,7 +3083,7 @@ static void handle_psbt_changed(struct subd *dualopend,
 		json_add_bool(response, "commitments_secured", false);
 		json_add_u64(response, "funding_serial", funding_serial);
 		json_add_bool(response, "requires_confirmed_inputs",
-			      channel->req_confirmed_ins[REMOTE]);
+			      channel->req_confirmed_ins);
 
 		oa->cmd = NULL;
 		was_pending(command_success(cmd, response));
@@ -3750,8 +3746,7 @@ bool peer_restart_dualopend(struct peer *peer,
 				      amount_sat_zero(inflight->lease_amt) ?
 					      NULL : &inflight->lease_amt,
 				      channel->type,
-				      channel->req_confirmed_ins[LOCAL],
-				      channel->req_confirmed_ins[REMOTE]);
+				      false); /* FIXME: use persisted state? */
 
 	subd_send_msg(channel->owner, take(msg));
 	return true;
