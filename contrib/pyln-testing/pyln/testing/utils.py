@@ -598,7 +598,7 @@ class LightningD(TailableProc):
         self.disconnect_file = None
 
         self.rpcproxy = bitcoindproxy
-        self.env['CLN_PLUGIN_LOG'] = "gl_plugin=trace,gl_rpc=trace,gl_grpc=trace,debug"
+        self.env['CLN_PLUGIN_LOG'] = "cln_plugin=trace,cln_rpc=trace,cln_grpc=trace,debug"
 
         self.opts = LIGHTNINGD_CONFIG.copy()
         opts = {
@@ -850,6 +850,39 @@ class LightningNode(object):
             self.executor,
             jsonschemas=jsonschemas
         )
+
+    @property
+    def grpc(self):
+        """Tiny helper to return a grpc stub if grpc was configured.
+        """
+        # Before doing anything let's see if we have a grpc-port at all
+        try:
+            grpc_port = int(filter(
+                lambda v: v[0] == 'grpc-port',
+                self.daemon.opts.items()
+            ).__next__()[1])
+        except Exception:
+            raise ValueError("grpc-port is not specified, can't connect over grpc")
+
+        import grpc
+        p = Path(self.daemon.lightning_dir) / TEST_NETWORK
+        cert, key, ca = [f.open('rb').read() for f in [
+            p / 'client.pem',
+            p / 'client-key.pem',
+            p / "ca.pem"]]
+        creds = grpc.ssl_channel_credentials(
+            root_certificates=ca,
+            private_key=key,
+            certificate_chain=cert,
+        )
+
+        channel = grpc.secure_channel(
+            f"localhost:{grpc_port}",
+            creds,
+            options=(('grpc.ssl_target_name_override', 'cln'),)
+        )
+        from pyln.testing import node_pb2_grpc as nodegrpc
+        return nodegrpc.NodeStub(channel)
 
     def connect(self, remote_node):
         self.rpc.connect(remote_node.info['id'], '127.0.0.1', remote_node.port)

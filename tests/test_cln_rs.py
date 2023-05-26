@@ -303,27 +303,7 @@ def test_grpc_keysend_routehint(bitcoind, node_factory):
     bitcoind.generate_block(3)
     sync_blockheight(bitcoind, [l1, l2, l3])
 
-    def connect(node):
-        p = Path(node.daemon.lightning_dir) / TEST_NETWORK
-        cert, key, ca = [f.open('rb').read() for f in [
-            p / 'client.pem',
-            p / 'client-key.pem',
-            p / "ca.pem"]]
-
-        creds = grpc.ssl_channel_credentials(
-            root_certificates=ca,
-            private_key=key,
-            certificate_chain=cert,
-        )
-
-        channel = grpc.secure_channel(
-            f"localhost:{grpc_port}",
-            creds,
-            options=(('grpc.ssl_target_name_override', 'cln'),)
-        )
-        return nodegrpc.NodeStub(channel)
-
-    stub = connect(l1)
+    stub = l1.grpc
     chan = l2.rpc.listpeerchannels(l3.info['id'])
 
     routehint = primitivespb.RoutehintList(hints=[
@@ -347,4 +327,57 @@ def test_grpc_keysend_routehint(bitcoind, node_factory):
     )
 
     res = stub.KeySend(call)
+    print(res)
+
+
+def test_grpc_listpeerchannels(bitcoind, node_factory):
+    """ Check that conversions of this rather complex type work.
+    """
+    grpc_port = reserve()
+    l1, l2 = node_factory.line_graph(
+        2,
+        opts=[
+            {"grpc-port": str(grpc_port)}, {}
+        ],
+        announce_channels=True,  # Do not enforce scid-alias
+    )
+
+    stub = l1.grpc
+    res = stub.ListPeerChannels(nodepb.ListpeerchannelsRequest(id=None))
+
+    # Way too many fields to check, so just do a couple
+    assert len(res.channels) == 1
+    c = res.channels[0]
+    assert c.peer_id.hex() == l2.info['id']
+    assert c.state == 2  # CHANNELD_NORMAL
+
+    # And since we're at it let's close the channel as well so we can
+    # see it in listclosedchanenls
+
+    res = stub.Close(nodepb.CloseRequest(id=l2.info['id']))
+
+    bitcoind.generate_block(100, wait_for_mempool=1)
+    l1.daemon.wait_for_log(r'onchaind complete, forgetting peer')
+
+    stub.ListClosedChannels(nodepb.ListclosedchannelsRequest())
+
+
+def test_grpc_decode(node_factory):
+    grpc_port = reserve()
+    l1 = node_factory.get_node(options={'grpc-port': str(grpc_port)})
+    inv = l1.grpc.Invoice(nodepb.InvoiceRequest(
+        amount_msat=primitivespb.AmountOrAny(any=True),
+        description="desc",
+        label="label",
+    ))
+
+    res = l1.grpc.DecodePay(nodepb.DecodepayRequest(
+        bolt11=inv.bolt11
+    ))
+    # If we get here we're good, conversions work
+    print(res)
+
+    res = l1.grpc.Decode(nodepb.DecodeRequest(
+        string=inv.bolt11
+    ))
     print(res)

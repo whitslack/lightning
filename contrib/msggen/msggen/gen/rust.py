@@ -15,21 +15,6 @@ logger = logging.getLogger(__name__)
 # built-in keywords.
 keywords = ["in", "type"]
 
-# Manual overrides for some of the auto-generated types for paths
-# Manual overrides for some of the auto-generated types for paths
-overrides = {
-    'ListPeers.peers[].channels[].state_changes[].old_state': "ChannelState",
-    'ListPeers.peers[].channels[].state_changes[].new_state': "ChannelState",
-    'ListPeers.peers[].channels[].state_changes[].cause': "ChannelStateChangeCause",
-    'ListPeers.peers[].channels[].htlcs[].state': None,
-    'ListPeers.peers[].channels[].opener': "ChannelSide",
-    'ListPeers.peers[].channels[].closer': "ChannelSide",
-    'ListPeers.peers[].channels[].features[]': "string",
-    'ListFunds.channels[].state': 'ChannelState',
-    'ListTransactions.transactions[].type[]': None,
-    'Invoice.exposeprivatechannels': None,
-}
-
 # A map of schema type to rust primitive types.
 typemap = {
     'boolean': 'bool',
@@ -75,6 +60,8 @@ def normalize_varname(field):
 
 
 def gen_field(field):
+    if field.omit():
+        return ("", "")
     if isinstance(field, CompositeField):
         return gen_composite(field)
     elif isinstance(field, EnumField):
@@ -90,7 +77,7 @@ def gen_field(field):
 def gen_enum(e):
     defi, decl = "", ""
 
-    if e.path in overrides and overrides[e.path] is None:
+    if e.omit():
         return "", ""
 
     if e.description != "":
@@ -128,9 +115,9 @@ def gen_enum(e):
 
     typename = e.typename
 
-    if e.path in overrides:
+    if e.override() is not None:
         decl = ""  # No declaration if we have an override
-        typename = overrides[e.path]
+        typename = e.override()
 
     if not e.optional:
         defi = f"    // Path `{e.path}`\n"
@@ -172,9 +159,9 @@ def gen_array(a):
     logger.debug(f"Generating array field {a.name} -> {name} ({a.path})")
     _, decl = gen_field(a.itemtype)
 
-    if a.path in overrides:
+    if a.override():
         decl = ""  # No declaration if we have an override
-        itemtype = overrides[a.path]
+        itemtype = a.override()
     elif isinstance(a.itemtype, PrimitiveField):
         itemtype = a.itemtype.typename
     elif isinstance(a.itemtype, CompositeField):
