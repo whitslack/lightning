@@ -58,10 +58,16 @@ static int compare_outputs_at(const struct output_set *a,
 }
 
 static const u8 *linearize_input(const tal_t *ctx,
-				 const struct wally_psbt_input *in)
+				 const struct wally_psbt_input *in,
+				 const struct wally_tx_input *tx_in)
 {
 	struct wally_psbt *psbt = create_psbt(NULL, 1, 0, 0);
 	size_t byte_len;
+
+	tal_wally_start();
+	if (wally_tx_add_input(psbt->tx, tx_in) != WALLY_OK)
+		abort();
+	tal_wally_end(psbt->tx);
 
 	psbt->inputs[0] = *in;
 	psbt->num_inputs++;
@@ -71,10 +77,11 @@ static const u8 *linearize_input(const tal_t *ctx,
 	wally_map_sort(&psbt->inputs[0].unknowns, 0);
 
 	/* signatures, keypaths, etc - we dont care if they change */
-	wally_psbt_input_set_final_witness(&psbt->inputs[0], NULL);
-	wally_psbt_input_set_final_scriptsig(&psbt->inputs[0], NULL, 0);
-	wally_psbt_input_set_witness_script(&psbt->inputs[0], NULL, 0);
-	wally_psbt_input_set_redeem_script(&psbt->inputs[0], NULL, 0);
+	psbt->inputs[0].final_witness = NULL;
+	psbt->inputs[0].final_scriptsig_len = 0;
+	psbt->inputs[0].witness_script = NULL;
+	psbt->inputs[0].witness_script_len = 0;
+	psbt->inputs[0].redeem_script_len = 0;
 	psbt->inputs[0].keypaths.num_items = 0;
 	psbt->inputs[0].signatures.num_items = 0;
 
@@ -87,15 +94,21 @@ static const u8 *linearize_input(const tal_t *ctx,
 }
 
 static const u8 *linearize_output(const tal_t *ctx,
-				  const struct wally_psbt_output *out)
+				  const struct wally_psbt_output *out,
+				  const struct wally_tx_output *tx_out)
 {
 	struct wally_psbt *psbt = create_psbt(NULL, 1, 1, 0);
 	size_t byte_len;
 	struct bitcoin_outpoint outpoint;
 
-	/* Add a 'fake' non-zero input so libwally will agree to linearize the tx */
-	memset(&outpoint, 1, sizeof(outpoint));
+	/* Add a 'fake' input so this will linearize the tx */
+	memset(&outpoint, 0, sizeof(outpoint));
 	psbt_append_input(psbt, &outpoint, 0, NULL, NULL, NULL);
+
+	tal_wally_start();
+	if (wally_tx_add_output(psbt->tx, tx_out) != WALLY_OK)
+		abort();
+	tal_wally_end(psbt->tx);
 
 	psbt->outputs[0] = *out;
 	psbt->num_outputs++;
@@ -105,8 +118,8 @@ static const u8 *linearize_output(const tal_t *ctx,
 	/* We don't care if the keypaths change */
 	psbt->outputs[0].keypaths.num_items = 0;
 	/* And you can add scripts, no problem */
-	wally_psbt_output_set_witness_script(&psbt->outputs[0], NULL, 0);
-	wally_psbt_output_set_redeem_script(&psbt->outputs[0], NULL, 0);
+	psbt->outputs[0].witness_script_len = 0;
+	psbt->outputs[0].redeem_script_len = 0;
 
 	const u8 *bytes = psbt_get_bytes(ctx, psbt, &byte_len);
 
@@ -122,9 +135,11 @@ static bool input_identical(const struct wally_psbt *a,
 			    size_t b_index)
 {
 	const u8 *a_in = linearize_input(tmpctx,
-					 &a->inputs[a_index]);
+					 &a->inputs[a_index],
+					 &a->tx->inputs[a_index]);
 	const u8 *b_in = linearize_input(tmpctx,
-					 &b->inputs[b_index]);
+					 &b->inputs[b_index],
+					 &b->tx->inputs[b_index]);
 
 	return memeq(a_in, tal_bytelen(a_in),
 		     b_in, tal_bytelen(b_in));
@@ -136,9 +151,11 @@ static bool output_identical(const struct wally_psbt *a,
 			     size_t b_index)
 {
 	const u8 *a_out = linearize_output(tmpctx,
-					   &a->outputs[a_index]);
+					   &a->outputs[a_index],
+					   &a->tx->outputs[a_index]);
 	const u8 *b_out = linearize_output(tmpctx,
-					   &b->outputs[b_index]);
+					   &b->outputs[b_index],
+					   &b->tx->outputs[b_index]);
 	return memeq(a_out, tal_bytelen(a_out),
 		     b_out, tal_bytelen(b_out));
 }
@@ -151,6 +168,7 @@ static void sort_inputs(struct wally_psbt *psbt)
 					psbt->num_inputs);
 
 	for (size_t i = 0; i < tal_count(set); i++) {
+		set[i].tx_input = psbt->tx->inputs[i];
 		set[i].input = psbt->inputs[i];
 	}
 
@@ -160,6 +178,7 @@ static void sort_inputs(struct wally_psbt *psbt)
 	/* Put PSBT parts into place */
 	for (size_t i = 0; i < tal_count(set); i++) {
 		psbt->inputs[i] = set[i].input;
+		psbt->tx->inputs[i] = set[i].tx_input;
 	}
 
 	tal_free(set);
@@ -172,6 +191,7 @@ static void sort_outputs(struct wally_psbt *psbt)
 					 struct output_set,
 					 psbt->num_outputs);
 	for (size_t i = 0; i < tal_count(set); i++) {
+		set[i].tx_output = psbt->tx->outputs[i];
 		set[i].output = psbt->outputs[i];
 	}
 
@@ -181,6 +201,7 @@ static void sort_outputs(struct wally_psbt *psbt)
 	/* Put PSBT parts into place */
 	for (size_t i = 0; i < tal_count(set); i++) {
 		psbt->outputs[i] = set[i].output;
+		psbt->tx->outputs[i] = set[i].tx_output;
 	}
 
 	tal_free(set);
@@ -196,6 +217,7 @@ void psbt_sort_by_serial_id(struct wally_psbt *psbt)
 	do {							\
 		struct type##_set a;				\
 		a.type = from->type##s[index];			\
+		a.tx_##type = from->tx->type##s[index]; 	\
 		a.idx = index;					\
 		tal_arr_expand(&add_to, a);			\
 	} while (0)
@@ -376,7 +398,6 @@ bool psbt_has_required_fields(struct wally_psbt *psbt)
 {
 	u64 serial_id;
 	for (size_t i = 0; i < psbt->num_inputs; i++) {
-		const struct wally_map_item *redeem_script;
 		struct wally_psbt_input *input = &psbt->inputs[i];
 
 		if (!psbt_get_serial_id(&input->unknowns, &serial_id))
@@ -387,13 +408,13 @@ bool psbt_has_required_fields(struct wally_psbt *psbt)
 			return false;
 
 		/* If is P2SH, redeemscript must be present */
-		assert(psbt->inputs[i].index < input->utxo->num_outputs);
+		assert(psbt->tx->inputs[i].index < input->utxo->num_outputs);
 		const u8 *outscript =
 			wally_tx_output_get_script(tmpctx,
-				&input->utxo->outputs[psbt->inputs[i].index]);
-		redeem_script = wally_map_get_integer(&psbt->inputs[i].psbt_fields, /* PSBT_IN_REDEEM_SCRIPT */ 0x04);
-		if (is_p2sh(outscript, NULL) && (!redeem_script || redeem_script->value_len == 0))
+				&input->utxo->outputs[psbt->tx->inputs[i].index]);
+		if (is_p2sh(outscript, NULL) && input->redeem_script_len == 0)
 			return false;
+
 	}
 
 	for (size_t i = 0; i < psbt->num_outputs; i++) {
@@ -490,8 +511,6 @@ bool psbt_output_to_external(const struct wally_psbt_output *output)
 bool psbt_contribs_changed(struct wally_psbt *orig,
 			   struct wally_psbt *new)
 {
-	assert(orig->version == 2 && new->version == 2);
-
 	struct psbt_changeset *cs;
 	bool ok;
 	cs = psbt_get_changeset(NULL, orig, new);
