@@ -1950,9 +1950,6 @@ static u8 *accepter_commits(struct state *state,
 					   state->feerate_per_kw_commitment,
 					   state->upfront_shutdown_script[LOCAL],
 					   state->upfront_shutdown_script[REMOTE],
-					   state->requested_lease ?
-						   *state->requested_lease :
-						   AMOUNT_SAT(0),
 					   tx_state->blockheight,
 					   tx_state->lease_expiry,
 					   tx_state->lease_fee,
@@ -2684,9 +2681,6 @@ static u8 *opener_commits(struct state *state,
 					    state->feerate_per_kw_commitment,
 					    state->upfront_shutdown_script[LOCAL],
 					    state->upfront_shutdown_script[REMOTE],
-					    state->requested_lease ?
-						    *state->requested_lease :
-						    AMOUNT_SAT(0),
 					    tx_state->blockheight,
 					    tx_state->lease_expiry,
 					    tx_state->lease_fee,
