@@ -227,7 +227,9 @@ static struct command_result *listinvoices_done(struct command *cmd,
 			cinfo->num_uncleaned++;
 	}
 
-	return clean_finished_one(cinfo);
+	if (cinfo->cleanup_reqs_remaining)
+		return command_still_pending(cmd);
+	return clean_finished(cinfo);
 }
 
 static struct command_result *listsendpays_done(struct command *cmd,
@@ -287,7 +289,9 @@ static struct command_result *listsendpays_done(struct command *cmd,
 		}
 	}
 
-	return clean_finished_one(cinfo);
+ 	if (cinfo->cleanup_reqs_remaining)
+		return command_still_pending(cmd);
+	return clean_finished(cinfo);
 }
 
 static struct command_result *listforwards_done(struct command *cmd,
@@ -364,7 +368,9 @@ static struct command_result *listforwards_done(struct command *cmd,
 		}
 	}
 
-	return clean_finished_one(cinfo);
+ 	if (cinfo->cleanup_reqs_remaining)
+		return command_still_pending(cmd);
+	return clean_finished(cinfo);
 }
 
 static struct command_result *listsendpays_failed(struct command *cmd,
@@ -393,7 +399,7 @@ static struct command_result *listforwards_failed(struct command *cmd,
 
 static struct command_result *do_clean(struct clean_info *cinfo)
 {
-	struct out_req *req;
+	struct out_req *req = NULL;
 
 	cinfo->cleanup_reqs_remaining = 0;
 	cinfo->num_uncleaned = 0;
@@ -405,7 +411,6 @@ static struct command_result *do_clean(struct clean_info *cinfo)
 					    listsendpays_done, listsendpays_failed,
 					    cinfo);
 		send_outreq(plugin, req);
-		cinfo->cleanup_reqs_remaining++;
 	}
 
 	if (cinfo->subsystem_age[EXPIREDINVOICES] != 0
@@ -414,7 +419,6 @@ static struct command_result *do_clean(struct clean_info *cinfo)
 					    listinvoices_done, listinvoices_failed,
 					    cinfo);
 		send_outreq(plugin, req);
-		cinfo->cleanup_reqs_remaining++;
 	}
 
 	if (cinfo->subsystem_age[SUCCEEDEDFORWARDS] != 0
@@ -423,12 +427,12 @@ static struct command_result *do_clean(struct clean_info *cinfo)
 					    listforwards_done, listforwards_failed,
 					    cinfo);
 		send_outreq(plugin, req);
-		cinfo->cleanup_reqs_remaining++;
 	}
 
-	if (cinfo->cleanup_reqs_remaining)
+	if (req)
 		return command_still_pending(NULL);
-	return clean_finished(cinfo);
+	else
+		return clean_finished(cinfo);
 }
 
 /* Needs a different signature than do_clean */
