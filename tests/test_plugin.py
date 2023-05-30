@@ -1497,8 +1497,9 @@ def test_libplugin(node_factory):
 
     myname = os.path.splitext(os.path.basename(sys.argv[0]))[0]
 
-    # Side note: getmanifest will trace back to plugin_start
-    l1.daemon.wait_for_log(r": {}:plugin#[0-9]*/cln:getmanifest#[0-9]*\[OUT\]".format(myname))
+    # Note: getmanifest always uses numeric ids, since it doesn't know
+    # yet whether strings are allowed:
+    l1.daemon.wait_for_log(r"test_libplugin: [0-9]*\[OUT\]")
 
     # Test commands
     assert l1.rpc.call("helloworld") == {"hello": "world"}
