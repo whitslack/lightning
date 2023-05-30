@@ -128,7 +128,7 @@ void json_add_payment_fields(struct json_stream *response,
 
 	json_add_amount_msat_compat(response, t->msatoshi_sent,
 				    "msatoshi_sent", "amount_sent_msat");
-	json_add_u64(response, "created_at", t->timestamp);
+	json_add_u32(response, "created_at", t->timestamp);
 
 	switch (t->status) {
 	case PAYMENT_PENDING:
