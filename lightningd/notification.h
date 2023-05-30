@@ -2,6 +2,7 @@
 #define LIGHTNING_LIGHTNINGD_NOTIFICATION_H
 #include "config.h"
 #include <common/coin_mvt.h>
+#include <lightningd/chaintopology.h>
 #include <lightningd/pay.h>
 #include <lightningd/plugin.h>
 
@@ -75,7 +76,7 @@ void notify_sendpay_success(struct lightningd *ld,
 
 void notify_sendpay_failure(struct lightningd *ld,
 			    const struct wallet_payment *payment,
-			    errcode_t pay_errcode,
+			    enum jsonrpc_errcode pay_errcode,
 			    const struct onionreply *onionreply,
 			    const struct routing_failure *fail,
 			    const char *errmsg);
@@ -85,6 +86,9 @@ void notify_coin_mvt(struct lightningd *ld,
 
 void notify_balance_snapshot(struct lightningd *ld,
 			     const struct balance_snapshot *snap);
+
+void notify_block_added(struct lightningd *ld,
+			const struct block *block);
 
 void notify_openchannel_peer_sigs(struct lightningd *ld,
 				  const struct channel_id *cid,

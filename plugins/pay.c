@@ -550,7 +550,7 @@ static struct command_result *json_listpays(struct command *cmd,
 #if DEVELOPER
 static void memleak_mark_payments(struct plugin *p, struct htable *memtable)
 {
-	memleak_remove_region(memtable, &payments, sizeof(payments));
+	memleak_scan_list_head(memtable, &payments);
 }
 #endif
 
@@ -1181,10 +1181,6 @@ static struct command_result *json_pay(struct command *cmd,
 		}
 		payment_mod_exemptfee_get_data(p)->amount
 			= exemptfee ? *exemptfee : AMOUNT_MSAT(5000);
-
-		/* We free unneeded params now to keep memleak happy. */
-		tal_free(maxfee_pct_millionths);
-		tal_free(exemptfee);
 	}
 
 	shadow_route = payment_mod_shadowroute_get_data(p);

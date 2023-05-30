@@ -271,6 +271,7 @@ bool invalid_last_tx(const struct bitcoin_tx *tx)
 
 static void sign_and_send_last(struct lightningd *ld,
 			       struct channel *channel,
+			       const char *cmd_id,
 			       struct bitcoin_tx *last_tx,
 			       struct bitcoin_signature *last_sig)
 {
@@ -285,7 +286,7 @@ static void sign_and_send_last(struct lightningd *ld,
 
 	/* Keep broadcasting until we say stop (can fail due to dup,
 	 * if they beat us to the broadcast). */
-	broadcast_tx(ld->topology, channel, last_tx, NULL);
+	broadcast_tx(ld->topology, channel, last_tx, cmd_id, false, NULL);
 
 	remove_sig(last_tx);
 }
@@ -294,6 +295,11 @@ void drop_to_chain(struct lightningd *ld, struct channel *channel,
 		   bool cooperative)
 {
 	struct channel_inflight *inflight;
+	const char *cmd_id;
+
+	/* If this was triggered by a close command, get a copy of the cmd id */
+	cmd_id = resolve_close_command(tmpctx, ld, channel, cooperative);
+
 	/* BOLT #2:
 	 *
 	 * - if `next_revocation_number` is greater than expected
@@ -313,15 +319,14 @@ void drop_to_chain(struct lightningd *ld, struct channel *channel,
 		/* We need to drop *every* commitment transaction to chain */
 		if (!cooperative && !list_empty(&channel->inflights)) {
 			list_for_each(&channel->inflights, inflight, list)
-				sign_and_send_last(ld, channel,
+				sign_and_send_last(ld, channel, cmd_id,
 						   inflight->last_tx,
 						   &inflight->last_sig);
 		} else
-			sign_and_send_last(ld, channel, channel->last_tx,
+			sign_and_send_last(ld, channel, cmd_id, channel->last_tx,
 					   &channel->last_sig);
 	}
 
-	resolve_close_command(ld, channel, cooperative);
 }
 
 void resend_closing_transactions(struct lightningd *ld)
@@ -1274,9 +1279,16 @@ static void update_remote_addr(struct lightningd *ld,
 			       const struct wireaddr *remote_addr,
 			       const struct node_id peer_id)
 {
+	u16 public_port;
+
 	/* failsafe to prevent privacy leakage. */
 	if (ld->always_use_proxy || ld->config.disable_ip_discovery)
 		return;
+
+	/* Peers will have likey reported our dynamic outbound TCP port.
+	 * Best guess is that we use default port for the selected network,
+	 * until we add a commandline switch to override this. */
+	public_port = chainparams_get_ln_port(chainparams);
 
 	switch (remote_addr->type) {
 	case ADDR_TYPE_IPV4:
@@ -1292,10 +1304,14 @@ static void update_remote_addr(struct lightningd *ld,
 			break;
 		}
 		/* tell gossip we have a valid update */
-		if (wireaddr_eq_without_port(ld->remote_addr_v4, remote_addr))
-			subd_send_msg(ld->gossip, towire_gossipd_remote_addr(
+		if (wireaddr_eq_without_port(ld->remote_addr_v4, remote_addr)) {
+			ld->discovered_ip_v4 = tal_dup(ld, struct wireaddr,
+						       ld->remote_addr_v4);
+			ld->discovered_ip_v4->port = public_port;
+			subd_send_msg(ld->gossip, towire_gossipd_discovered_ip(
 							  tmpctx,
-							  ld->remote_addr_v4));
+							  ld->discovered_ip_v4));
+		}
 		/* store latest values */
 		*ld->remote_addr_v4 = *remote_addr;
 		ld->remote_addr_v4_peer = peer_id;
@@ -1311,10 +1327,14 @@ static void update_remote_addr(struct lightningd *ld,
 			*ld->remote_addr_v6 = *remote_addr;
 			break;
 		}
-		if (wireaddr_eq_without_port(ld->remote_addr_v6, remote_addr))
-			subd_send_msg(ld->gossip, towire_gossipd_remote_addr(
+		if (wireaddr_eq_without_port(ld->remote_addr_v6, remote_addr)) {
+			ld->discovered_ip_v6 = tal_dup(ld, struct wireaddr,
+						       ld->remote_addr_v6);
+			ld->discovered_ip_v6->port = public_port;
+			subd_send_msg(ld->gossip, towire_gossipd_discovered_ip(
 							  tmpctx,
-							  ld->remote_addr_v6));
+							  ld->discovered_ip_v6));
+		}
 		*ld->remote_addr_v6 = *remote_addr;
 		ld->remote_addr_v6_peer = peer_id;
 		break;
@@ -1343,6 +1363,7 @@ void peer_connected(struct lightningd *ld, const u8 *msg)
 	struct peer *peer;
 	struct peer_connected_hook_payload *hook_payload;
 	u64 connectd_counter;
+	const char *cmd_id;
 
 	hook_payload = tal(NULL, struct peer_connected_hook_payload);
 	hook_payload->ld = ld;
@@ -1391,6 +1412,9 @@ void peer_connected(struct lightningd *ld, const u8 *msg)
 	tal_steal(peer, hook_payload);
 	hook_payload->peer = peer;
 
+	/* If there's a connect command, use its id as basis for hook id */
+	cmd_id = connect_any_cmd_id(tmpctx, ld, peer);
+
 	/* Log and update remote_addr for Nat/IP discovery. */
 	if (hook_payload->remote_addr) {
 		log_peer_debug(ld->log, &id, "Peer says it sees our address as: %s",
@@ -1403,7 +1427,7 @@ void peer_connected(struct lightningd *ld, const u8 *msg)
 			update_remote_addr(ld, hook_payload->remote_addr, id);
 	}
 
-	plugin_hook_call_peer_connected(ld, hook_payload);
+	plugin_hook_call_peer_connected(ld, cmd_id, hook_payload);
 }
 
 /* connectd tells us a peer has a message and we've not already attached
@@ -1744,7 +1768,8 @@ static enum watch_result funding_depth_cb(struct lightningd *ld,
 		if (!list_empty(&channel->inflights)) {
 			inf = channel_inflight_find(channel, txid);
 			if (!inf) {
-				channel_fail_permanent(channel, REASON_LOCAL,
+				channel_fail_permanent(channel,
+						       REASON_LOCAL,
 					"Txid %s for channel"
 					" not found in inflights. (peer %s)",
 					type_to_string(tmpctx,
@@ -2247,22 +2272,22 @@ static struct command_result *json_getinfo(struct command *cmd,
 		for (size_t i = 0; i < count_announceable; i++)
 			json_add_address(response, NULL, cmd->ld->announceable+i);
 
-		/* Currently, IP discovery will only be announced by gossipd, if we
-		 * don't already have usable addresses.
+		/* Currently, IP discovery will only be announced by gossipd,
+		 * if we don't already have usable addresses.
 		 * See `create_node_announcement` in `gossip_generation.c`. */
 		if (count_announceable == 0) {
-			if (cmd->ld->remote_addr_v4 != NULL &&
+			if (cmd->ld->discovered_ip_v4 != NULL &&
 					!wireaddr_arr_contains(
 						cmd->ld->announceable,
-						cmd->ld->remote_addr_v4))
+						cmd->ld->discovered_ip_v4))
 				json_add_address(response, NULL,
-						 cmd->ld->remote_addr_v4);
-			if (cmd->ld->remote_addr_v6 != NULL &&
+						 cmd->ld->discovered_ip_v4);
+			if (cmd->ld->discovered_ip_v6 != NULL &&
 					!wireaddr_arr_contains(
 						cmd->ld->announceable,
-						cmd->ld->remote_addr_v6))
+						cmd->ld->discovered_ip_v6))
 				json_add_address(response, NULL,
-						 cmd->ld->remote_addr_v6);
+						 cmd->ld->discovered_ip_v6);
 		}
 		json_array_end(response);
 

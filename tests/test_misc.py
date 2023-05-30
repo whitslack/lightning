@@ -49,7 +49,7 @@ def test_names(node_factory):
 
 @unittest.skipIf(os.getenv('TEST_DB_PROVIDER', 'sqlite3') != 'sqlite3', "This migration is based on a sqlite3 snapshot")
 def test_db_upgrade(node_factory):
-    l1 = node_factory.get_node()
+    l1 = node_factory.get_node(options={'database-upgrade': True})
     l1.stop()
 
     version = subprocess.check_output(['lightningd/lightningd',
@@ -863,7 +863,7 @@ def test_malformed_rpc(node_factory):
 
 
 def test_cli(node_factory):
-    l1 = node_factory.get_node()
+    l1 = node_factory.get_node(options={'log-level': 'io'})
 
     out = subprocess.check_output(['cli/lightning-cli',
                                    '--network={}'.format(TEST_NETWORK),
@@ -872,6 +872,9 @@ def test_cli(node_factory):
                                    'help']).decode('utf-8')
     # Test some known output.
     assert 'help [command]\n    List available commands, or give verbose help on one {command}' in out
+
+    # Check JSON id is as expected
+    l1.daemon.wait_for_log(r"jsonrpc#[0-9]*: cli:help#[0-9]*\[IN\]")
 
     # Test JSON output.
     out = subprocess.check_output(['cli/lightning-cli',
@@ -2212,7 +2215,7 @@ def test_sendcustommsg(node_factory):
         l1.rpc.sendcustommsg(node_id, msg)
 
     # `l3` is disconnected and we can't send messages to it
-    assert(not l2.rpc.listpeers(l3.info['id'])['peers'][0]['connected'])
+    wait_for(lambda: l2.rpc.listpeers(l3.info['id'])['peers'][0]['connected'] is False)
     with pytest.raises(RpcError, match=r'Peer is not connected'):
         l2.rpc.sendcustommsg(l3.info['id'], msg)
 

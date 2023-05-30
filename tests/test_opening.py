@@ -1730,3 +1730,159 @@ def test_zeroconf_multichan_forward(node_factory):
     inv = l3.rpc.invoice(amount_msat=10000, label='lbl1', description='desc')['bolt11']
     l1.rpc.pay(inv)
     assert l2.daemon.is_in_log(r'Chose a better channel: .*')
+
+
+def test_zeroreserve(node_factory, bitcoind):
+    """Ensure we can set the reserves.
+
+    3 nodes:
+     - l1 enforces zeroreserve
+     - l2 enforces default reserve
+     - l3 enforces sub-dust reserves
+    """
+    plugin_path = Path(__file__).parent / "plugins" / "zeroreserve.py"
+    opts = [
+        {
+            'plugin': str(plugin_path),
+            'reserve': '0sat',
+            'dev-allowdustreserve': True,
+        },
+        {
+            'dev-allowdustreserve': True,
+        },
+        {
+            'plugin': str(plugin_path),
+            'reserve': '123sat',
+            'dev-allowdustreserve': True,
+        }
+    ]
+    l1, l2, l3 = node_factory.get_nodes(3, opts=opts)
+
+    l1.fundwallet(10**7)
+    l2.fundwallet(10**7)
+    l3.fundwallet(10**7)
+
+    l1.connect(l2)
+    l2.connect(l3)
+    l3.connect(l1)
+
+    l1.rpc.fundchannel(l2.info['id'], 10**6, reserve='0sat')
+    l2.rpc.fundchannel(l3.info['id'], 10**6)
+    l3.rpc.fundchannel(l1.info['id'], 10**6, reserve='321sat')
+    bitcoind.generate_block(1, wait_for_mempool=3)
+    wait_for(lambda: l1.channel_state(l2) == 'CHANNELD_NORMAL')
+    wait_for(lambda: l2.channel_state(l3) == 'CHANNELD_NORMAL')
+    wait_for(lambda: l3.channel_state(l1) == 'CHANNELD_NORMAL')
+
+    # Now make sure we all agree on each others reserves
+    l1c1 = l1.rpc.listpeers(l2.info['id'])['peers'][0]['channels'][0]
+    l2c1 = l2.rpc.listpeers(l1.info['id'])['peers'][0]['channels'][0]
+    l2c2 = l2.rpc.listpeers(l3.info['id'])['peers'][0]['channels'][0]
+    l3c2 = l3.rpc.listpeers(l2.info['id'])['peers'][0]['channels'][0]
+    l3c3 = l3.rpc.listpeers(l1.info['id'])['peers'][0]['channels'][0]
+    l1c3 = l1.rpc.listpeers(l3.info['id'])['peers'][0]['channels'][0]
+
+    # l1 imposed a 0sat reserve on l2, while l2 imposed the default 1% reserve on l1
+    assert l1c1['their_reserve_msat'] == l2c1['our_reserve_msat'] == Millisatoshi('0sat')
+    assert l1c1['our_reserve_msat'] == l2c1['their_reserve_msat'] == Millisatoshi('10000sat')
+
+    # l2 imposed the default 1% on l3, while l3 imposed a custom 123sat fee on l2
+    assert l2c2['their_reserve_msat'] == l3c2['our_reserve_msat'] == Millisatoshi('10000sat')
+    assert l2c2['our_reserve_msat'] == l3c2['their_reserve_msat'] == Millisatoshi('123sat')
+
+    # l3 imposed a custom 321sat fee on l1, while l1 imposed a custom 0sat fee on l3
+    assert l3c3['their_reserve_msat'] == l1c3['our_reserve_msat'] == Millisatoshi('321sat')
+    assert l3c3['our_reserve_msat'] == l1c3['their_reserve_msat'] == Millisatoshi('0sat')
+
+    # Now do some drain tests on c1, as that should be drainable
+    # completely by l2 being the fundee
+    l1.rpc.keysend(l2.info['id'], 10 * 7)  # Something above dust for sure
+    l2.drain(l1)
+
+    # Remember that this is the reserve l1 imposed on l2, so l2 can drain completely
+    l2c1 = l2.rpc.listpeers(l1.info['id'])['peers'][0]['channels'][0]
+
+    # And despite us briefly being above dust (with a to_us output),
+    # closing should result in the output being trimmed again since we
+    # dropped below dust again.
+    c = l2.rpc.close(l1.info['id'])
+    decoded = bitcoind.rpc.decoderawtransaction(c['tx'])
+    # Elements has a change output always
+    assert len(decoded['vout']) == 1 if TEST_NETWORK == 'regtest' else 2
+
+
+def test_zeroreserve_mixed(node_factory, bitcoind):
+    """l1 runs with zeroreserve, l2 and l3 without, should still work
+
+    Basically tests that l1 doesn't get upset when l2 allows us to
+    drop below dust.
+
+    """
+    plugin_path = Path(__file__).parent / "plugins" / "zeroreserve.py"
+    opts = [
+        {
+            'plugin': str(plugin_path),
+            'reserve': '0sat',
+            'dev-allowdustreserve': True,
+        }, {
+            'dev-allowdustreserve': False,
+        }, {
+            'dev-allowdustreserve': False,
+        }
+    ]
+    l1, l2, l3 = node_factory.get_nodes(3, opts=opts)
+    l1.fundwallet(10**7)
+    l3.fundwallet(10**7)
+
+    l1.connect(l2)
+    l3.connect(l1)
+
+    l1.rpc.fundchannel(l2.info['id'], 10**6, reserve='0sat')
+    l3.rpc.fundchannel(l1.info['id'], 10**6)
+
+
+def test_zeroreserve_alldust(node_factory):
+    """If we allow dust reserves we need larger fundings
+
+    This is because we might have up to
+
+      allhtlcs = (local.max_concurrent_htlcs + remote.max_concurrent_htlcs)
+      alldust = allhlcs * min(local.dust, remote.dust)
+
+    allocated to HTLCs in flight, reducing both direct outputs to
+    dust. This could leave us with no outs on the commitment, is
+    therefore invalid.
+
+    Parameters are as follows:
+     - Regtest:
+       - max_concurrent_htlcs = 483
+       - dust = 546sat
+       - minfunding = (483 * 2 + 2) * 546sat = 528528sat
+     - Mainnet:
+       - max_concurrent_htlcs = 30
+       - dust = 546sat
+       - minfunding = (30 * 2 + 2) * 546sat = 33852s
+    """
+    plugin_path = Path(__file__).parent / "plugins" / "zeroreserve.py"
+    l1, l2 = node_factory.get_nodes(2, opts=[{
+        'plugin': plugin_path,
+        'reserve': '0sat',
+        'dev-allowdustreserve': True
+    }] * 2)
+    maxhtlc = 483
+    mindust = 546
+    minfunding = (maxhtlc * 2 + 2) * mindust
+
+    l1.fundwallet(10**6)
+    error = (f'channel funding {minfunding}sat too small for chosen parameters: '
+             f'a total of {maxhtlc * 2} HTLCs with dust value {mindust}sat would '
+             f'result in a commitment_transaction without outputs')
+
+    # This is right on the edge, and should fail
+    with pytest.raises(RpcError, match=error):
+        l1.connect(l2)
+        l1.rpc.fundchannel(l2.info['id'], minfunding)
+
+    # Now try with just a bit more
+    l1.connect(l2)
+    l1.rpc.fundchannel(l2.info['id'], minfunding + 1)

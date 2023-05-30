@@ -60,7 +60,17 @@ fun to put in other's config files while their computer is unattended.
 putting this in someone's config file may convince them to read this man
 page.
 
+* **database-upgrade**=*BOOL*
+
+  Upgrades to Core Lightning often change the database: once this is done,
+downgrades are not generally possible.  By default, Core Lightning will
+exit with an error rather than upgrade, unless this is an official released
+version.  If you really want to upgrade to a non-release version, you can
+set this to *true* (or *false* to never allow a non-reversible upgrade!).
+
 ### Bitcoin control options:
+
+Bitcoin control options:
 
 * **network**=*NETWORK*
 
@@ -413,6 +423,12 @@ the outgoing is redeemed.
   The number of blocks to allow for payments we receive: if we have to, we
 might need to redeem this on-chain, so this is the number of blocks we
 have to do that.
+
+* **accept-htlc-tlv-types**=*types*
+
+  Normally HTLC onions which contain unknown even fields are rejected.
+This option specifies that these (comma-separated) types are to be
+accepted, and ignored.
 
 ### Invoice control options:
 

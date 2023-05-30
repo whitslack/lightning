@@ -341,36 +341,33 @@ static void handle_local_private_channel(struct daemon *daemon, const u8 *msg)
 	}
 }
 
-/* lightningd tells us it has dicovered and verified new `remote_addr`.
+/* lightningd tells us it has discovered and verified new `remote_addr`.
  * We can use this to update our node announcement. */
-static void handle_remote_addr(struct daemon *daemon, const u8 *msg)
+static void handle_discovered_ip(struct daemon *daemon, const u8 *msg)
 {
-	struct wireaddr remote_addr;
+	struct wireaddr discovered_ip;
 
-	if (!fromwire_gossipd_remote_addr(msg, &remote_addr))
-		master_badmsg(WIRE_GOSSIPD_REMOTE_ADDR, msg);
+	if (!fromwire_gossipd_discovered_ip(msg, &discovered_ip))
+		master_badmsg(WIRE_GOSSIPD_DISCOVERED_IP, msg);
 
-	/* Best guess is that we use default port for the selected network */
-	remote_addr.port = chainparams_get_ln_port(chainparams);
-
-	switch (remote_addr.type) {
+	switch (discovered_ip.type) {
 	case ADDR_TYPE_IPV4:
-		if (daemon->remote_addr_v4 != NULL &&
-		    wireaddr_eq_without_port(daemon->remote_addr_v4,
-					     &remote_addr))
+		if (daemon->discovered_ip_v4 != NULL &&
+		    wireaddr_eq_without_port(daemon->discovered_ip_v4,
+					     &discovered_ip))
 			break;
-		tal_free(daemon->remote_addr_v4);
-		daemon->remote_addr_v4 = tal_dup(daemon, struct wireaddr,
-						 &remote_addr);
+		tal_free(daemon->discovered_ip_v4);
+		daemon->discovered_ip_v4 = tal_dup(daemon, struct wireaddr,
+						 &discovered_ip);
 		goto update_node_annoucement;
 	case ADDR_TYPE_IPV6:
-		if (daemon->remote_addr_v6 != NULL &&
-		    wireaddr_eq_without_port(daemon->remote_addr_v6,
-					     &remote_addr))
+		if (daemon->discovered_ip_v6 != NULL &&
+		    wireaddr_eq_without_port(daemon->discovered_ip_v6,
+					     &discovered_ip))
 			break;
-		tal_free(daemon->remote_addr_v6);
-		daemon->remote_addr_v6 = tal_dup(daemon, struct wireaddr,
-						 &remote_addr);
+		tal_free(daemon->discovered_ip_v6);
+		daemon->discovered_ip_v6 = tal_dup(daemon, struct wireaddr,
+						 &discovered_ip);
 		goto update_node_annoucement;
 
 	/* ignore all other cases */
@@ -384,7 +381,7 @@ static void handle_remote_addr(struct daemon *daemon, const u8 *msg)
 
 update_node_annoucement:
 	status_debug("Update our node_announcement for discovered address: %s",
-		     fmt_wireaddr(tmpctx, &remote_addr));
+		     fmt_wireaddr(tmpctx, &discovered_ip));
 	maybe_send_own_node_announce(daemon, false);
 }
 
@@ -810,10 +807,10 @@ static void dev_gossip_memleak(struct daemon *daemon, const u8 *msg)
 	struct htable *memtable;
 	bool found_leak;
 
-	memtable = memleak_find_allocations(tmpctx, msg, msg);
-
+	memtable = memleak_start(tmpctx);
+	memleak_ptr(memtable, msg);
 	/* Now delete daemon and those which it has pointers to. */
-	memleak_remove_region(memtable, daemon, sizeof(*daemon));
+	memleak_scan_obj(memtable, daemon);
 
 	found_leak = dump_memleak(memtable, memleak_status_broken);
 	daemon_conn_send(daemon->master,
@@ -1041,8 +1038,8 @@ static struct io_plan *recv_req(struct io_conn *conn,
 		handle_local_private_channel(daemon, msg);
 		goto done;
 
-	case WIRE_GOSSIPD_REMOTE_ADDR:
-		handle_remote_addr(daemon, msg);
+	case WIRE_GOSSIPD_DISCOVERED_IP:
+		handle_discovered_ip(daemon, msg);
 		goto done;
 #if DEVELOPER
 	case WIRE_GOSSIPD_DEV_SET_MAX_SCIDS_ENCODE_SIZE:
@@ -1100,8 +1097,8 @@ int main(int argc, char *argv[])
 	daemon->node_announce_regen_timer = NULL;
 	daemon->current_blockheight = 0; /* i.e. unknown */
 	daemon->rates = NULL;
-	daemon->remote_addr_v4 = NULL;
-	daemon->remote_addr_v6 = NULL;
+	daemon->discovered_ip_v4 = NULL;
+	daemon->discovered_ip_v6 = NULL;
 	list_head_init(&daemon->deferred_updates);
 
 	/* Tell the ecdh() function how to talk to hsmd */

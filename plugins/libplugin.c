@@ -4,8 +4,10 @@
 #include <ccan/io/io.h>
 #include <ccan/json_out/json_out.h>
 #include <ccan/read_write_all/read_write_all.h>
+#include <ccan/tal/path/path.h>
 #include <ccan/tal/str/str.h>
 #include <common/daemon.h>
+#include <common/json_parse_simple.h>
 #include <common/json_stream.h>
 #include <common/memleak.h>
 #include <common/route.h>
@@ -35,6 +37,9 @@ struct plugin {
 	struct io_conn *stdin_conn;
 	struct io_conn *stdout_conn;
 
+	/* to append to all our command ids */
+	const char *id;
+
 	/* To read from lightningd */
 	char *buffer;
 	size_t used, len_read;
@@ -52,7 +57,7 @@ struct plugin {
 	jsmn_parser rpc_parser;
 	jsmntok_t *rpc_toks;
 	/* Tracking async RPC requests */
-	UINTMAP(struct out_req *) out_reqs;
+	STRMAP(struct out_req *) out_reqs;
 	u64 next_outreq_id;
 
 	/* Synchronous RPC interaction */
@@ -153,6 +158,26 @@ static void disable_request_cb(struct command *cmd, struct out_req *out)
 	out->cmd = NULL;
 }
 
+static const char *get_json_id(const tal_t *ctx,
+			       struct plugin *plugin,
+			       const char *cmd_id,
+			       const char *method)
+{
+	if (cmd_id)
+		return tal_fmt(ctx, "%s/%s:%s#%"PRIu64,
+			       cmd_id,
+			       plugin->id, method,
+			       plugin->next_outreq_id++);
+	return tal_fmt(ctx, "%s:%s#%"PRIu64,
+		       plugin->id, method,
+		       plugin->next_outreq_id++);
+}
+
+static void destroy_out_req(struct out_req *out_req, struct plugin *plugin)
+{
+	strmap_del(&plugin->out_reqs, out_req->id, NULL);
+}
+
 /* FIXME: Move lightningd/jsonrpc to common/ ? */
 
 struct out_req *
@@ -170,13 +195,14 @@ jsonrpc_request_start_(struct plugin *plugin, struct command *cmd,
 {
 	struct out_req *out;
 
-	out = tal(plugin, struct out_req);
-	out->id = plugin->next_outreq_id++;
+	out = tal(cmd, struct out_req);
+	out->id = get_json_id(out, plugin, cmd ? cmd->id : NULL, method);
 	out->cmd = cmd;
 	out->cb = cb;
 	out->errcb = errcb;
 	out->arg = arg;
-	uintmap_add(&plugin->out_reqs, out->id, out);
+	strmap_add(&plugin->out_reqs, out->id, out);
+	tal_add_destructor2(out, destroy_out_req, plugin);
 
 	/* If command goes away, don't call callbacks! */
 	if (out->cmd)
@@ -185,7 +211,7 @@ jsonrpc_request_start_(struct plugin *plugin, struct command *cmd,
 	out->js = new_json_stream(NULL, cmd, NULL);
 	json_object_start(out->js, NULL);
 	json_add_string(out->js, "jsonrpc", "2.0");
-	json_add_u64(out->js, "id", out->id);
+	json_add_string(out->js, "id", out->id);
 	json_add_string(out->js, "method", method);
 	if (out->errcb)
 		json_object_start(out->js, "params");
@@ -211,7 +237,7 @@ static struct json_stream *jsonrpc_stream_start(struct command *cmd)
 
 	json_object_start(js, NULL);
 	json_add_string(js, "jsonrpc", "2.0");
-	json_add_u64(js, "id", *cmd->id);
+	json_add_string(js, "id", cmd->id);
 
 	return js;
 }
@@ -271,6 +297,8 @@ struct command_result *command_finished(struct command *cmd,
 struct command_result *WARN_UNUSED_RESULT
 command_still_pending(struct command *cmd)
 {
+	if (cmd)
+		notleak_with_children(cmd);
 	return &pending;
 }
 
@@ -324,18 +352,6 @@ static int read_json_from_rpc(struct plugin *p)
 	return end + 2 - membuf_elems(&p->rpc_conn->mb);
 }
 
-/* This starts a JSON RPC message with boilerplate */
-static struct json_out *start_json_rpc(const tal_t *ctx, u64 id)
-{
-	struct json_out *jout = json_out_new(ctx);
-
-	json_out_start(jout, NULL, '{');
-	json_out_addstr(jout, "jsonrpc", "2.0");
-	json_out_add(jout, "id", false, "%"PRIu64, id);
-
-	return jout;
-}
-
 /* This closes a JSON response and writes it out. */
 static void finish_and_send_json(int fd, struct json_out *jout)
 {
@@ -375,14 +391,14 @@ command_success(struct command *cmd, const struct json_out *result)
 }
 
 struct command_result *command_done_err(struct command *cmd,
-					errcode_t code,
+					enum jsonrpc_errcode code,
 					const char *errmsg,
 					const struct json_out *data)
 {
 	struct json_stream *js = jsonrpc_stream_start(cmd);
 
 	json_object_start(js, "error");
-	json_add_errcode(js, "code", code);
+	json_add_jsonrpc_errcode(js, "code", code);
 	json_add_string(js, "message", errmsg);
 
 	if (data)
@@ -428,7 +444,7 @@ struct command_result *forward_result(struct command *cmd,
 
 /* Called by param() directly if it's malformed. */
 struct command_result *command_fail(struct command *cmd,
-				    errcode_t code, const char *fmt, ...)
+				    enum jsonrpc_errcode code, const char *fmt, ...)
 {
 	va_list ap;
 	struct command_result *res;
@@ -496,22 +512,6 @@ static const jsmntok_t *read_rpc_reply(const tal_t *ctx,
 	return toks;
 }
 
-static struct json_out *start_json_request(const tal_t *ctx,
-					   u64 id,
-					   const char *method,
-					   const struct json_out *params TAKES)
-{
-	struct json_out *jout;
-
-	jout = start_json_rpc(tmpctx, id);
-	json_out_addstr(jout, "method", method);
-	json_out_add_splice(jout, "params", params);
-	if (taken(params))
-		tal_free(params);
-
-	return jout;
-}
-
 static const char *rpc_scan_core(const tal_t *ctx,
 				 struct plugin *plugin,
 				 const char *method,
@@ -523,9 +523,15 @@ static const char *rpc_scan_core(const tal_t *ctx,
 	const jsmntok_t *contents;
 	int reqlen;
 	const char *p;
-	struct json_out *jout;
+	struct json_out *jout = json_out_new(tmpctx);
 
-	jout = start_json_request(tmpctx, 0, method, params);
+	json_out_start(jout, NULL, '{');
+	json_out_addstr(jout, "jsonrpc", "2.0");
+	json_out_addstr(jout, "id", get_json_id(tmpctx, plugin, "init", method));
+	json_out_addstr(jout, "method", method);
+	json_out_add_splice(jout, "params", params);
+	if (taken(params))
+		tal_free(params);
 	finish_and_send_json(plugin->rpc_conn->fd, jout);
 
 	read_rpc_reply(tmpctx, plugin, &contents, &error, &reqlen);
@@ -666,22 +672,22 @@ static void handle_rpc_reply(struct plugin *plugin, const jsmntok_t *toks)
 	const jsmntok_t *idtok, *contenttok;
 	struct out_req *out;
 	struct command_result *res;
-	u64 id;
 
 	idtok = json_get_member(plugin->rpc_buffer, toks, "id");
 	if (!idtok)
 		/* FIXME: Don't simply ignore notifications! */
 		return;
 
-	if (!json_to_u64(plugin->rpc_buffer, idtok, &id))
-		plugin_err(plugin, "JSON reply without numeric id '%.*s'",
+	out = strmap_getn(&plugin->out_reqs,
+			  plugin->rpc_buffer + idtok->start,
+			  idtok->end - idtok->start);
+	if (!out) {
+		/* This can actually happen, if they free req! */
+		plugin_log(plugin, LOG_DBG, "JSON reply with unknown id '%.*s'",
 			   json_tok_full_len(toks),
 			   json_tok_full(plugin->rpc_buffer, toks));
-	out = uintmap_get(&plugin->out_reqs, id);
-	if (!out)
-		plugin_err(plugin, "JSON reply with unknown id '%.*s' (%"PRIu64")",
-			   json_tok_full_len(toks),
-			   json_tok_full(plugin->rpc_buffer, toks), id);
+		return;
+	}
 
 	/* Remove destructor if one existed */
 	if (out->cmd)
@@ -689,7 +695,6 @@ static void handle_rpc_reply(struct plugin *plugin, const jsmntok_t *toks)
 
 	/* We want to free this if callback doesn't. */
 	tal_steal(tmpctx, out);
-	uintmap_del(&plugin->out_reqs, out->id);
 
 	contenttok = json_get_member(plugin->rpc_buffer, toks, "error");
 	if (contenttok) {
@@ -728,6 +733,8 @@ send_outreq(struct plugin *plugin, const struct out_req *req)
 
 	ld_rpc_send(plugin, req->js);
 
+	if (req->cmd != NULL)
+		notleak_with_children(req->cmd);
 	return &pending;
 }
 
@@ -1236,7 +1243,7 @@ struct json_stream *plugin_notify_start(struct command *cmd, const char *method)
 	json_add_string(js, "method", method);
 
 	json_object_start(js, "params");
-	json_add_u64(js, "id", *cmd->id);
+	json_add_string(js, "id", cmd->id);
 
 	return js;
 }
@@ -1350,16 +1357,20 @@ static void memleak_check(struct plugin *plugin, struct command *cmd)
 {
 	struct htable *memtable;
 
-	memtable = memleak_find_allocations(tmpctx, cmd, cmd);
+	memtable = memleak_start(tmpctx);
+
+	/* cmd in use right now */
+	memleak_ptr(memtable, cmd);
+	memleak_ignore_children(memtable, cmd);
 
 	/* Now delete plugin and anything it has pointers to. */
-	memleak_remove_region(memtable, plugin, sizeof(*plugin));
+	memleak_scan_obj(memtable, plugin);
 
-	/* Memleak needs some help to see into intmaps */
-	memleak_remove_uintmap(memtable, &plugin->out_reqs);
+	/* Memleak needs some help to see into strmaps */
+	memleak_scan_strmap(memtable, &plugin->out_reqs);
 
 	/* We know usage strings are referred to. */
-	memleak_remove_strmap(memtable, &cmd->plugin->usagemap);
+	memleak_scan_strmap(memtable, &cmd->plugin->usagemap);
 
 	if (plugin->mark_mem)
 		plugin->mark_mem(plugin, memtable);
@@ -1379,10 +1390,9 @@ void plugin_set_memleak_handler(struct plugin *plugin,
 static void ld_command_handle(struct plugin *plugin,
 			      const jsmntok_t *toks)
 {
-	const jsmntok_t *idtok, *methtok, *paramstok;
+	const jsmntok_t *methtok, *paramstok;
 	struct command *cmd;
 
-	idtok = json_get_member(plugin->buffer, toks, "id");
 	methtok = json_get_member(plugin->buffer, toks, "method");
 	paramstok = json_get_member(plugin->buffer, toks, "params");
 
@@ -1394,16 +1404,9 @@ static void ld_command_handle(struct plugin *plugin,
 
 	cmd = tal(plugin, struct command);
 	cmd->plugin = plugin;
-	cmd->id = NULL;
 	cmd->usage_only = false;
 	cmd->methodname = json_strdup(cmd, plugin->buffer, methtok);
-	if (idtok) {
-		cmd->id = tal(cmd, u64);
-		if (!json_to_u64(plugin->buffer, idtok, cmd->id))
-			plugin_err(plugin, "JSON id '%*.s' is not a number",
-				   json_tok_full_len(idtok),
-				   json_tok_full(plugin->buffer, idtok));
-	}
+	cmd->id = json_get_id(cmd, plugin->buffer, toks);
 
 	if (!plugin->manifested) {
 		if (streq(cmd->methodname, "getmanifest")) {
@@ -1594,6 +1597,7 @@ static struct io_plan *stdout_conn_init(struct io_conn *conn,
 }
 
 static struct plugin *new_plugin(const tal_t *ctx,
+				 const char *argv0,
 				 const char *(*init)(struct plugin *p,
 						     const char *buf,
 						     const jsmntok_t *),
@@ -1612,7 +1616,12 @@ static struct plugin *new_plugin(const tal_t *ctx,
 {
 	const char *optname;
 	struct plugin *p = tal(ctx, struct plugin);
+	char *name;
 
+	/* id is our name, without extension (not that we expect any, in C!) */
+	name = path_basename(p, argv0);
+	name[path_ext_off(name)] = '\0';
+	p->id = name;
 	p->buffer = tal_arr(p, char, 64);
 	p->js_arr = tal_arr(p, struct json_stream *, 0);
 	p->used = 0;
@@ -1627,7 +1636,7 @@ static struct plugin *new_plugin(const tal_t *ctx,
 	jsmn_init(&p->rpc_parser);
 	p->rpc_toks = toks_alloc(p);
 	p->next_outreq_id = 0;
-	uintmap_init(&p->out_reqs);
+	strmap_init(&p->out_reqs);
 
 	p->desired_features = tal_steal(p, features);
 	if (init_rpc) {
@@ -1705,7 +1714,8 @@ void plugin_main(char *argv[],
 	daemon_setup(argv[0], NULL, NULL);
 
 	va_start(ap, num_notif_topics);
-	plugin = new_plugin(NULL, init, restartability, init_rpc, features, commands,
+	plugin = new_plugin(NULL, argv[0],
+			    init, restartability, init_rpc, features, commands,
 			    num_commands, notif_subs, num_notif_subs, hook_subs,
 			    num_hook_subs, notif_topics, num_notif_topics, ap);
 	va_end(ap);

@@ -711,7 +711,8 @@ openchannel_hook_final(struct openchannel_hook_payload *payload STEALS)
 	subd_send_msg(openingd,
 		      take(towire_openingd_got_offer_reply(NULL, errmsg,
 							   our_upfront_shutdown_script,
-							   upfront_shutdown_script_wallet_index)));
+							   upfront_shutdown_script_wallet_index,
+							   payload->uc->reserve)));
 }
 
 static bool
@@ -732,6 +733,7 @@ openchannel_hook_deserialize(struct openchannel_hook_payload *payload,
 	const jsmntok_t *t_errmsg  = json_get_member(buffer, toks, "error_message");
 	const jsmntok_t *t_closeto = json_get_member(buffer, toks, "close_to");
 	const jsmntok_t *t_mindepth = json_get_member(buffer, toks, "mindepth");
+	const jsmntok_t *t_reserve = json_get_member(buffer, toks, "reserve");
 
 	if (!t_result)
 		fatal("Plugin returned an invalid response to the"
@@ -793,6 +795,16 @@ openchannel_hook_deserialize(struct openchannel_hook_payload *payload,
 		    payload->uc->minimum_depth);
 	}
 
+	if (t_reserve != NULL) {
+		payload->uc->reserve = tal(payload->uc, struct amount_sat);
+		json_to_sat(buffer, t_reserve, payload->uc->reserve);
+		log_debug(openingd->ld->log,
+			  "Setting reserve=%s for this channel as requested by "
+			  "the openchannel hook",
+			  type_to_string(tmpctx, struct amount_sat,
+					 payload->uc->reserve));
+	}
+
 	return true;
 }
 
@@ -832,7 +844,7 @@ static void opening_got_offer(struct subd *openingd,
 	}
 
 	tal_add_destructor2(openingd, openchannel_payload_remove_openingd, payload);
-	plugin_hook_call_openchannel(openingd->ld, payload);
+	plugin_hook_call_openchannel(openingd->ld, NULL, payload);
 }
 
 static unsigned int openingd_msg(struct subd *openingd,
@@ -934,18 +946,19 @@ bool peer_start_openingd(struct peer *peer, struct peer_fd *peer_fd)
 
 
 	msg = towire_openingd_init(NULL,
-				  chainparams,
-				  peer->ld->our_features,
-				  peer->their_features,
-				  &uc->our_config,
-				  max_to_self_delay,
-				  min_effective_htlc_capacity,
-				  &uc->local_basepoints,
-				  &uc->local_funding_pubkey,
-				  uc->minimum_depth,
-				  feerate_min(peer->ld, NULL),
-				  feerate_max(peer->ld, NULL),
-				  IFDEV(peer->ld->dev_force_tmp_channel_id, NULL));
+				   chainparams,
+				   peer->ld->our_features,
+				   peer->their_features,
+				   &uc->our_config,
+				   max_to_self_delay,
+				   min_effective_htlc_capacity,
+				   &uc->local_basepoints,
+				   &uc->local_funding_pubkey,
+				   uc->minimum_depth,
+				   feerate_min(peer->ld, NULL),
+				   feerate_max(peer->ld, NULL),
+				   IFDEV(peer->ld->dev_force_tmp_channel_id, NULL),
+				   peer->ld->config.allowdustreserve);
 	subd_send_msg(uc->open_daemon, take(msg));
 	return true;
 }
@@ -1095,7 +1108,7 @@ static struct command_result *json_fundchannel_start(struct command *cmd,
 	bool *announce_channel;
 	u32 *feerate_per_kw, *mindepth;
 	int fds[2];
-	struct amount_sat *amount;
+	struct amount_sat *amount, *reserve;
 	struct amount_msat *push_msat;
 	u32 *upfront_shutdown_script_wallet_index;
 	struct channel_id tmp_channel_id;
@@ -1114,6 +1127,7 @@ static struct command_result *json_fundchannel_start(struct command *cmd,
 		   p_opt("close_to", param_bitcoin_address, &fc->our_upfront_shutdown_script),
 		   p_opt("push_msat", param_msat, &push_msat),
 		   p_opt_def("mindepth", param_u32, &mindepth, cmd->ld->config.anchor_confirms),
+		   p_opt("reserve", param_sat, &reserve),
 		   NULL))
 		return command_param_failed();
 
@@ -1223,6 +1237,8 @@ static struct command_result *json_fundchannel_start(struct command *cmd,
 	assert(mindepth != NULL);
 	fc->uc->minimum_depth = *mindepth;
 
+	fc->uc->reserve = reserve;
+
 	/* Needs to be stolen away from cmd */
 	if (fc->our_upfront_shutdown_script)
 		fc->our_upfront_shutdown_script
@@ -1241,15 +1257,16 @@ static struct command_result *json_fundchannel_start(struct command *cmd,
 	} else
 		upfront_shutdown_script_wallet_index = NULL;
 
-	fc->open_msg
-		= towire_openingd_funder_start(fc,
-					  *amount,
-					  fc->push,
-					  fc->our_upfront_shutdown_script,
-					  upfront_shutdown_script_wallet_index,
-					  *feerate_per_kw,
-					  &tmp_channel_id,
-					  fc->channel_flags);
+	fc->open_msg = towire_openingd_funder_start(
+			fc,
+			*amount,
+			fc->push,
+			fc->our_upfront_shutdown_script,
+			upfront_shutdown_script_wallet_index,
+			*feerate_per_kw,
+			&tmp_channel_id,
+			fc->channel_flags,
+			fc->uc->reserve);
 
 	if (socketpair(AF_LOCAL, SOCK_STREAM, 0, fds) != 0) {
 		return command_fail(cmd, FUND_MAX_EXCEEDED,

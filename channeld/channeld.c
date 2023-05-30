@@ -955,6 +955,10 @@ static void send_shutdown_complete(struct peer *peer)
 	wire_sync_write(MASTER_FD,
 			take(towire_channeld_shutdown_complete(NULL)));
 	per_peer_state_fdpass_send(MASTER_FD, peer->pps);
+
+	/* Give master a chance to pass the fd along */
+	sleep(1);
+
 	close(MASTER_FD);
 }
 
@@ -3648,10 +3652,11 @@ static void handle_dev_memleak(struct peer *peer, const u8 *msg)
 	struct htable *memtable;
 	bool found_leak;
 
-	memtable = memleak_find_allocations(tmpctx, msg, msg);
+	memtable = memleak_start(tmpctx);
+	memleak_ptr(memtable, msg);
 
 	/* Now delete peer and things it has pointers to. */
-	memleak_remove_region(memtable, peer, tal_bytelen(peer));
+	memleak_scan_obj(memtable, peer);
 
 	found_leak = dump_memleak(memtable, memleak_status_broken);
 	wire_sync_write(MASTER_FD,

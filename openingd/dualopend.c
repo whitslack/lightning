@@ -303,6 +303,9 @@ static void dualopen_shutdown(struct state *state)
 	status_debug("Sent %s with fds",
 		     dualopend_wire_name(fromwire_peektype(msg)));
 
+	/* Give master a chance to pass the fd along */
+	sleep(1);
+
 	/* This frees the entire tal tree. */
 	tal_free(state);
 	daemon_shutdown();
@@ -887,10 +890,11 @@ static void handle_dev_memleak(struct state *state, const u8 *msg)
 
 	/* Populate a hash table with all our allocations (except msg, which
 	 * is in use right now). */
-	memtable = memleak_find_allocations(tmpctx, msg, msg);
+	memtable = memleak_start(tmpctx);
+	memleak_ptr(memtable, msg);
 
 	/* Now delete state and things it has pointers to. */
-	memleak_remove_region(memtable, state, tal_bytelen(state));
+	memleak_scan_obj(memtable, state);
 
 	/* If there's anything left, dump it to logs, and return true. */
 	found_leak = dump_memleak(memtable, memleak_status_broken);
@@ -3988,6 +3992,9 @@ int main(int argc, char *argv[])
 	status_debug("Sent %s with fds",
 		     dualopend_wire_name(fromwire_peektype(msg)));
 	tal_free(msg);
+
+	/* Give master a chance to pass the fd along */
+	sleep(1);
 
 	/* This frees the entire tal tree. */
 	tal_free(state);

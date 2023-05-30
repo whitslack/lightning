@@ -392,7 +392,7 @@ void notify_sendpay_success(struct lightningd *ld,
 
 static void sendpay_failure_notification_serialize(struct json_stream *stream,
 						   const struct wallet_payment *payment,
-						   errcode_t pay_errcode,
+						   enum jsonrpc_errcode pay_errcode,
 						   const struct onionreply *onionreply,
 						   const struct routing_failure *fail,
 						   char *errmsg)
@@ -401,7 +401,7 @@ static void sendpay_failure_notification_serialize(struct json_stream *stream,
 
 	/* In line with the format of json error returned
 	 * by sendpay_fail(). */
-	json_add_errcode(stream, "code", pay_errcode);
+	json_add_jsonrpc_errcode(stream, "code", pay_errcode);
 	json_add_string(stream, "message", errmsg);
 
 	json_object_start(stream, "data");
@@ -420,14 +420,14 @@ REGISTER_NOTIFICATION(sendpay_failure,
 
 void notify_sendpay_failure(struct lightningd *ld,
 			    const struct wallet_payment *payment,
-			    errcode_t pay_errcode,
+			    enum jsonrpc_errcode pay_errcode,
 			    const struct onionreply *onionreply,
 			    const struct routing_failure *fail,
 			    const char *errmsg)
 {
 	void (*serialize)(struct json_stream *,
 			  const struct wallet_payment *,
-			  errcode_t,
+			  enum jsonrpc_errcode,
 			  const struct onionreply *,
 			  const struct routing_failure *,
 			  const char *) = sendpay_failure_notification_gen.serialize;
@@ -578,6 +578,32 @@ void notify_balance_snapshot(struct lightningd *ld,
 	struct jsonrpc_notification *n =
 		jsonrpc_notification_start(NULL, "balance_snapshot");
 	serialize(n->stream, snap);
+	jsonrpc_notification_end(n);
+	plugins_notify(ld->plugins, take(n));
+}
+
+static void block_added_notification_serialize(struct json_stream *stream,
+					       struct block *block)
+{
+	json_object_start(stream, "block");
+	json_add_string(stream, "hash",
+			type_to_string(tmpctx, struct bitcoin_blkid, &block->blkid));
+	json_add_u32(stream, "height", block->height);
+	json_object_end(stream);
+}
+
+REGISTER_NOTIFICATION(block_added,
+		      block_added_notification_serialize);
+
+void notify_block_added(struct lightningd *ld,
+			const struct block *block)
+{
+	void (*serialize)(struct json_stream *,
+			  const struct block *block) = block_added_notification_gen.serialize;
+
+	struct jsonrpc_notification *n =
+		jsonrpc_notification_start(NULL, "block_added");
+	serialize(n->stream, block);
 	jsonrpc_notification_end(n);
 	plugins_notify(ld->plugins, take(n));
 }

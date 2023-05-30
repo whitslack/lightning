@@ -24,6 +24,7 @@ import signal
 import sqlite3
 import stat
 import subprocess
+import sys
 import time
 import unittest
 
@@ -1477,7 +1478,8 @@ def test_libplugin(node_factory):
     """Sanity checks for plugins made with libplugin"""
     plugin = os.path.join(os.getcwd(), "tests/plugins/test_libplugin")
     l1 = node_factory.get_node(options={"plugin": plugin,
-                                        'allow-deprecated-apis': False})
+                                        'allow-deprecated-apis': False,
+                                        'log-level': 'io'})
 
     # Test startup
     assert l1.daemon.is_in_log("test_libplugin initialised!")
@@ -1485,6 +1487,11 @@ def test_libplugin(node_factory):
     l1.rpc.plugin_stop(plugin)
     l1.rpc.plugin_start(plugin)
     l1.rpc.check("helloworld")
+
+    myname = os.path.splitext(os.path.basename(sys.argv[0]))[0]
+
+    # Side note: getmanifest will trace back to plugin_start
+    l1.daemon.wait_for_log(r": {}:plugin#[0-9]*/cln:getmanifest#[0-9]*\[OUT\]".format(myname))
 
     # Test commands
     assert l1.rpc.call("helloworld") == {"hello": "world"}
@@ -1497,9 +1504,11 @@ def test_libplugin(node_factory):
     # But param takes over!
     assert l1.rpc.call("helloworld", {"name": "test"}) == {"hello": "test"}
 
-    # Test hooks and notifications
-    l2 = node_factory.get_node()
+    # Test hooks and notifications (add plugin, so we can test hook id)
+    l2 = node_factory.get_node(options={"plugin": plugin, 'log-level': 'io'})
     l2.connect(l1)
+    l2.daemon.wait_for_log(r": {}:connect#[0-9]*/cln:peer_connected#[0-9]*\[OUT\]".format(myname))
+
     l1.daemon.wait_for_log("{} peer_connected".format(l2.info["id"]))
     l1.daemon.wait_for_log("{} connected".format(l2.info["id"]))
 
@@ -2649,11 +2658,11 @@ def test_commando_rune(node_factory):
     #   "rune": "zKc2W88jopslgUBl0UE77aEe5PNCLn5WwqSusU_Ov3A9MA=="
     # $ l1-cli commando-rune restrictions=readonly
     #   "rune": "1PJnoR9a7u4Bhglj2s7rVOWqRQnswIwUoZrDVMKcLTY9MSZtZXRob2RebGlzdHxtZXRob2ReZ2V0fG1ldGhvZD1zdW1tYXJ5Jm1ldGhvZC9saXN0ZGF0YXN0b3Jl"
-    # $ l1-cli commando-rune restrictions='time>1656675211'
+    # $ l1-cli commando-rune restrictions='[[time>1656675211]]'
     #   "rune": "RnlWC4lwBULFaObo6ZP8jfqYRyTbfWPqcMT3qW-Wmso9MiZ0aW1lPjE2NTY2NzUyMTE="
-    # $ l1-cli commando-rune restrictions='["id^022d223620a359a47ff7","method=listpeers"]'
+    # $ l1-cli commando-rune restrictions='[["id^022d223620a359a47ff7"],["method=listpeers"]]'
     #   "rune": "lXFWzb51HjWxKV5TmfdiBgd74w0moeyChj3zbLoxmws9MyZpZF4wMjJkMjIzNjIwYTM1OWE0N2ZmNyZtZXRob2Q9bGlzdHBlZXJz"
-    # $ l1-cli commando-rune lXFWzb51HjWxKV5TmfdiBgd74w0moeyChj3zbLoxmws9MyZpZF4wMjJkMjIzNjIwYTM1OWE0N2ZmNyZtZXRob2Q9bGlzdHBlZXJz 'pnamelevel!|pnamelevel/io'
+    # $ l1-cli commando-rune lXFWzb51HjWxKV5TmfdiBgd74w0moeyChj3zbLoxmws9MyZpZF4wMjJkMjIzNjIwYTM1OWE0N2ZmNyZtZXRob2Q9bGlzdHBlZXJz '[pnamelevel!,pnamelevel/io]'
     #   "rune": "Dw2tzGCoUojAyT0JUw7fkYJYqExpEpaDRNTkyvWKoJY9MyZpZF4wMjJkMjIzNjIwYTM1OWE0N2ZmNyZtZXRob2Q9bGlzdHBlZXJzJnBuYW1lbGV2ZWwhfHBuYW1lbGV2ZWwvaW8="
 
     rune1 = l1.rpc.commando_rune()
@@ -2662,27 +2671,46 @@ def test_commando_rune(node_factory):
     rune2 = l1.rpc.commando_rune(restrictions="readonly")
     assert rune2['rune'] == '1PJnoR9a7u4Bhglj2s7rVOWqRQnswIwUoZrDVMKcLTY9MSZtZXRob2RebGlzdHxtZXRob2ReZ2V0fG1ldGhvZD1zdW1tYXJ5Jm1ldGhvZC9saXN0ZGF0YXN0b3Jl'
     assert rune2['unique_id'] == '1'
-    rune3 = l1.rpc.commando_rune(restrictions="time>1656675211")
+    rune3 = l1.rpc.commando_rune(restrictions=[["time>1656675211"]])
     assert rune3['rune'] == 'RnlWC4lwBULFaObo6ZP8jfqYRyTbfWPqcMT3qW-Wmso9MiZ0aW1lPjE2NTY2NzUyMTE='
     assert rune3['unique_id'] == '2'
-    rune4 = l1.rpc.commando_rune(restrictions=["id^022d223620a359a47ff7", "method=listpeers"])
+    rune4 = l1.rpc.commando_rune(restrictions=[["id^022d223620a359a47ff7"], ["method=listpeers"]])
     assert rune4['rune'] == 'lXFWzb51HjWxKV5TmfdiBgd74w0moeyChj3zbLoxmws9MyZpZF4wMjJkMjIzNjIwYTM1OWE0N2ZmNyZtZXRob2Q9bGlzdHBlZXJz'
     assert rune4['unique_id'] == '3'
-    rune5 = l1.rpc.commando_rune(rune4['rune'], "pnamelevel!|pnamelevel/io")
+    rune5 = l1.rpc.commando_rune(rune4['rune'], [["pnamelevel!", "pnamelevel/io"]])
     assert rune5['rune'] == 'Dw2tzGCoUojAyT0JUw7fkYJYqExpEpaDRNTkyvWKoJY9MyZpZF4wMjJkMjIzNjIwYTM1OWE0N2ZmNyZtZXRob2Q9bGlzdHBlZXJzJnBuYW1lbGV2ZWwhfHBuYW1lbGV2ZWwvaW8='
     assert rune5['unique_id'] == '3'
-    rune6 = l1.rpc.commando_rune(rune5['rune'], "parr1!|parr1/io")
+    rune6 = l1.rpc.commando_rune(rune5['rune'], [["parr1!", "parr1/io"]])
     assert rune6['rune'] == '2Wh6F4R51D3esZzp-7WWG51OhzhfcYKaaI8qiIonaHE9MyZpZF4wMjJkMjIzNjIwYTM1OWE0N2ZmNyZtZXRob2Q9bGlzdHBlZXJzJnBuYW1lbGV2ZWwhfHBuYW1lbGV2ZWwvaW8mcGFycjEhfHBhcnIxL2lv'
     assert rune6['unique_id'] == '3'
-    rune7 = l1.rpc.commando_rune(restrictions="pnum=0")
+    rune7 = l1.rpc.commando_rune(restrictions=[["pnum=0"]])
     assert rune7['rune'] == 'QJonN6ySDFw-P5VnilZxlOGRs_tST1ejtd-bAYuZfjk9NCZwbnVtPTA='
     assert rune7['unique_id'] == '4'
-    rune8 = l1.rpc.commando_rune(rune7['rune'], "rate=3")
+    rune8 = l1.rpc.commando_rune(rune7['rune'], [["rate=3"]])
     assert rune8['rune'] == 'kSYFx6ON9hr_ExcQLwVkm1ABnvc1TcMFBwLrAVee0EA9NCZwbnVtPTAmcmF0ZT0z'
     assert rune8['unique_id'] == '4'
-    rune9 = l1.rpc.commando_rune(rune8['rune'], "rate=1")
+    rune9 = l1.rpc.commando_rune(rune8['rune'], [["rate=1"]])
     assert rune9['rune'] == 'O8Zr-ULTBKO3_pKYz0QKE9xYl1vQ4Xx9PtlHuist9Rk9NCZwbnVtPTAmcmF0ZT0zJnJhdGU9MQ=='
     assert rune9['unique_id'] == '4'
+
+    # Test rune with \|.
+    weirdrune = l1.rpc.commando_rune(restrictions=[["method=invoice"],
+                                                   ["pnamedescription=@tipjar|jb55@sendsats.lol"]])
+    with pytest.raises(RpcError, match='Not authorized:'):
+        l2.rpc.call(method='commando',
+                    payload={'peer_id': l1.info['id'],
+                             'rune': weirdrune['rune'],
+                             'method': 'invoice',
+                             'params': {"amount_msat": "any",
+                                        "label": "lbl",
+                                        "description": "@tipjar\\|jb55@sendsats.lol"}})
+    l2.rpc.call(method='commando',
+                payload={'peer_id': l1.info['id'],
+                         'rune': weirdrune['rune'],
+                         'method': 'invoice',
+                         'params': {"amount_msat": "any",
+                                    "label": "lbl",
+                                    "description": "@tipjar|jb55@sendsats.lol"}})
 
     runedecodes = ((rune1, []),
                    (rune2, [{'alternatives': ['method^list', 'method^get', 'method=summary'],
@@ -2739,7 +2767,7 @@ def test_commando_rune(node_factory):
 
     # Replace rune3 with a more useful timestamp!
     expiry = int(time.time()) + 15
-    rune3 = l1.rpc.commando_rune(restrictions="time<{}".format(expiry))
+    rune3 = l1.rpc.commando_rune(restrictions=[["time<{}".format(expiry)]])
 
     successes = ((rune1, "listpeers", {}),
                  (rune2, "listpeers", {}),
@@ -2904,3 +2932,36 @@ def test_commando_badrune(node_factory):
                     l1.rpc.decode(base64.urlsafe_b64encode(modrune).decode('utf8'))
                 except RpcError:
                     pass
+
+
+def test_block_added_notifications(node_factory, bitcoind):
+    """Test if a plugin gets notifications when a new block is found"""
+    base = bitcoind.rpc.getblockchaininfo()["blocks"]
+    plugin = [
+        os.path.join(os.getcwd(), "tests/plugins/block_added.py"),
+    ]
+    l1 = node_factory.get_node(options={"plugin": plugin})
+    ret = l1.rpc.call("blockscatched")
+    assert len(ret) == 1 and ret[0] == base + 0
+
+    bitcoind.generate_block(2)
+    sync_blockheight(bitcoind, [l1])
+    ret = l1.rpc.call("blockscatched")
+    assert len(ret) == 3 and ret[0] == base + 0 and ret[2] == base + 2
+
+    l2 = node_factory.get_node(options={"plugin": plugin})
+    ret = l2.rpc.call("blockscatched")
+    assert len(ret) == 1 and ret[0] == base + 2
+
+    l2.stop()
+    next_l2_base = bitcoind.rpc.getblockchaininfo()["blocks"]
+
+    bitcoind.generate_block(2)
+    sync_blockheight(bitcoind, [l1])
+    ret = l1.rpc.call("blockscatched")
+    assert len(ret) == 5 and ret[4] == base + 4
+
+    l2.start()
+    sync_blockheight(bitcoind, [l2])
+    ret = l2.rpc.call("blockscatched")
+    assert len(ret) == 3 and ret[1] == next_l2_base + 1 and ret[2] == next_l2_base + 2

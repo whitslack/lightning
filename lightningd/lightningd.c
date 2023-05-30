@@ -209,10 +209,13 @@ static struct lightningd *new_lightningd(const tal_t *ctx)
 
 	ld->remote_addr_v4 = NULL;
 	ld->remote_addr_v6 = NULL;
+	ld->discovered_ip_v4 = NULL;
+	ld->discovered_ip_v6 = NULL;
 	ld->listen = true;
 	ld->autolisten = true;
 	ld->reconnect = true;
 	ld->try_reexec = false;
+	ld->db_upgrade_ok = NULL;
 
 	/*~ This is from ccan/timer: it is efficient for the case where timers
 	 * are deleted before expiry (as is common with timeouts) using an
@@ -332,7 +335,7 @@ static void destroy_alt_subdaemons(struct lightningd *ld)
 static void memleak_help_alt_subdaemons(struct htable *memtable,
 					struct lightningd *ld)
 {
-	memleak_remove_strmap(memtable, &ld->alt_subdaemons);
+	memleak_scan_strmap(memtable, &ld->alt_subdaemons);
 }
 #endif /* DEVELOPER */
 
