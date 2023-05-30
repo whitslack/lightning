@@ -285,6 +285,7 @@ class UnixDomainSocketRpc(object):
         self.executor = executor
         self.logger = logger
         self._notify = None
+        self._filter = None
         if caller_name is None:
             self.caller_name = os.path.splitext(os.path.basename(sys.argv[0]))[0]
         else:
@@ -338,7 +339,7 @@ class UnixDomainSocketRpc(object):
             this_id = f'{cmdprefix}/{this_id}'
         return this_id
 
-    def call(self, method, payload=None, cmdprefix=None):
+    def call(self, method, payload=None, cmdprefix=None, filter=None):
         """Generic call API: you can set cmdprefix here, or set self.cmdprefix
         before the call is made.
 
@@ -378,6 +379,11 @@ class UnixDomainSocketRpc(object):
             "params": payload,
             "id": this_id,
         }
+
+        if filter is None:
+            filter = self._filter
+        if filter is not None:
+            request["filter"] = filter
 
         self._writeobj(sock, request)
         while True:
@@ -434,6 +440,22 @@ class UnixDomainSocketRpc(object):
         self._notify = fn
         yield
         self._notify = old
+
+    @contextmanager
+    def reply_filter(self, filter):
+        """Filter the fields returned from am RPC call (or more than one)..
+
+        This is a context manager and should be used like this:
+
+        ```python
+        with rpc.reply_filter({"transactions": [{"outputs": [{"amount_msat": true, "type": true}]}]}):
+            rpc.listtransactions()
+        ```
+        """
+        old = self._filter
+        self._filter = filter
+        yield
+        self._filter = old
 
 
 class LightningRpc(UnixDomainSocketRpc):

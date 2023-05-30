@@ -60,6 +60,7 @@ pub enum Request {
 	ListForwards(requests::ListforwardsRequest),
 	ListPays(requests::ListpaysRequest),
 	Ping(requests::PingRequest),
+	SetChannel(requests::SetchannelRequest),
 	SignMessage(requests::SignmessageRequest),
 	Stop(requests::StopRequest),
 }
@@ -112,6 +113,7 @@ pub enum Response {
 	ListForwards(responses::ListforwardsResponse),
 	ListPays(responses::ListpaysResponse),
 	Ping(responses::PingResponse),
+	SetChannel(responses::SetchannelResponse),
 	SignMessage(responses::SignmessageResponse),
 	Stop(responses::StopResponse),
 }
@@ -863,10 +865,6 @@ pub mod requests {
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
-	pub struct KeysendExtratlvs {
-	}
-
-	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct KeysendRequest {
 	    #[serde(alias = "destination")]
 	    pub destination: PublicKey,
@@ -884,6 +882,8 @@ pub mod requests {
 	    pub exemptfee: Option<Amount>,
 	    #[serde(alias = "routehints", skip_serializing_if = "Option::is_none")]
 	    pub routehints: Option<RoutehintList>,
+	    #[serde(alias = "extratlvs", skip_serializing_if = "Option::is_none")]
+	    pub extratlvs: Option<TlvStream>,
 	}
 
 	impl From<KeysendRequest> for Request {
@@ -899,7 +899,7 @@ pub mod requests {
 	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct FundpsbtRequest {
 	    #[serde(alias = "satoshi")]
-	    pub satoshi: Amount,
+	    pub satoshi: AmountOrAll,
 	    #[serde(alias = "feerate")]
 	    pub feerate: Feerate,
 	    #[serde(alias = "startweight")]
@@ -1275,6 +1275,32 @@ pub mod requests {
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct SetchannelRequest {
+	    #[serde(alias = "id")]
+	    pub id: String,
+	    #[serde(alias = "feebase", skip_serializing_if = "Option::is_none")]
+	    pub feebase: Option<Amount>,
+	    #[serde(alias = "feeppm", skip_serializing_if = "Option::is_none")]
+	    pub feeppm: Option<u32>,
+	    #[serde(alias = "htlcmin", skip_serializing_if = "Option::is_none")]
+	    pub htlcmin: Option<Amount>,
+	    #[serde(alias = "htlcmax", skip_serializing_if = "Option::is_none")]
+	    pub htlcmax: Option<Amount>,
+	    #[serde(alias = "enforcedelay", skip_serializing_if = "Option::is_none")]
+	    pub enforcedelay: Option<u32>,
+	}
+
+	impl From<SetchannelRequest> for Request {
+	    fn from(r: SetchannelRequest) -> Self {
+	        Request::SetChannel(r)
+	    }
+	}
+
+	impl IntoRequest for SetchannelRequest {
+	    type Response = super::responses::SetchannelResponse;
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct SignmessageRequest {
 	    #[serde(alias = "message")]
 	    pub message: String,
@@ -1433,6 +1459,9 @@ pub mod responses {
 	    pub blockheight: u32,
 	    #[serde(alias = "network")]
 	    pub network: String,
+	    #[deprecated]
+	    #[serde(alias = "msatoshi_fees_collected", skip_serializing_if = "Option::is_none")]
+	    pub msatoshi_fees_collected: Option<u64>,
 	    #[serde(alias = "fees_collected_msat")]
 	    pub fees_collected_msat: Amount,
 	    #[serde(alias = "address", skip_serializing_if = "crate::is_none_or_empty")]
@@ -3516,6 +3545,9 @@ pub mod responses {
 	    pub channel: ShortChannelId,
 	    #[serde(alias = "direction")]
 	    pub direction: u32,
+	    #[deprecated]
+	    #[serde(alias = "msatoshi", skip_serializing_if = "Option::is_none")]
+	    pub msatoshi: Option<u64>,
 	    #[serde(alias = "amount_msat")]
 	    pub amount_msat: Amount,
 	    #[serde(alias = "delay")]
@@ -3708,6 +3740,45 @@ pub mod responses {
 	    fn try_from(response: Response) -> Result<Self, Self::Error> {
 	        match response {
 	            Response::Ping(response) => Ok(response),
+	            _ => Err(TryFromResponseError)
+	        }
+	    }
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct SetchannelChannels {
+	    #[serde(alias = "peer_id")]
+	    pub peer_id: PublicKey,
+	    #[serde(alias = "channel_id")]
+	    pub channel_id: String,
+	    #[serde(alias = "short_channel_id", skip_serializing_if = "Option::is_none")]
+	    pub short_channel_id: Option<ShortChannelId>,
+	    #[serde(alias = "fee_base_msat")]
+	    pub fee_base_msat: Amount,
+	    #[serde(alias = "fee_proportional_millionths")]
+	    pub fee_proportional_millionths: u32,
+	    #[serde(alias = "minimum_htlc_out_msat")]
+	    pub minimum_htlc_out_msat: Amount,
+	    #[serde(alias = "warning_htlcmin_too_low", skip_serializing_if = "Option::is_none")]
+	    pub warning_htlcmin_too_low: Option<String>,
+	    #[serde(alias = "maximum_htlc_out_msat")]
+	    pub maximum_htlc_out_msat: Amount,
+	    #[serde(alias = "warning_htlcmax_too_high", skip_serializing_if = "Option::is_none")]
+	    pub warning_htlcmax_too_high: Option<String>,
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct SetchannelResponse {
+	    #[serde(alias = "channels")]
+	    pub channels: Vec<SetchannelChannels>,
+	}
+
+	impl TryFrom<Response> for SetchannelResponse {
+	    type Error = super::TryFromResponseError;
+
+	    fn try_from(response: Response) -> Result<Self, Self::Error> {
+	        match response {
+	            Response::SetChannel(response) => Ok(response),
 	            _ => Err(TryFromResponseError)
 	        }
 	    }

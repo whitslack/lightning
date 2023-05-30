@@ -1,22 +1,51 @@
-FROM alpine:3.14.3
+FROM alpine:3.16 as builder
 LABEL org.opencontainers.image.authors="Vincenzo Palazzo (@vincenzopalazzo) vincenzopalazzodev@gmail.com"
 
 WORKDIR /build
 
 RUN apk update && \
-    apk add ca-certificates alpine-sdk autoconf automake git libtool \
-    gmp-dev sqlite-dev python3 py3-mako net-tools zlib-dev libsodium gettext su-exec \
-    python3 py3-pip #&& \
-    #apk add --upgrade fortify-headers
+    apk add \
+      alpine-sdk \
+      autoconf \
+      automake \
+      ca-certificates \
+      cargo \
+      gettext \
+      git \
+      gmp-dev \
+      libsodium \
+      libtool \
+      net-tools \
+      postgresql-dev \
+      py3-mako \
+      python3 \
+      python3-dev \
+      sqlite-dev \
+      sqlite-static \
+      su-exec \
+      zlib-dev \
+      zlib-static
 
-RUN mkdir lightning
-COPY . lightning
+COPY . /source
 
-RUN cd lightning && \
-    git submodule update --init --recursive && \
-    ./configure && \
-    make -j$(nproc) && \
+RUN git clone /source /repo --recursive && \
+    cd /repo && \
+    ./configure --enable-static --prefix=/usr && \
+    make -j $(nproc) && \
     make install
 
-# TODO: review entry point here, to make this availale for the user
-CMD ["lightningd", "--version"]
+FROM alpine:3.16 as runner
+
+RUN apk update && \
+    apk add \
+      postgresql \
+      bitcoin-cli
+
+COPY --from=builder /usr/bin/lightningd /usr/bin/
+COPY --from=builder /usr/bin/lightning-cli /usr/bin/
+COPY --from=builder /usr/bin/lightning-hsmtool /usr/bin/
+COPY --from=builder /usr/libexec/c-lightning /usr/libexec/c-lightning
+COPY --from=builder /usr/share/man/man8 /usr/share/man/man8
+COPY --from=builder /usr/share/doc/c-lightning /usr/share/doc/c-lightning
+
+ENTRYPOINT ["/usr/bin/lightningd"]

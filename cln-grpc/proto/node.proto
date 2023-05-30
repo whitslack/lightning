@@ -52,6 +52,7 @@ service Node {
 	rpc ListForwards(ListforwardsRequest) returns (ListforwardsResponse) {}
 	rpc ListPays(ListpaysRequest) returns (ListpaysResponse) {}
 	rpc Ping(PingRequest) returns (PingResponse) {}
+	rpc SetChannel(SetchannelRequest) returns (SetchannelResponse) {}
 	rpc SignMessage(SignmessageRequest) returns (SignmessageResponse) {}
 	rpc Stop(StopRequest) returns (StopResponse) {}
 }
@@ -71,6 +72,7 @@ message GetinfoResponse {
 	string lightning_dir = 9;
 	uint32 blockheight = 11;
 	string network = 12;
+	optional uint64 msatoshi_fees_collected = 18;
 	Amount fees_collected_msat = 13;
 	repeated GetinfoAddress address = 14;
 	repeated GetinfoBinding binding = 15;
@@ -964,6 +966,7 @@ message KeysendRequest {
 	optional uint32 maxdelay = 6;
 	optional Amount exemptfee = 7;
 	optional RoutehintList routehints = 8;
+	optional TlvStream extratlvs = 9;
 }
 
 message KeysendResponse {
@@ -982,11 +985,8 @@ message KeysendResponse {
 	KeysendStatus status = 9;
 }
 
-message KeysendExtratlvs {
-}
-
 message FundpsbtRequest {
-	Amount satoshi = 1;
+	AmountOrAll satoshi = 1;
 	Feerate feerate = 2;
 	uint32 startweight = 3;
 	optional uint32 minconf = 4;
@@ -1191,6 +1191,7 @@ message GetrouteRoute {
 	bytes id = 1;
 	string channel = 2;
 	uint32 direction = 3;
+	optional uint64 msatoshi = 7;
 	Amount amount_msat = 4;
 	uint32 delay = 5;
 	GetrouteRouteStyle style = 6;
@@ -1283,6 +1284,31 @@ message PingRequest {
 
 message PingResponse {
 	uint32 totlen = 1;
+}
+
+message SetchannelRequest {
+	string id = 1;
+	optional Amount feebase = 2;
+	optional uint32 feeppm = 3;
+	optional Amount htlcmin = 4;
+	optional Amount htlcmax = 5;
+	optional uint32 enforcedelay = 6;
+}
+
+message SetchannelResponse {
+	repeated SetchannelChannels channels = 1;
+}
+
+message SetchannelChannels {
+	bytes peer_id = 1;
+	bytes channel_id = 2;
+	optional string short_channel_id = 3;
+	Amount fee_base_msat = 4;
+	uint32 fee_proportional_millionths = 5;
+	Amount minimum_htlc_out_msat = 6;
+	optional string warning_htlcmin_too_low = 7;
+	Amount maximum_htlc_out_msat = 8;
+	optional string warning_htlcmax_too_high = 9;
 }
 
 message SignmessageRequest {

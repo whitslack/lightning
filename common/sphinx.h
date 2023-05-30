@@ -53,27 +53,6 @@ enum route_next_case {
  */
 struct sphinx_path;
 
-/* BOLT #4:
- *
- * ## Legacy `hop_data` payload format
- *
- * The `hop_data` format is identified by a single `0x00`-byte length,
- * for backward compatibility.  Its payload is defined as:
- *
- * 1. type: `hop_data` (for `realm` 0)
- * 2. data:
- *    * [`short_channel_id`:`short_channel_id`]
- *    * [`u64`:`amt_to_forward`]
- *    * [`u32`:`outgoing_cltv_value`]
- *    * [`12*byte`:`padding`]
- */
-struct hop_data_legacy {
-	u8 realm;
-	struct short_channel_id channel_id;
-	struct amount_msat amt_forward;
-	u32 outgoing_cltv;
-};
-
 /*
  * All the necessary information to generate a valid onion for this hop on a
  * sphinx path. The payload is preserialized in order since the onion
@@ -223,17 +202,19 @@ struct sphinx_path *sphinx_path_new_with_key(const tal_t *ctx,
 					     const struct secret *session_key);
 
 /**
- * Add a payload hop to the path.
+ * Add a payload hop to the path (already has length prepended).
+ *
+ * Fails if length actually isn't prepended!
  */
-void sphinx_add_hop(struct sphinx_path *path, const struct pubkey *pubkey,
-		    const u8 *payload TAKES);
+bool sphinx_add_hop_has_length(struct sphinx_path *path, const struct pubkey *pubkey,
+			       const u8 *payload TAKES);
 
 /**
  * Prepend length to payload and add: for onionmessage, any size is OK,
  * for HTLC onions tal_bytelen(payload) must be > 1.
  */
-void sphinx_add_modern_hop(struct sphinx_path *path, const struct pubkey *pubkey,
-			   const u8 *payload TAKES);
+void sphinx_add_hop(struct sphinx_path *path, const struct pubkey *pubkey,
+		    const u8 *payload TAKES);
 
 /**
  * Compute the size of the serialized payloads.
@@ -286,6 +267,9 @@ sphinx_compressed_onion_deserialize(const tal_t *ctx, const u8 *src);
 #if DEVELOPER
 /* Override to force us to reject valid onion packets */
 extern bool dev_fail_process_onionpacket;
+
+/* Override to set custom onion error lengths. */
+extern unsigned dev_onion_reply_length;
 #endif
 
 #endif /* LIGHTNING_COMMON_SPHINX_H */

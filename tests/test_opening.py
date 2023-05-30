@@ -398,18 +398,27 @@ def test_v2_rbf_liquidity_ad(node_factory, bitcoind, chainparams):
                                    funding_feerate=next_feerate)
     update = l1.rpc.openchannel_update(chan_id, bump['psbt'])
     assert update['commitments_secured']
+
     # Sign our inputs, and continue
     signed_psbt = l1.rpc.signpsbt(update['psbt'])['signed_psbt']
     l1.rpc.openchannel_signed(chan_id, signed_psbt)
+
+    # There's data in the datastore now (l2 only)
+    assert l1.rpc.listdatastore() == {'datastore': []}
+    only_one(l2.rpc.listdatastore("funder/{}".format(chan_id))['datastore'])
 
     # what happens when the channel opens?
     bitcoind.generate_block(6)
     l1.daemon.wait_for_log('to CHANNELD_NORMAL')
 
+    # Datastore should be cleaned up!
+    assert l1.rpc.listdatastore() == {'datastore': []}
+    assert l2.rpc.listdatastore() == {'datastore': []}
+
     # This should be the accepter's amount
     fundings = only_one(only_one(l1.rpc.listpeers()['peers'])['channels'])['funding']
-    # FIXME: The lease goes away :(
-    assert Millisatoshi(0) == Millisatoshi(fundings['remote_funds_msat'])
+    # The lease is still there!
+    assert Millisatoshi(amount * 1000) == fundings['remote_funds_msat']
 
     wait_for(lambda: [c['active'] for c in l1.rpc.listchannels(l1.get_channel_scid(l2))['channels']] == [True, True])
 
@@ -1490,6 +1499,10 @@ def test_zeroconf_forward(node_factory, bitcoind):
     # And now try the other way around: zeroconf channel first
     # followed by a public one.
     wait_for(lambda: len(l3.rpc.listchannels()['channels']) == 4)
+
+    # Make sure all htlcs completely settled!
+    wait_for(lambda: all(only_one(p['channels'])['htlcs'] == [] for p in l2.rpc.listpeers()['peers']))
+
     inv = l1.rpc.invoice(42, 'back1', 'desc')['bolt11']
     l3.rpc.pay(inv)
 
@@ -1894,3 +1907,22 @@ def test_zeroreserve_alldust(node_factory):
     # Now try with just a bit more
     l1.connect(l2)
     l1.rpc.fundchannel(l2.info['id'], minfunding + 1)
+
+
+@pytest.mark.xfail
+def test_coinbase_unspendable(node_factory, bitcoind):
+    """ A node should not be able to spend a coinbase output
+        before it's mature """
+
+    [l1] = node_factory.get_nodes(1)
+
+    addr = l1.rpc.newaddr()["bech32"]
+    bitcoind.rpc.generatetoaddress(1, addr)
+
+    addr2 = l1.rpc.newaddr()["bech32"]
+
+    # Wait til money in wallet
+    wait_for(lambda: len(l1.rpc.listfunds()['outputs']) == 1)
+    l1.rpc.withdraw(addr2, "all")
+    # Nothing sent to the mempool!
+    assert len(bitcoind.rpc.getrawmempool()) == 0

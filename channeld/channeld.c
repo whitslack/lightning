@@ -690,31 +690,20 @@ static void handle_peer_add_htlc(struct peer *peer, const u8 *msg)
 	u8 onion_routing_packet[TOTAL_PACKET_SIZE(ROUTING_INFO_SIZE)];
 	enum channel_add_err add_err;
 	struct htlc *htlc;
-#if EXPERIMENTAL_FEATURES
 	struct tlv_update_add_tlvs *tlvs;
-#endif
-	struct pubkey *blinding = NULL;
 
-	if (!fromwire_update_add_htlc
-#if EXPERIMENTAL_FEATURES
-	    (msg, msg, &channel_id, &id, &amount,
-	     &payment_hash, &cltv_expiry,
-	     onion_routing_packet, &tlvs)
-#else
-	    (msg, &channel_id, &id, &amount,
-	     &payment_hash, &cltv_expiry,
-	     onion_routing_packet)
-#endif
-		)
+	if (!fromwire_update_add_htlc(msg, msg, &channel_id, &id, &amount,
+				      &payment_hash, &cltv_expiry,
+				      onion_routing_packet, &tlvs)
+	    /* This is an *even* field: don't send if we didn't understand */
+	    || (tlvs->blinding && !feature_offered(peer->our_features->bits[INIT_FEATURE],
+						   OPT_ROUTE_BLINDING))) {
 		peer_failed_warn(peer->pps, &peer->channel_id,
 				 "Bad peer_add_htlc %s", tal_hex(msg, msg));
-
-#if EXPERIMENTAL_FEATURES
-	blinding = tlvs->blinding;
-#endif
+	}
 	add_err = channel_add_htlc(peer->channel, REMOTE, id, amount,
 				   cltv_expiry, &payment_hash,
-				   onion_routing_packet, blinding, &htlc, NULL,
+				   onion_routing_packet, tlvs->blinding, &htlc, NULL,
 				   /* We don't immediately fail incoming htlcs,
 				    * instead we wait and fail them after
 				    * they've been committed */
@@ -1491,11 +1480,7 @@ static void marshall_htlc_info(const tal_t *ctx,
 			memcpy(a.onion_routing_packet,
 			       htlc->routing,
 			       sizeof(a.onion_routing_packet));
-			if (htlc->blinding) {
-				a.blinding = htlc->blinding;
-				ecdh(a.blinding, &a.blinding_ss);
-			} else
-				a.blinding = NULL;
+			a.blinding = htlc->blinding;
 			a.fail_immediate = htlc->fail_immediate;
 			tal_arr_expand(added, a);
 		} else if (htlc->state == RCVD_REMOVE_COMMIT) {
@@ -2311,7 +2296,6 @@ static void peer_in(struct peer *peer, const u8 *msg)
 	case WIRE_PONG:
 	case WIRE_WARNING:
 	case WIRE_ERROR:
-	case WIRE_OBS2_ONION_MESSAGE:
 	case WIRE_ONION_MESSAGE:
 		abort();
 	}
@@ -2436,7 +2420,6 @@ static void resend_commitment(struct peer *peer, struct changed_htlc *last)
 					 last[i].id);
 
 		if (h->state == SENT_ADD_COMMIT) {
-#if EXPERIMENTAL_FEATURES
 			struct tlv_update_add_tlvs *tlvs;
 			if (h->blinding) {
 				tlvs = tlv_update_add_tlvs_new(tmpctx);
@@ -2444,17 +2427,12 @@ static void resend_commitment(struct peer *peer, struct changed_htlc *last)
 							 h->blinding);
 			} else
 				tlvs = NULL;
-#endif
 			msg = towire_update_add_htlc(NULL, &peer->channel_id,
 						     h->id, h->amount,
 						     &h->rhash,
 						     abs_locktime_to_blocks(
 							     &h->expiry),
-						     h->routing
-#if EXPERIMENTAL_FEATURES
-						     , tlvs
-#endif
-				);
+						     h->routing, tlvs);
 			peer_write(peer->pps, take(msg));
 		}
 	}
@@ -3320,6 +3298,7 @@ static void handle_offer_htlc(struct peer *peer, const u8 *inmsg)
 	const char *failstr;
 	struct amount_sat htlc_fee;
 	struct pubkey *blinding;
+	struct tlv_update_add_tlvs *tlvs;
 
 	if (!peer->channel_ready[LOCAL] || !peer->channel_ready[REMOTE])
 		status_failed(STATUS_FAIL_MASTER_IO,
@@ -3330,14 +3309,11 @@ static void handle_offer_htlc(struct peer *peer, const u8 *inmsg)
 					 onion_routing_packet, &blinding))
 		master_badmsg(WIRE_CHANNELD_OFFER_HTLC, inmsg);
 
-#if EXPERIMENTAL_FEATURES
-	struct tlv_update_add_tlvs *tlvs;
 	if (blinding) {
 		tlvs = tlv_update_add_tlvs_new(tmpctx);
 		tlvs->blinding = tal_dup(tlvs, struct pubkey, blinding);
 	} else
 		tlvs = NULL;
-#endif
 
 	e = channel_add_htlc(peer->channel, LOCAL, peer->htlc_id,
 			     amount, cltv_expiry, &payment_hash,
@@ -3355,11 +3331,7 @@ static void handle_offer_htlc(struct peer *peer, const u8 *inmsg)
 		msg = towire_update_add_htlc(NULL, &peer->channel_id,
 					     peer->htlc_id, amount,
 					     &payment_hash, cltv_expiry,
-					     onion_routing_packet
-#if EXPERIMENTAL_FEATURES
-					     , tlvs
-#endif
-			);
+					     onion_routing_packet, tlvs);
 		peer_write(peer->pps, take(msg));
 		start_commit_timer(peer);
 		/* Tell the master. */
@@ -3803,9 +3775,6 @@ static void init_channel(struct peer *peer)
 	struct channel_type *channel_type;
 	u32 *dev_disable_commit; /* Always NULL */
 	bool dev_fast_gossip;
-#if !DEVELOPER
-	bool dev_fail_process_onionpacket; /* Ignored */
-#endif
 
 	assert(!(fcntl(MASTER_FD, F_GETFL) & O_NONBLOCK));
 
@@ -3868,7 +3837,6 @@ static void init_channel(struct peer *peer)
 				    &remote_ann_bitcoin_sig,
 				    &channel_type,
 				    &dev_fast_gossip,
-				    &dev_fail_process_onionpacket,
 				    &dev_disable_commit,
 				    &pbases,
 				    &reestablish_only,

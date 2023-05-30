@@ -305,6 +305,16 @@ need to include `testnet=1`
     ./lightningd/lightningd &
     ./cli/lightning-cli help
 
+
+To install the built binaries into your system, you'll need to run `make install`:
+
+    make install
+
+On an M1 mac you may need to use this command instead:
+
+    sudo PATH="/usr/local/opt:$PATH"  LIBRARY_PATH=/opt/homebrew/lib CPATH=/opt/homebrew/include make install
+
+
 To Build on Arch Linux
 ---------------------
 
@@ -445,8 +455,8 @@ To compile for Alpine
 Get dependencies:
 ```
 apk update
-apk add ca-certificates alpine-sdk autoconf automake git libtool \
-  gmp-dev sqlite-dev python python3 py3-mako net-tools zlib-dev libsodium gettext
+apk add --virtual .build-deps ca-certificates alpine-sdk autoconf automake git libtool \
+  gmp-dev sqlite-dev python3 py3-mako net-tools zlib-dev libsodium gettext
 ```
 Clone lightning:
 ```
@@ -463,8 +473,11 @@ make install
 Clean up:
 ```
 cd .. && rm -rf lightning
-apk del ca-certificates alpine-sdk autoconf automake git libtool \
-  gmp-dev sqlite python3 py3-mako net-tools zlib-dev libsodium gettext
+apk del .build-deps
+```
+Install runtime dependencies:
+```
+apk add gmp libgcc libsodium sqlite-libs zlib
 ```
 
 Additional steps

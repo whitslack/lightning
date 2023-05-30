@@ -59,6 +59,7 @@ def getinfo2py(m):
         "lightning_dir": m.lightning_dir,  # PrimitiveField in generate_composite
         "blockheight": m.blockheight,  # PrimitiveField in generate_composite
         "network": m.network,  # PrimitiveField in generate_composite
+        "msatoshi_fees_collected": m.msatoshi_fees_collected,  # PrimitiveField in generate_composite
         "fees_collected_msat": amount2msat(m.fees_collected_msat),  # PrimitiveField in generate_composite
         "address": [getinfo_address2py(i) for i in m.address],  # ArrayField[composite] in generate_composite
         "binding": [getinfo_binding2py(i) for i in m.binding],  # ArrayField[composite] in generate_composite
@@ -785,6 +786,7 @@ def getroute_route2py(m):
         "id": hexlify(m.id),  # PrimitiveField in generate_composite
         "channel": m.channel,  # PrimitiveField in generate_composite
         "direction": m.direction,  # PrimitiveField in generate_composite
+        "msatoshi": m.msatoshi,  # PrimitiveField in generate_composite
         "amount_msat": amount2msat(m.amount_msat),  # PrimitiveField in generate_composite
         "delay": m.delay,  # PrimitiveField in generate_composite
         "style": str(m.style),  # EnumField in generate_composite
@@ -844,6 +846,26 @@ def listpays2py(m):
 def ping2py(m):
     return remove_default({
         "totlen": m.totlen,  # PrimitiveField in generate_composite
+    })
+
+
+def setchannel_channels2py(m):
+    return remove_default({
+        "peer_id": hexlify(m.peer_id),  # PrimitiveField in generate_composite
+        "channel_id": hexlify(m.channel_id),  # PrimitiveField in generate_composite
+        "short_channel_id": m.short_channel_id,  # PrimitiveField in generate_composite
+        "fee_base_msat": amount2msat(m.fee_base_msat),  # PrimitiveField in generate_composite
+        "fee_proportional_millionths": m.fee_proportional_millionths,  # PrimitiveField in generate_composite
+        "minimum_htlc_out_msat": amount2msat(m.minimum_htlc_out_msat),  # PrimitiveField in generate_composite
+        "warning_htlcmin_too_low": m.warning_htlcmin_too_low,  # PrimitiveField in generate_composite
+        "maximum_htlc_out_msat": amount2msat(m.maximum_htlc_out_msat),  # PrimitiveField in generate_composite
+        "warning_htlcmax_too_high": m.warning_htlcmax_too_high,  # PrimitiveField in generate_composite
+    })
+
+
+def setchannel2py(m):
+    return remove_default({
+        "channels": [setchannel_channels2py(i) for i in m.channels],  # ArrayField[composite] in generate_composite
     })
 
 

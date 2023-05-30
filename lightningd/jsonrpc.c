@@ -22,6 +22,7 @@
 #include <ccan/tal/str/str.h>
 #include <common/configdir.h>
 #include <common/json_command.h>
+#include <common/json_filter.h>
 #include <common/json_param.h>
 #include <common/memleak.h>
 #include <common/timeout.h>
@@ -461,6 +462,16 @@ struct command_result *command_success(struct command *cmd,
 {
 	assert(cmd);
 	assert(cmd->json_stream == result);
+
+	/* Filter will get upset if we close "result" object it didn't
+	 * see! */
+	if (cmd->filter) {
+		const char *err = json_stream_detach_filter(tmpctx, result);
+		if (err)
+			json_add_string(result, "warning_parameter_filter",
+					err);
+	}
+
 	json_object_end(result);
 	json_object_end(result);
 
@@ -491,6 +502,11 @@ struct command_result *command_fail(struct command *cmd, enum jsonrpc_errcode co
 	r = json_stream_fail_nodata(cmd, code, errmsg);
 
 	return command_failed(cmd, r);
+}
+
+struct json_filter **command_filter_ptr(struct command *cmd)
+{
+	return &cmd->filter;
 }
 
 struct command_result *command_still_pending(struct command *cmd)
@@ -600,6 +616,10 @@ struct json_stream *json_stream_success(struct command *cmd)
 {
 	struct json_stream *r = json_start(cmd);
 	json_object_start(r, "result");
+
+	/* We have results?  OK, start filtering */
+	if (cmd->filter)
+		json_stream_attach_filter(r, cmd->filter);
 	return r;
 }
 
@@ -863,7 +883,7 @@ REGISTER_PLUGIN_HOOK(rpc_command,
 static struct command_result *
 parse_request(struct json_connection *jcon, const jsmntok_t tok[])
 {
-	const jsmntok_t *method, *id, *params, *jsonrpc;
+	const jsmntok_t *method, *id, *params, *filter, *jsonrpc;
 	struct command *c;
 	struct rpc_command_hook_payload *rpc_hook;
 	bool completed;
@@ -876,6 +896,7 @@ parse_request(struct json_connection *jcon, const jsmntok_t tok[])
 
 	method = json_get_member(jcon->buffer, tok, "method");
 	params = json_get_member(jcon->buffer, tok, "params");
+	filter = json_get_member(jcon->buffer, tok, "filter");
 	id = json_get_member(jcon->buffer, tok, "id");
 
 	if (!id) {
@@ -909,6 +930,7 @@ parse_request(struct json_connection *jcon, const jsmntok_t tok[])
 	c->id_is_string = (id->type == JSMN_STRING);
 	c->id = json_strdup(c, jcon->buffer, id);
 	c->mode = CMD_NORMAL;
+	c->filter = NULL;
 	list_add_tail(&jcon->commands, &c->list);
 	tal_add_destructor(c, destroy_command);
 
@@ -920,6 +942,13 @@ parse_request(struct json_connection *jcon, const jsmntok_t tok[])
 	if (method->type != JSMN_STRING) {
 		return command_fail(c, JSONRPC2_INVALID_REQUEST,
 				    "Expected string for method");
+	}
+
+	if (filter) {
+		struct command_result *ret;
+		ret = parse_filter(c, "filter", jcon->buffer, filter);
+		if (ret)
+			return ret;
 	}
 
 	/* Debug was too chatty, so we use IO here, even though we're

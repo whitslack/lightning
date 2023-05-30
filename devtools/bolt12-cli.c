@@ -152,9 +152,9 @@ static void print_issuer(const char *issuer)
 	printf("issuer: %.*s\n", (int)tal_bytelen(issuer), issuer);
 }
 
-static void print_node_id(const struct point32 *node_id)
+static void print_node_id(const struct pubkey *node_id)
 {
-	printf("node_id: %s\n", type_to_string(tmpctx, struct point32, node_id));
+	printf("node_id: %s\n", type_to_string(tmpctx, struct pubkey, node_id));
 }
 
 static void print_quantity_min(u64 min)
@@ -260,7 +260,7 @@ static bool print_blindedpaths(struct blinded_path **paths,
 	size_t bp_idx = 0;
 
 	for (size_t i = 0; i < tal_count(paths); i++) {
-		struct onionmsg_path **p = paths[i]->path;
+		struct onionmsg_hop **p = paths[i]->path;
 		printf("blindedpath %zu/%zu: blinding %s",
 		       i, tal_count(paths),
 		       type_to_string(tmpctx, struct pubkey,
@@ -270,7 +270,7 @@ static bool print_blindedpaths(struct blinded_path **paths,
 		for (size_t j = 0; j < tal_count(p); j++) {
 			printf(" %s:%s",
 			       type_to_string(tmpctx, struct pubkey,
-					      &p[j]->node_id),
+					      &p[j]->blinded_node_id),
 			       tal_hex(tmpctx, p[j]->encrypted_recipient_data));
 			if (blindedpay) {
 				if (bp_idx < tal_count(blindedpay))
@@ -307,7 +307,7 @@ static void print_refund_for(const struct sha256 *payment_hash)
 static bool print_signature(const char *messagename,
 			    const char *fieldname,
 			    const struct tlv_field *fields,
-			    const struct point32 *node_id,
+			    const struct pubkey *node_id,
 			    const struct bip340sig *sig)
 {
 	struct sha256 m, shash;
@@ -318,11 +318,7 @@ static bool print_signature(const char *messagename,
 
 	merkle_tlv(fields, &m);
 	sighash_from_merkle(messagename, fieldname, &m, &shash);
-	if (secp256k1_schnorrsig_verify(secp256k1_ctx,
-					sig->u8,
-					shash.u.u8,
-					sizeof(shash.u.u8),
-					&node_id->pubkey) != 1) {
+	if (!check_schnorr_sig(&shash, &node_id->pubkey, sig)) {
 		fprintf(stderr, "%s: INVALID\n", fieldname);
 		return false;
 	}
@@ -367,11 +363,11 @@ static bool print_recurrence_counter_with_base(const u32 *recurrence_counter,
 	return true;
 }
 
-static void print_payer_key(const struct point32 *payer_key,
+static void print_payer_key(const struct pubkey *payer_key,
 			    const u8 *payer_info)
 {
 	printf("payer_key: %s",
-	       type_to_string(tmpctx, struct point32, payer_key));
+	       type_to_string(tmpctx, struct pubkey, payer_key));
 	if (payer_info)
 		printf(" (payer_info %s)", tal_hex(tmpctx, payer_info));
 	printf("\n");
@@ -461,13 +457,16 @@ int main(int argc, char *argv[])
 	char *hrp;
 	u8 *data;
 	char *fail;
+	bool to_hex = false;
 
 	common_setup(argv[0]);
 	deprecated_apis = true;
 
 	opt_set_alloc(opt_allocfn, tal_reallocfn, tal_freefn);
 	opt_register_noarg("--help|-h", opt_usage_and_exit,
-			   "<decode> <bolt12>", "Show this message");
+			   "decode|decodehex <bolt12>\n"
+			   "encodehex <hrp> <hexstr>...",
+			   "Show this message");
 	opt_register_version();
 
 	opt_early_parse(argc, argv, opt_log_stderr_exit);
@@ -478,8 +477,37 @@ int main(int argc, char *argv[])
 		errx(ERROR_USAGE, "Need at least one argument\n%s",
 		     opt_usage(argv[0], NULL));
 
-	if (!streq(method, "decode"))
-		errx(ERROR_USAGE, "Need decode argument\n%s",
+	if (streq(method, "encodehex")) {
+		char *nospaces;
+
+		if (argc < 4)
+			errx(ERROR_USAGE, "Need hrp and hexstr...\n%s",
+			     opt_usage(argv[0], NULL));
+		nospaces = tal_arr(ctx, char, 0);
+		for (size_t i = 3; i < argc; i++) {
+			const char *src;
+
+			for (src = argv[i]; *src; src++) {
+				if (cisspace(*src))
+					continue;
+				tal_arr_expand(&nospaces, *src);
+			}
+		}
+		data = tal_hexdata(ctx, nospaces, tal_bytelen(nospaces));
+		if (!data)
+			errx(ERROR_USAGE, "Invalid hexstr\n%s",
+			     opt_usage(argv[0], NULL));
+		printf("%s\n", to_bech32_charset(ctx, argv[2], data));
+		goto out;
+	}
+
+	if (streq(method, "decode"))
+		to_hex = false;
+	else if (streq(method, "decodehex"))
+		to_hex = true;
+	else
+		errx(ERROR_USAGE,
+		     "Need encodehex/decode/decodehex argument\n%s",
 		     opt_usage(argv[0], NULL));
 
 	if (!argv[2])
@@ -489,6 +517,34 @@ int main(int argc, char *argv[])
 	if (!from_bech32_charset(ctx, argv[2], strlen(argv[2]), &hrp, &data))
 		errx(ERROR_USAGE, "Bad bech32 string\n%s",
 		     opt_usage(argv[0], NULL));
+
+	if (to_hex) {
+		const u8 *cursor = data;
+		size_t max = tal_bytelen(data);
+
+		printf("%s %s\n", hrp, tal_hex(ctx, data));
+		/* Now break down each element */
+		while (max) {
+			bigsize_t len;
+			const u8 *s = cursor;
+			fromwire_bigsize(&cursor, &max);
+			if (!cursor)
+				errx(ERROR_BAD_DECODE, "Bad type");
+			printf("%s ", tal_hexstr(ctx, s, cursor - s));
+
+			s = cursor;
+			len = fromwire_bigsize(&cursor, &max);
+			if (!cursor)
+				errx(ERROR_BAD_DECODE, "Bad len");
+			printf("%s ", tal_hexstr(ctx, s, cursor - s));
+			s = cursor;
+			fromwire(&cursor, &max, NULL, len);
+			if (!cursor)
+				errx(ERROR_BAD_DECODE, "Bad value");
+			printf("%s\n", tal_hexstr(ctx, s, cursor - s));
+		}
+		goto out;
+	}
 
 	if (streq(hrp, "lno")) {
 		const struct tlv_offer *offer
@@ -657,6 +713,7 @@ int main(int argc, char *argv[])
 	} else
 		errx(ERROR_BAD_DECODE, "Unknown prefix %s", hrp);
 
+out:
 	tal_free(ctx);
 	common_shutdown();
 

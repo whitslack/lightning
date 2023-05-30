@@ -4,6 +4,7 @@
 #include <ccan/mem/mem.h>
 #include <common/onion.h>
 #include <common/onionreply.h>
+#include <common/overflows.h>
 #include <common/sphinx.h>
 
 
@@ -14,8 +15,6 @@
 
 
 #define BLINDING_FACTOR_SIZE 32
-
-#define ONION_REPLY_SIZE 256
 
 #define RHO_KEYTYPE "rho"
 
@@ -103,17 +102,29 @@ size_t sphinx_path_payloads_size(const struct sphinx_path *path)
 	return size;
 }
 
-void sphinx_add_hop(struct sphinx_path *path, const struct pubkey *pubkey,
-		    const u8 *payload TAKES)
+bool sphinx_add_hop_has_length(struct sphinx_path *path, const struct pubkey *pubkey,
+			       const u8 *payload TAKES)
 {
 	struct sphinx_hop sp;
+	bigsize_t lenlen, prepended_len;
+
+	/* You promised size was prepended! */
+	if (tal_bytelen(payload) == 0)
+		return false;
+	lenlen = bigsize_get(payload, tal_bytelen(payload), &prepended_len);
+	if (add_overflows_u64(lenlen, prepended_len))
+		return false;
+	if (lenlen + prepended_len != tal_bytelen(payload))
+		return false;
+
 	sp.raw_payload = tal_dup_talarr(path, u8, payload);
 	sp.pubkey = *pubkey;
 	tal_arr_expand(&path->hops, sp);
+	return true;
 }
 
-void sphinx_add_modern_hop(struct sphinx_path *path, const struct pubkey *pubkey,
-			   const u8 *payload TAKES)
+void sphinx_add_hop(struct sphinx_path *path, const struct pubkey *pubkey,
+		    const u8 *payload TAKES)
 {
 	u8 *with_len = tal_arr(NULL, u8, 0);
 	size_t len = tal_bytelen(payload);
@@ -122,7 +133,8 @@ void sphinx_add_modern_hop(struct sphinx_path *path, const struct pubkey *pubkey
 	if (taken(payload))
 		tal_free(payload);
 
-	sphinx_add_hop(path, pubkey, take(with_len));
+	if (!sphinx_add_hop_has_length(path, pubkey, take(with_len)))
+		abort();
 }
 
 /* Small helper to append data to a buffer and update the position
@@ -601,7 +613,8 @@ struct route_step *process_onionpacket(
 	u8 *paddedheader;
 	size_t payload_size;
 	bigsize_t shift_size;
-	bool valid;
+	const u8 *cursor;
+	size_t max;
 
 	step->next = talz(step, struct onionpacket);
 	step->next->version = msg->version;
@@ -624,23 +637,29 @@ struct route_step *process_onionpacket(
 	if (!blind_group_element(&step->next->ephemeralkey, &msg->ephemeralkey, blind))
 		return tal_free(step);
 
-	payload_size = onion_payload_length(paddedheader,
-					    tal_bytelen(msg->routinginfo),
-					    has_realm,
-					    &valid, NULL);
+	/* Now, try to pull data out. */
+	cursor = paddedheader;
+	max = tal_bytelen(msg->routinginfo);
 
-	/* Can't decode?  Treat it as terminal. */
-	if (!valid) {
-		shift_size = payload_size;
-		memset(step->next->hmac.bytes, 0, sizeof(step->next->hmac.bytes));
-	} else {
-		assert(payload_size <= tal_bytelen(msg->routinginfo) - HMAC_SIZE);
-		/* Copy hmac */
-		shift_size = payload_size + HMAC_SIZE;
-		memcpy(step->next->hmac.bytes,
-		       paddedheader + payload_size, HMAC_SIZE);
-	}
-	step->raw_payload = tal_dup_arr(step, u8, paddedheader, payload_size, 0);
+	/* Any of these could fail, falling thru with cursor == NULL */
+	payload_size = fromwire_bigsize(&cursor, &max);
+	/* FIXME: raw_payload *includes* the length, which is redundant and
+	 * means we can't just ust fromwire_tal_arrn. */
+	fromwire_pad(&cursor, &max, payload_size);
+	if (cursor != NULL)
+		step->raw_payload = tal_dup_arr(step, u8, paddedheader,
+						cursor - paddedheader, 0);
+	fromwire_hmac(&cursor, &max, &step->next->hmac);
+
+	/* BOLT-remove-legacy-onion #4:
+	 * Since no `payload` TLV value can ever be shorter than 2 bytes, `length` values of 0 and 1 are
+	 * reserved.  (`0` indicated a legacy format no longer supported, and `1` is reserved for future
+	 * use). */
+	if (payload_size < 2 || !cursor)
+		return tal_free(step);
+
+	/* This includes length field and hmac */
+	shift_size = cursor - paddedheader;
 
 	/* Left shift the current payload out and make the remainder the new onion */
 	step->next->routinginfo = tal_dup_arr(step->next,
@@ -658,16 +677,35 @@ struct route_step *process_onionpacket(
 	return step;
 }
 
+#if DEVELOPER
+unsigned dev_onion_reply_length = 256;
+#endif
+
 struct onionreply *create_onionreply(const tal_t *ctx,
 				     const struct secret *shared_secret,
 				     const u8 *failure_msg)
 {
 	size_t msglen = tal_count(failure_msg);
-	size_t padlen = ONION_REPLY_SIZE - msglen;
+	size_t padlen;
 	struct onionreply *reply = tal(ctx, struct onionreply);
 	u8 *payload = tal_arr(ctx, u8, 0);
 	struct secret key;
 	struct hmac hmac;
+
+	/* BOLT #4:
+	 * The _erring node_:
+	 * - SHOULD set `pad` such that the `failure_len` plus `pad_len`
+	 *  is equal to  256.
+	 *   - Note: this value is 118 bytes longer than the longest
+	 *    currently-defined message.
+	 */
+	const u16 onion_reply_size = IFDEV(dev_onion_reply_length, 256);
+
+	/* We never do this currently, but could in future! */
+	if (msglen > onion_reply_size)
+		padlen = 0;
+	else
+		padlen = onion_reply_size - msglen;
 
 	/* BOLT #4:
 	 *
@@ -687,15 +725,8 @@ struct onionreply *create_onionreply(const tal_t *ctx,
 	towire_u16(&payload, padlen);
 	towire_pad(&payload, padlen);
 
-	/* BOLT #4:
-	 *
-	 * The _erring node_:
-	 *   - SHOULD set `pad` such that the `failure_len` plus `pad_len` is
-	 *     equal to 256.
-	 *     - Note: this value is 118 bytes longer than the longest
-	 *       currently-defined message.
-	 */
-	assert(tal_count(payload) == ONION_REPLY_SIZE + 4);
+	/* Two bytes for each length: failure_len and pad_len */
+	assert(tal_count(payload) == onion_reply_size + 4);
 
 	/* BOLT #4:
 	 *
@@ -742,21 +773,17 @@ u8 *unwrap_onionreply(const tal_t *ctx,
 		      int *origin_index)
 {
 	struct onionreply *r;
-	struct secret key;
-	struct hmac hmac;
 	const u8 *cursor;
-	u8 *final;
 	size_t max;
 	u16 msglen;
-
-	if (tal_count(reply->contents) != ONION_REPLY_SIZE + sizeof(hmac) + 4) {
-		return NULL;
-	}
 
 	r = new_onionreply(tmpctx, reply->contents);
 	*origin_index = -1;
 
 	for (int i = 0; i < numhops; i++) {
+		struct secret key;
+		struct hmac hmac, expected_hmac;
+
 		/* Since the encryption is just XORing with the cipher
 		 * stream encryption is identical to decryption */
 		r = wrap_onionreply(tmpctx, &shared_secrets[i], r);
@@ -764,30 +791,29 @@ u8 *unwrap_onionreply(const tal_t *ctx,
 		/* Check if the HMAC matches, this means that this is
 		 * the origin */
 		subkey_from_hmac("um", &shared_secrets[i], &key);
-		compute_hmac(&key, r->contents + sizeof(hmac.bytes),
-			     tal_count(r->contents) - sizeof(hmac.bytes),
-			     NULL, 0, &hmac);
-		if (memcmp(hmac.bytes, r->contents, sizeof(hmac.bytes)) == 0) {
+
+		cursor = r->contents;
+		max = tal_count(r->contents);
+
+		fromwire_hmac(&cursor, &max, &hmac);
+		/* Too short. */
+		if (!cursor)
+			return NULL;
+
+		compute_hmac(&key, cursor, max, NULL, 0, &expected_hmac);
+		if (hmac_eq(&hmac, &expected_hmac)) {
 			*origin_index = i;
 			break;
 		}
 	}
+
+	/* Didn't find source, it's garbled */
 	if (*origin_index == -1) {
 		return NULL;
 	}
 
-	cursor = r->contents + sizeof(hmac);
-	max = tal_count(r->contents) - sizeof(hmac);
 	msglen = fromwire_u16(&cursor, &max);
-
-	if (msglen > ONION_REPLY_SIZE) {
-		return NULL;
-	}
-
-	final = tal_arr(ctx, u8, msglen);
-	if (!fromwire(&cursor, &max, final, msglen))
-		return tal_free(final);
-	return final;
+	return fromwire_tal_arrn(ctx, &cursor, &max, msglen);
 }
 
 struct onionpacket *sphinx_decompress(const tal_t *ctx,

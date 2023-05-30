@@ -16,8 +16,7 @@
 /* We need to keep the reply path around so we can reply with invoice */
 struct invreq {
 	struct tlv_invoice_request *invreq;
-	struct tlv_onionmsg_payload_reply_path *reply_path;
-	struct tlv_obs2_onionmsg_payload_reply_path *obs2_reply_path;
+	struct blinded_path *reply_path;
 
 	/* The offer, once we've looked it up. */
 	struct tlv_offer *offer;
@@ -36,8 +35,8 @@ fail_invreq_level(struct command *cmd,
 		  const char *fmt, va_list ap)
 {
 	char *full_fmt, *msg;
+	struct tlv_onionmsg_tlv *payload;
 	struct tlv_invoice_error *err;
-	u8 *errdata;
 
 	full_fmt = tal_fmt(tmpctx, "Failed invoice_request");
 	if (invreq->invreq) {
@@ -62,10 +61,10 @@ fail_invreq_level(struct command *cmd,
 	err->error = tal_dup_arr(err, char, msg, strlen(msg), 0);
 	/* FIXME: Add suggested_value / erroneous_field! */
 
-	errdata = tal_arr(cmd, u8, 0);
-	towire_tlv_invoice_error(&errdata, err);
-	return send_onion_reply(cmd, invreq->reply_path, invreq->obs2_reply_path,
-				"invoice_error", errdata);
+	payload = tlv_onionmsg_tlv_new(tmpctx);
+	payload->invoice_error = tal_arr(payload, u8, 0);
+	towire_tlv_invoice_error(&payload->invoice_error, err);
+	return send_onion_reply(cmd, invreq->reply_path, payload);
 }
 
 static struct command_result *WARN_UNUSED_RESULT PRINTF_FMT(3,4)
@@ -137,15 +136,14 @@ static void set_recurring_inv_expiry(struct tlv_invoice *inv, u64 last_pay)
 /* We rely on label forms for uniqueness. */
 static void json_add_label(struct json_stream *js,
 			   const struct sha256 *offer_id,
-			   const struct point32 *payer_key,
+			   const struct pubkey *payer_key,
 			   const u32 counter)
 {
 	char *label;
 
 	label = tal_fmt(tmpctx, "%s-%s-%u",
 			type_to_string(tmpctx, struct sha256, offer_id),
-			type_to_string(tmpctx, struct point32,
-				       payer_key),
+			type_to_string(tmpctx, struct pubkey, payer_key),
 			counter);
 	json_add_string(js, "label", label);
 }
@@ -172,6 +170,7 @@ static struct command_result *createinvoice_done(struct command *cmd,
 {
 	char *hrp;
 	u8 *rawinv;
+	struct tlv_onionmsg_tlv *payload;
 	const jsmntok_t *t;
 
 	/* We have a signed invoice, use it as a reply. */
@@ -184,8 +183,9 @@ static struct command_result *createinvoice_done(struct command *cmd,
 					json_tok_full(buf, t));
 	}
 
-	return send_onion_reply(cmd, ir->reply_path, ir->obs2_reply_path,
-				"invoice", rawinv);
+	payload = tlv_onionmsg_tlv_new(tmpctx);
+	payload->invoice = rawinv;
+	return send_onion_reply(cmd, ir->reply_path, payload);
 }
 
 static struct command_result *createinvoice_error(struct command *cmd,
@@ -424,18 +424,14 @@ static struct command_result *check_previous_invoice(struct command *cmd,
  */
 static bool check_payer_sig(struct command *cmd,
 			    const struct tlv_invoice_request *invreq,
-			    const struct point32 *payer_key,
+			    const struct pubkey *payer_key,
 			    const struct bip340sig *sig)
 {
 	struct sha256 merkle, sighash;
 	merkle_tlv(invreq->fields, &merkle);
 	sighash_from_merkle("invoice_request", "signature", &merkle, &sighash);
 
-	return secp256k1_schnorrsig_verify(secp256k1_ctx,
-					   sig->u8,
-					   sighash.u.u8,
-					   sizeof(sighash.u.u8),
-					   &payer_key->pubkey) == 1;
+	return check_schnorr_sig(&sighash, &payer_key->pubkey, sig);
 }
 
 static struct command_result *invreq_amount_by_quantity(struct command *cmd,
@@ -778,7 +774,7 @@ static struct command_result *listoffers_done(struct command *cmd,
 	/* FIXME: Insert paths and payinfo */
 
 	ir->inv->issuer = tal_dup_talarr(ir->inv, char, ir->offer->issuer);
-	ir->inv->node_id = tal_dup(ir->inv, struct point32, ir->offer->node_id);
+	ir->inv->node_id = tal_dup(ir->inv, struct pubkey, ir->offer->node_id);
 	/* BOLT-offers #12:
 	 *  - MUST set (or not set) `quantity` exactly as the invoice_request
 	 *    did.
@@ -789,7 +785,7 @@ static struct command_result *listoffers_done(struct command *cmd,
 	/* BOLT-offers #12:
 	 *  - MUST set `payer_key` exactly as the invoice_request did.
 	 */
-	ir->inv->payer_key = tal_dup(ir->inv, struct point32,
+	ir->inv->payer_key = tal_dup(ir->inv, struct pubkey,
 				     ir->invreq->payer_key);
 
 	/* BOLT-offers #12:
@@ -835,15 +831,13 @@ static struct command_result *handle_offerless_request(struct command *cmd,
 
 struct command_result *handle_invoice_request(struct command *cmd,
 					      const u8 *invreqbin,
-					      struct tlv_onionmsg_payload_reply_path *reply_path,
-					      struct tlv_obs2_onionmsg_payload_reply_path *obs2_reply_path)
+					      struct blinded_path *reply_path)
 {
 	size_t len = tal_count(invreqbin);
 	struct invreq *ir = tal(cmd, struct invreq);
 	struct out_req *req;
 	int bad_feature;
 
-	ir->obs2_reply_path = tal_steal(ir, obs2_reply_path);
 	ir->reply_path = tal_steal(ir, reply_path);
 
 	ir->invreq = fromwire_tlv_invoice_request(cmd, &invreqbin, &len);

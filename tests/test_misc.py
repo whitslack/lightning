@@ -927,6 +927,16 @@ def test_cli(node_factory):
     j, _ = json.JSONDecoder().raw_decode(out)
     assert 'help [command]' in j['help'][0]['verbose']
 
+    # Test filtering
+    out = subprocess.check_output(['cli/lightning-cli',
+                                   '--network={}'.format(TEST_NETWORK),
+                                   '--lightning-dir={}'
+                                   .format(l1.daemon.lightning_dir),
+                                   '-J', '--filter={"help":[{"command":true}]}',
+                                   'help', 'help']).decode('utf-8')
+    j, _ = json.JSONDecoder().raw_decode(out)
+    assert j == {'help': [{'command': 'help [command]'}]}
+
     # Test missing parameters.
     try:
         # This will error due to missing parameters.
@@ -2281,6 +2291,10 @@ def test_makesecret(node_factory):
     assert l1.rpc.makesecret(hex="736362207365637265")["secret"] != secret
     assert l1.rpc.makesecret(hex="7363622073656372657401")["secret"] != secret
 
+    # Using string works!
+    assert l1.rpc.makesecret(string="scb secret")["secret"] == secret
+    assert l1.rpc.makesecret(None, "scb secret")["secret"] == secret
+
 
 def test_staticbackup(node_factory):
     """
@@ -2312,7 +2326,9 @@ def test_emergencyrecover(node_factory, bitcoind):
     """
     Test emergencyrecover
     """
-    l1, l2 = node_factory.get_nodes(2, opts=[{}, {}])
+    l1, l2 = node_factory.get_nodes(2, opts=[{'allow_broken_log': True, 'may_reconnect': True},
+                                             {'may_reconnect': True}])
+
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     c12, _ = l1.fundchannel(l2, 10**5)
     stubs = l1.rpc.emergencyrecover()["stubs"]
@@ -2331,6 +2347,18 @@ def test_emergencyrecover(node_factory, bitcoind):
 
     listfunds = l1.rpc.listfunds()["channels"][0]
     assert listfunds["short_channel_id"] == "1x1x1"
+
+    l1.daemon.wait_for_log('peer_out WIRE_ERROR')
+    l2.daemon.wait_for_log('State changed from CHANNELD_NORMAL to AWAITING_UNILATERAL')
+
+    bitcoind.generate_block(5, wait_for_mempool=1)
+    sync_blockheight(bitcoind, [l1, l2])
+
+    l1.daemon.wait_for_log(r'All outputs resolved.*')
+    wait_for(lambda: l1.rpc.listfunds()["channels"][0]["state"] == "ONCHAIN")
+    # Check if funds are recovered.
+    assert l1.rpc.listfunds()["channels"][0]["state"] == "ONCHAIN"
+    assert l2.rpc.listfunds()["channels"][0]["state"] == "ONCHAIN"
 
 
 def test_commitfee_option(node_factory):
@@ -2740,6 +2768,54 @@ def test_torv2_in_db(node_factory):
     l1.stop()
     l1.db_manip("UPDATE peers SET address='3fyb44wdhnd2ghhl.onion:1234';")
     l1.start()
+
+
+def test_field_filter(node_factory, chainparams):
+    l1, l2 = node_factory.get_nodes(2)
+
+    addr1 = l1.rpc.newaddr('bech32')['bech32']
+    addr2 = l1.rpc.newaddr('p2sh-segwit')['p2sh-segwit']
+    inv = l1.rpc.invoice(123000, 'label', 'description', 3700, [addr1, addr2])
+
+    # Simple case: single field
+    dec = l1.rpc.call('decodepay', {'bolt11': inv['bolt11']}, filter={"currency": True})
+    assert dec == {"currency": chainparams['bip173_prefix']}
+
+    # Use context manager:
+    with l1.rpc.reply_filter({"currency": True}):
+        dec = l1.rpc.decodepay(bolt11=inv['bolt11'])
+    assert dec == {"currency": chainparams['bip173_prefix']}
+
+    # Two fields
+    dec = l1.rpc.call('decodepay', {'bolt11': inv['bolt11']}, filter={"currency": True, "payment_hash": True})
+    assert dec == {"currency": chainparams['bip173_prefix'],
+                   "payment_hash": inv['payment_hash']}
+
+    # Nested fields
+    dec = l1.rpc.call('decodepay', {'bolt11': inv['bolt11']},
+                      filter={"currency": True,
+                              "payment_hash": True,
+                              "fallbacks": [{"type": True}]})
+    assert dec == {"currency": chainparams['bip173_prefix'],
+                   "payment_hash": inv['payment_hash'],
+                   "fallbacks": [{"type": 'P2WPKH'}, {"type": 'P2SH'}]}
+
+    # Nonexistent fields.
+    dec = l1.rpc.call('decodepay', {'bolt11': inv['bolt11']},
+                      filter={"foobar": True})
+    assert dec == {}
+
+    # Bad filters
+    dec = l1.rpc.call('decodepay', {'bolt11': inv['bolt11']},
+                      filter={"currency": True,
+                              "payment_hash": True,
+                              "fallbacks": {'type': True}})
+    assert dec['warning_parameter_filter'] == '.fallbacks is an array'
+
+    # C plugins implement filters!
+    res = l1.rpc.call('decode', {'string': inv['bolt11']},
+                      filter={"currency": True})
+    assert res == {"currency": chainparams['bip173_prefix']}
 
 
 def test_checkmessage_pubkey_not_found(node_factory):

@@ -4,6 +4,7 @@
 #include <common/ecdh.h>
 #include <common/errcode.h>
 #include <common/hsm_encryption.h>
+#include <common/hsm_version.h>
 #include <common/json_command.h>
 #include <common/json_param.h>
 #include <common/jsonrpc_errors.h>
@@ -109,18 +110,33 @@ struct ext_key *hsm_init(struct lightningd *ld)
 							 IFDEV(ld->dev_force_privkey, NULL),
 							 IFDEV(ld->dev_force_bip32_seed, NULL),
 							 IFDEV(ld->dev_force_channel_secrets, NULL),
-							 IFDEV(ld->dev_force_channel_secrets_shaseed, NULL))))
+							  IFDEV(ld->dev_force_channel_secrets_shaseed, NULL),
+							  HSM_MIN_VERSION,
+							  HSM_MAX_VERSION)))
 		err(EXITCODE_HSM_GENERIC_ERROR, "Writing init msg to hsm");
 
 	bip32_base = tal(ld, struct ext_key);
 	msg = wire_sync_read(tmpctx, ld->hsm_fd);
-	if (!fromwire_hsmd_init_reply(msg,
-				      &ld->id, bip32_base,
-				      &ld->bolt12_base,
-				      &ld->onion_reply_secret)) {
-		if (ld->config.keypass)
-			errx(EXITCODE_HSM_BAD_PASSWORD, "Wrong password for encrypted hsm_secret.");
-		errx(EXITCODE_HSM_GENERIC_ERROR, "HSM did not give init reply");
+	if (!fromwire_hsmd_init_reply_v2(msg,
+					 &ld->id, bip32_base,
+					 &ld->bolt12_base,
+					 &ld->onion_reply_secret)) {
+		/* v1 had x-only pubkey */
+		u8 pubkey32[33];
+
+		pubkey32[0] = SECP256K1_TAG_PUBKEY_EVEN;
+		if (!fromwire_hsmd_init_reply_v1(msg,
+					 &ld->id, bip32_base,
+					 pubkey32 + 1,
+					 &ld->onion_reply_secret)) {
+			if (ld->config.keypass)
+				errx(EXITCODE_HSM_BAD_PASSWORD, "Wrong password for encrypted hsm_secret.");
+			errx(EXITCODE_HSM_GENERIC_ERROR, "HSM did not give init reply");
+		}
+		if (!pubkey_from_der(pubkey32, sizeof(pubkey32),
+				     &ld->bolt12_base))
+			errx(EXITCODE_HSM_GENERIC_ERROR,
+			     "HSM gave invalid v1 bolt12_base");
 	}
 
 	return bip32_base;
@@ -131,16 +147,30 @@ static struct command_result *json_makesecret(struct command *cmd,
 					   const jsmntok_t *obj UNNEEDED,
 					   const jsmntok_t *params)
 {
-	u8 *info;
+	u8 *data;
+	const char *strdata;
 	struct json_stream *response;
 	struct secret secret;
 
 	if (!param(cmd, buffer, params,
-		   p_req("hex", param_bin_from_hex, &info),
+		   p_opt("hex", param_bin_from_hex, &data),
+		   p_opt("string", param_string, &strdata),
 		   NULL))
 		return command_param_failed();
 
-	u8 *msg = towire_hsmd_derive_secret(cmd, info);
+	if (strdata) {
+		if (data)
+			return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
+					    "Cannot have both hex and string");
+		data = tal_dup_arr(cmd, u8, (u8 *)strdata, strlen(strdata), 0);
+	} else {
+		if (!data)
+			return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
+					    "Must have either hex or string");
+	}
+
+
+	u8 *msg = towire_hsmd_derive_secret(cmd, data);
 	if (!wire_sync_write(cmd->ld->hsm_fd, take(msg)))
 		return command_fail(cmd, LIGHTNINGD,
                      "Could not write to HSM: %s", strerror(errno));

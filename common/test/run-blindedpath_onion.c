@@ -24,6 +24,9 @@ struct amount_msat amount_msat(u64 millisatoshis UNNEEDED)
 /* Generated stub for amount_msat_eq */
 bool amount_msat_eq(struct amount_msat a UNNEEDED, struct amount_msat b UNNEEDED)
 { fprintf(stderr, "amount_msat_eq called!\n"); abort(); }
+/* Generated stub for amount_msat_less */
+bool amount_msat_less(struct amount_msat a UNNEEDED, struct amount_msat b UNNEEDED)
+{ fprintf(stderr, "amount_msat_less called!\n"); abort(); }
 /* Generated stub for amount_sat */
 struct amount_sat amount_sat(u64 satoshis UNNEEDED)
 { fprintf(stderr, "amount_sat called!\n"); abort(); }
@@ -108,12 +111,13 @@ static u8 *next_onion(const tal_t *ctx, u8 *omsg,
 {
 	struct onionpacket *op;
 	struct pubkey blinding, ephemeral;
-	struct pubkey next_node, next_blinding;
-	struct tlv_onionmsg_payload *om;
+	struct pubkey next_blinding;
+	struct tlv_onionmsg_tlv *om;
 	struct secret ss, onion_ss;
 	const u8 *cursor;
 	size_t max, maxlen;
 	struct route_step *rs;
+	struct tlv_encrypted_data_tlv *enc;
 
 	assert(fromwire_onion_message(tmpctx, omsg, &blinding, &omsg));
 	assert(pubkey_eq(&blinding, expected_blinding));
@@ -132,13 +136,14 @@ static u8 *next_onion(const tal_t *ctx, u8 *omsg,
 	cursor = rs->raw_payload;
 	max = tal_bytelen(rs->raw_payload);
 	maxlen = fromwire_bigsize(&cursor, &max);
-	om = fromwire_tlv_onionmsg_payload(tmpctx, &cursor, &maxlen);
+	om = fromwire_tlv_onionmsg_tlv(tmpctx, &cursor, &maxlen);
 
 	if (rs->nextcase == ONION_END)
 		return NULL;
 
-	assert(decrypt_enctlv(&blinding, &ss, om->encrypted_data_tlv, &next_node,
-			      &next_blinding));
+	enc = decrypt_encrypted_data(tmpctx, &blinding, &ss, om->encrypted_recipient_data);
+	assert(enc);
+	blindedpath_next_blinding(enc, &blinding, &ss, &next_blinding);
 	return towire_onion_message(ctx, &next_blinding,
 				    serialize_onionpacket(tmpctx, rs->next));
 }
@@ -149,7 +154,7 @@ int main(int argc, char *argv[])
 	struct pubkey id[4], blinding_pub[4], override_blinding_pub, alias[4];
 	struct secret self_id;
 	u8 *enctlv[4];
-	u8 *onionmsg_payload[4];
+	u8 *onionmsg_tlv[4];
 	u8 *omsg;
 	struct sphinx_path *sphinx_path;
 	struct secret *path_secrets;
@@ -168,8 +173,9 @@ int main(int argc, char *argv[])
 	pubkey_from_privkey(&blinding[ALICE], &blinding_pub[ALICE]);
 
 	enctlv[ALICE] = create_enctlv(tmpctx, &blinding[ALICE],
-				      &id[ALICE], &id[BOB],
-				      0, NULL, &blinding[BOB], &alias[ALICE]);
+				      &id[ALICE], &id[BOB], NULL,
+				      0, NULL, NULL, NULL, NULL,
+				      &blinding[BOB], &alias[ALICE]);
 
 	pubkey_from_privkey(&blinding[BOB], &blinding_pub[BOB]);
 
@@ -177,8 +183,8 @@ int main(int argc, char *argv[])
 	memset(&override_blinding, 7, sizeof(override_blinding));
 	pubkey_from_privkey(&override_blinding, &override_blinding_pub);
 	enctlv[BOB] = create_enctlv(tmpctx, &blinding[BOB],
-				    &id[BOB], &id[CAROL],
-				    0, &override_blinding_pub,
+				    &id[BOB], &id[CAROL], NULL,
+				    0, &override_blinding_pub, NULL, NULL, NULL,
 				    &blinding[CAROL], &alias[BOB]);
 
 	/* That replaced the blinding */
@@ -186,26 +192,26 @@ int main(int argc, char *argv[])
 	blinding_pub[CAROL] = override_blinding_pub;
 
 	enctlv[CAROL] = create_enctlv(tmpctx, &blinding[CAROL],
-				      &id[CAROL], &id[DAVE],
-				      35, NULL, &blinding[DAVE], &alias[CAROL]);
+				      &id[CAROL], &id[DAVE], NULL,
+				      35, NULL, NULL, NULL, NULL,
+				      &blinding[DAVE], &alias[CAROL]);
 
 	for (size_t i = 0; i < sizeof(self_id); i++)
 		self_id.data[i] = i+1;
 
 	enctlv[DAVE] = create_final_enctlv(tmpctx, &blinding[DAVE], &id[DAVE],
-					   0, &self_id, &alias[DAVE]);
+					   0, &self_id, NULL, &alias[DAVE]);
 	pubkey_from_privkey(&blinding[DAVE], &blinding_pub[DAVE]);
 
 	/* Create an onion which encodes this. */
 	sphinx_path = sphinx_path_new(tmpctx, NULL);
 	for (size_t i = 0; i < 4; i++) {
-		struct tlv_onionmsg_payload *payload
-			= tlv_onionmsg_payload_new(tmpctx);
-		payload->encrypted_data_tlv = enctlv[i];
-		onionmsg_payload[i] = tal_arr(tmpctx, u8, 0);
-		towire_tlv_onionmsg_payload(&onionmsg_payload[i], payload);
-		sphinx_add_modern_hop(sphinx_path, &alias[i],
-				      onionmsg_payload[i]);
+		struct tlv_onionmsg_tlv *payload
+			= tlv_onionmsg_tlv_new(tmpctx);
+		payload->encrypted_recipient_data = enctlv[i];
+		onionmsg_tlv[i] = tal_arr(tmpctx, u8, 0);
+		towire_tlv_onionmsg_tlv(&onionmsg_tlv[i], payload);
+		sphinx_add_hop(sphinx_path, &alias[i], onionmsg_tlv[i]);
 	}
 	op = create_onionpacket(tmpctx, sphinx_path, ROUTING_INFO_SIZE,
 				&path_secrets);
@@ -236,8 +242,8 @@ int main(int argc, char *argv[])
 			      type_to_string(tmpctx, struct pubkey, &blinding_pub[i]));
 		json_strfield("blinded_alias",
 			      type_to_string(tmpctx, struct pubkey, &alias[i]));
-		json_strfield("onionmsg_payload",
-			      tal_hex(tmpctx, onionmsg_payload[i]));
+		json_strfield("onionmsg_tlv",
+			      tal_hex(tmpctx, onionmsg_tlv[i]));
 		printf("\"enctlv\": \"%s\"}\n", tal_hex(tmpctx, enctlv[i]));
 
 		printf("}");

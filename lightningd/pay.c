@@ -1164,13 +1164,11 @@ send_payment(struct lightningd *ld,
 		ret = pubkey_from_node_id(&pubkey, &ids[i]);
 		assert(ret);
 
-		sphinx_add_hop(path, &pubkey,
+		sphinx_add_hop_has_length(path, &pubkey,
 			       take(onion_nonfinal_hop(NULL,
 					&route[i + 1].scid,
 					route[i + 1].amount,
-					base_expiry + route[i + 1].delay,
-					route[i].blinding,
-					route[i].enctlv)));
+					base_expiry + route[i + 1].delay)));
 	}
 
 	/* And finally set the final hop to the special values in
@@ -1189,14 +1187,14 @@ send_payment(struct lightningd *ld,
 	onion = onion_final_hop(cmd,
 				route[i].amount,
 				base_expiry + route[i].delay,
-				total_msat, route[i].blinding, route[i].enctlv,
+				total_msat,
 				payment_secret, payment_metadata);
 	if (!onion) {
 		return command_fail(cmd, PAY_DESTINATION_PERM_FAIL,
 				    "Destination does not support"
 				    " payment_secret");
 	}
-	sphinx_add_hop(path, &pubkey, onion);
+	sphinx_add_hop_has_length(path, &pubkey, onion);
 
 	/* Copy channels used along the route. */
 	channels = tal_arr(tmpctx, struct short_channel_id, n_hops);
@@ -1377,8 +1375,6 @@ static struct command_result *param_route_hops(struct command *cmd,
 		struct node_id *id;
 		struct short_channel_id *channel;
 		unsigned *delay, *direction;
-		struct pubkey *blinding;
-		u8 *enctlv;
 		int *ignored;
 
 		if (!param(cmd, buffer, t,
@@ -1390,8 +1386,6 @@ static struct command_result *param_route_hops(struct command *cmd,
 			   /* Allowed (getroute supplies it) but ignored */
 			   p_opt("direction", param_number, &direction),
 			   p_opt("style", param_route_hop_style, &ignored),
-			   p_opt("blinding", param_pubkey, &blinding),
-			   p_opt("encrypted_recipient_data", param_bin_from_hex, &enctlv),
 			   NULL))
 			return command_param_failed();
 
@@ -1399,8 +1393,6 @@ static struct command_result *param_route_hops(struct command *cmd,
 		(*hops)[i].node_id = *id;
 		(*hops)[i].delay = *delay;
 		(*hops)[i].scid = *channel;
-		(*hops)[i].blinding = blinding;
-		(*hops)[i].enctlv = enctlv;
 	}
 
 	return NULL;
@@ -1756,8 +1748,12 @@ static struct command_result *json_createonion(struct command *cmd,
 	else
 		sp = sphinx_path_new_with_key(cmd, assocdata, session_key);
 
-	for (size_t i=0; i<tal_count(hops); i++)
-		sphinx_add_hop(sp, &hops[i].pubkey, hops[i].raw_payload);
+	for (size_t i=0; i<tal_count(hops); i++) {
+		if (!sphinx_add_hop_has_length(sp, &hops[i].pubkey, hops[i].raw_payload))
+			return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
+					    "hops[%zi] payload is not prefixed with length!",
+					    i);
+	}
 
 	if (sphinx_path_payloads_size(sp) > *packet_size)
 		return command_fail(

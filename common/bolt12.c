@@ -1,4 +1,5 @@
 #include "config.h"
+#include <assert.h>
 #include <bitcoin/chainparams.h>
 #include <ccan/tal/str/str.h>
 #include <common/bech32_util.h>
@@ -73,25 +74,22 @@ static char *check_features_and_chain(const tal_t *ctx,
 bool bolt12_check_signature(const struct tlv_field *fields,
 			    const char *messagename,
 			    const char *fieldname,
-			    const struct point32 *key,
+			    const struct pubkey *key,
 			    const struct bip340sig *sig)
 {
 	struct sha256 m, shash;
 
 	merkle_tlv(fields, &m);
 	sighash_from_merkle(messagename, fieldname, &m, &shash);
-	return secp256k1_schnorrsig_verify(secp256k1_ctx,
-					   sig->u8,
-					   shash.u.u8,
-					   sizeof(shash.u.u8),
-					   &key->pubkey) == 1;
+
+	return check_schnorr_sig(&shash, &key->pubkey, sig);
 }
 
 static char *check_signature(const tal_t *ctx,
 			     const struct tlv_field *fields,
 			     const char *messagename,
 			     const char *fieldname,
-			     const struct point32 *node_id,
+			     const struct pubkey *node_id,
 			     const struct bip340sig *sig)
 {
 	if (!node_id)

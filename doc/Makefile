@@ -7,6 +7,7 @@ doc-wrongdir:
 MANPAGES := doc/lightning-cli.1 \
 	doc/lightningd.8 \
 	doc/lightningd-config.5 \
+	doc/lightningd-rpc.7 \
 	doc/lightning-addgossip.7 \
 	doc/lightning-autocleaninvoice.7 \
 	doc/lightning-batching.7 \
@@ -100,7 +101,8 @@ MANPAGES := doc/lightning-cli.1 \
 	doc/lightning-listnodes.7 \
 	doc/lightning-listconfigs.7 \
 	doc/lightning-help.7 \
-	doc/lightning-getlog.7
+	doc/lightning-getlog.7 \
+	doc/reckless.7
 
 doc-all: $(MANPAGES) doc/index.rst
 

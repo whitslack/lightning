@@ -122,7 +122,7 @@ struct lightningd {
 	struct node_id id;
 
 	/* The public base for our payer_id keys */
-	struct point32 bolt12_base;
+	struct pubkey bolt12_base;
 
 	/* The secret we put in onion message paths to know it's ours. */
 	struct secret onion_reply_secret;
@@ -283,7 +283,7 @@ struct lightningd {
 	u32 dev_max_funding_unconfirmed;
 
 	/* Special switches to test onion compatibility */
-	bool dev_ignore_modern_onion, dev_ignore_obsolete_onion;
+	bool dev_ignore_modern_onion;
 
 	/* Tell channeld to disable commits after this many. */
 	int dev_disable_commit;

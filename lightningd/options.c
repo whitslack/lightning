@@ -745,9 +745,6 @@ static void dev_register_opts(struct lightningd *ld)
 	opt_register_noarg("--dev-no-modern-onion", opt_set_bool,
 			   &ld->dev_ignore_modern_onion,
 			   "Ignore modern onion messages");
-	opt_register_noarg("--dev-no-obsolete-onion", opt_set_bool,
-			   &ld->dev_ignore_obsolete_onion,
-			   "Ignore obsolete onion messages");
 	opt_register_arg("--dev-disable-commit-after",
 			 opt_set_intval, opt_show_intval,
 			 &ld->dev_disable_commit,
@@ -755,6 +752,11 @@ static void dev_register_opts(struct lightningd *ld)
 	opt_register_noarg("--dev-no-ping-timer", opt_set_bool,
 			   &ld->dev_no_ping_timer,
 			   "Don't hang up if we don't get a ping response");
+	opt_register_arg("--dev-onion-reply-length",
+			 opt_set_uintval,
+			 opt_show_uintval,
+			 &dev_onion_reply_length,
+			 "Send onion errors of custom length");
 }
 #endif /* DEVELOPER */
 
@@ -1010,6 +1012,9 @@ static char *opt_set_onion_messages(struct lightningd *ld)
 	feature_set_or(ld->our_features,
 		       take(feature_set_for_feature(NULL,
 						    OPTIONAL_FEATURE(OPT_ONION_MESSAGES))));
+	feature_set_or(ld->our_features,
+		       take(feature_set_for_feature(NULL,
+						    OPTIONAL_FEATURE(OPT_ROUTE_BLINDING))));
 	return NULL;
 }
 
@@ -1084,7 +1089,7 @@ static void register_opts(struct lightningd *ld)
 	opt_register_early_noarg("--experimental-onion-messages",
 				 opt_set_onion_messages, ld,
 				 "EXPERIMENTAL: enable send, receive and relay"
-				 " of onion messages");
+				 " of onion messages and blinded payments");
 	opt_register_early_noarg("--experimental-offers",
 				 opt_set_offers, ld,
 				 "EXPERIMENTAL: enable send and receive of offers"

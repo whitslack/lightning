@@ -1372,12 +1372,15 @@ requests an RBF for a channel funding transaction.
   "rbf_channel": {
     "id": "03864ef025fde8fb587d989186ce6a4a186895ee44a926bfc370e2c366597a3f8f",
     "channel_id": "252d1b0a1e57895e84137f28cf19ab2c35847e284c112fefdecc7afeaa5c1de7",
+    "their_last_funding_msat": 100000000,
     "their_funding_msat": 100000000,
+    "our_last_funding_msat": 100000000,
     "funding_feerate_per_kw": 7500,
     "feerate_our_max": 10000,
     "feerate_our_min": 253,
     "channel_max_msat": 16777215000,
-    "locktime": 2453
+    "locktime": 2453,
+    "requested_lease_msat": 100000000,
   }
 }
 ```
@@ -1770,13 +1773,13 @@ The plugin must broadcast it and respond with the following fields:
 
 [jsonrpc-spec]: https://www.jsonrpc.org/specification
 [jsonrpc-notification-spec]: https://www.jsonrpc.org/specification#notification
-[bolt4]: https://github.com/lightningnetwork/lightning-rfc/blob/master/04-onion-routing.md
-[bolt4-failure-messages]: https://github.com/lightningnetwork/lightning-rfc/blob/master/04-onion-routing.md#failure-messages
-[bolt4-failure-onion]: https://github.com/lightningnetwork/lightning-rfc/blob/master/04-onion-routing.md#returning-errors
-[bolt2-open-channel]: https://github.com/lightningnetwork/lightning-rfc/blob/master/02-peer-protocol.md#the-open_channel-message
+[bolt4]: https://github.com/lightning/bolts/blob/master/04-onion-routing.md
+[bolt4-failure-messages]: https://github.com/lightning/bolts/blob/master/04-onion-routing.md#failure-messages
+[bolt4-failure-onion]: https://github.com/lightning/bolts/blob/master/04-onion-routing.md#returning-errors
+[bolt2-open-channel]: https://github.com/lightning/bolts/blob/master/02-peer-protocol.md#the-open_channel-message
 [sendcustommsg]: lightning-sendcustommsg.7.html
-[oddok]: https://github.com/lightningnetwork/lightning-rfc/blob/master/00-introduction.md#its-ok-to-be-odd
-[spec]: [https://github.com/lightningnetwork/lightning-rfc]
-[bolt9]: https://github.com/lightningnetwork/lightning-rfc/blob/master/09-features.md
+[oddok]: https://github.com/lightning/bolts/blob/master/00-introduction.md#its-ok-to-be-odd
+[spec]: [https://github.com/lightning/bolts]
+[bolt9]: https://github.com/lightning/bolts/blob/master/09-features.md
 [lightning-plugin]: lightning-plugin.7.md
 [pyln-client]: ../contrib/pyln-client

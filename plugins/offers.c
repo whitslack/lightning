@@ -17,7 +17,7 @@
 #include <plugins/offers_invreq_hook.h>
 #include <plugins/offers_offer.h>
 
-struct point32 id;
+struct pubkey id;
 u16 cltv_final;
 bool offers_enabled;
 
@@ -43,64 +43,13 @@ static struct command_result *sendonionmessage_error(struct command *cmd,
 	return command_hook_success(cmd);
 }
 
-/* FIXME: replyfield string interface is to accomodate obsolete API */
-static struct command_result *
-send_obs2_onion_reply(struct command *cmd,
-		      struct tlv_obs2_onionmsg_payload_reply_path *reply_path,
-		      const char *replyfield,
-		      const u8 *replydata)
-{
-	struct out_req *req;
-	size_t nhops = tal_count(reply_path->path);
-
-	req = jsonrpc_request_start(cmd->plugin, cmd, "sendobs2onionmessage",
-				    finished, sendonionmessage_error, NULL);
-
-	json_add_pubkey(req->js, "first_id", &reply_path->first_node_id);
-	json_add_pubkey(req->js, "blinding", &reply_path->blinding);
-	json_array_start(req->js, "hops");
-	for (size_t i = 0; i < nhops; i++) {
-		struct tlv_obs2_onionmsg_payload *omp;
-		u8 *tlv;
-
-		json_object_start(req->js, NULL);
-		json_add_pubkey(req->js, "id", &reply_path->path[i]->node_id);
-
-		omp = tlv_obs2_onionmsg_payload_new(tmpctx);
-		omp->enctlv = reply_path->path[i]->encrypted_recipient_data;
-
-		/* Put payload in last hop. */
-		if (i == nhops - 1) {
-			if (streq(replyfield, "invoice")) {
-				omp->invoice = cast_const(u8 *, replydata);
-			} else {
-				assert(streq(replyfield, "invoice_error"));
-				omp->invoice_error = cast_const(u8 *, replydata);
-			}
-		}
-		tlv = tal_arr(tmpctx, u8, 0);
-		towire_tlv_obs2_onionmsg_payload(&tlv, omp);
-		json_add_hex_talarr(req->js, "tlv", tlv);
-		json_object_end(req->js);
-	}
-	json_array_end(req->js);
-	return send_outreq(cmd->plugin, req);
-}
-
 struct command_result *
 send_onion_reply(struct command *cmd,
-		 struct tlv_onionmsg_payload_reply_path *reply_path,
-		 struct tlv_obs2_onionmsg_payload_reply_path *obs2_reply_path,
-		 const char *replyfield,
-		 const u8 *replydata)
+		 struct blinded_path *reply_path,
+		 struct tlv_onionmsg_tlv *payload)
 {
 	struct out_req *req;
 	size_t nhops;
-
-	/* Exactly one must be set! */
-	assert(!reply_path != !obs2_reply_path);
-	if (obs2_reply_path)
-		return send_obs2_onion_reply(cmd, obs2_reply_path, replyfield, replydata);
 
 	req = jsonrpc_request_start(cmd->plugin, cmd, "sendonionmessage",
 				    finished, sendonionmessage_error, NULL);
@@ -111,26 +60,22 @@ send_onion_reply(struct command *cmd,
 
 	nhops = tal_count(reply_path->path);
 	for (size_t i = 0; i < nhops; i++) {
-		struct tlv_onionmsg_payload *omp;
+		struct tlv_onionmsg_tlv *omp;
 		u8 *tlv;
 
 		json_object_start(req->js, NULL);
-		json_add_pubkey(req->js, "id", &reply_path->path[i]->node_id);
-
-		omp = tlv_onionmsg_payload_new(tmpctx);
-		omp->encrypted_data_tlv = reply_path->path[i]->encrypted_recipient_data;
+		json_add_pubkey(req->js, "id", &reply_path->path[i]->blinded_node_id);
 
 		/* Put payload in last hop. */
-		if (i == nhops - 1) {
-			if (streq(replyfield, "invoice")) {
-				omp->invoice = cast_const(u8 *, replydata);
-			} else {
-				assert(streq(replyfield, "invoice_error"));
-				omp->invoice_error = cast_const(u8 *, replydata);
-			}
-		}
+		if (i == nhops - 1)
+			omp = payload;
+		else
+			omp = tlv_onionmsg_tlv_new(tmpctx);
+
+		omp->encrypted_recipient_data = reply_path->path[i]->encrypted_recipient_data;
+
 		tlv = tal_arr(tmpctx, u8, 0);
-		towire_tlv_onionmsg_payload(&tlv, omp);
+		towire_tlv_onionmsg_tlv(&tlv, omp);
 		json_add_hex_talarr(req->js, "tlv", tlv);
 		json_object_end(req->js);
 	}
@@ -143,8 +88,7 @@ static struct command_result *onion_message_modern_call(struct command *cmd,
 							const jsmntok_t *params)
 {
 	const jsmntok_t *om, *replytok, *invreqtok, *invtok;
-	struct tlv_obs2_onionmsg_payload_reply_path *obs2_reply_path = NULL;
-	struct tlv_onionmsg_payload_reply_path *reply_path = NULL;
+	struct blinded_path *reply_path = NULL;
 
 	if (!offers_enabled)
 		return command_hook_success(cmd);
@@ -152,31 +96,20 @@ static struct command_result *onion_message_modern_call(struct command *cmd,
 	om = json_get_member(buf, params, "onion_message");
 	replytok = json_get_member(buf, om, "reply_blindedpath");
 	if (replytok) {
-		bool obs2;
-		json_to_bool(buf, json_get_member(buf, om, "obs2"), &obs2);
-		if (obs2) {
-			obs2_reply_path = json_to_obs2_reply_path(cmd, buf, replytok);
-			if (!obs2_reply_path)
-				plugin_err(cmd->plugin, "Invalid obs2 reply path %.*s?",
-					   json_tok_full_len(replytok),
-					   json_tok_full(buf, replytok));
-		} else {
-			reply_path = json_to_reply_path(cmd, buf, replytok);
-			if (!reply_path)
-				plugin_err(cmd->plugin, "Invalid reply path %.*s?",
-					   json_tok_full_len(replytok),
-					   json_tok_full(buf, replytok));
-		}
+		reply_path = json_to_blinded_path(cmd, buf, replytok);
+		if (!reply_path)
+			plugin_err(cmd->plugin, "Invalid reply path %.*s?",
+				   json_tok_full_len(replytok),
+				   json_tok_full(buf, replytok));
 	}
 
 	invreqtok = json_get_member(buf, om, "invoice_request");
 	if (invreqtok) {
 		const u8 *invreqbin = json_tok_bin_from_hex(tmpctx, buf, invreqtok);
-		if (reply_path || obs2_reply_path)
+		if (reply_path)
 			return handle_invoice_request(cmd,
 						      invreqbin,
-						      reply_path,
-						      obs2_reply_path);
+						      reply_path);
 		else
 			plugin_log(cmd->plugin, LOG_DBG,
 				   "invoice_request without reply_path");
@@ -186,7 +119,7 @@ static struct command_result *onion_message_modern_call(struct command *cmd,
 	if (invtok) {
 		const u8 *invbin = json_tok_bin_from_hex(tmpctx, buf, invtok);
 		if (invbin)
-			return handle_invoice(cmd, invbin, reply_path, obs2_reply_path);
+			return handle_invoice(cmd, invbin, reply_path);
 	}
 
 	return command_hook_success(cmd);
@@ -295,12 +228,12 @@ static void json_add_chains(struct json_stream *js,
 
 static void json_add_onionmsg_path(struct json_stream *js,
 				   const char *fieldname,
-				   const struct onionmsg_path *path,
+				   const struct onionmsg_hop *hop,
 				   const struct blinded_payinfo *payinfo)
 {
 	json_object_start(js, fieldname);
-	json_add_pubkey(js, "node_id", &path->node_id);
-	json_add_hex_talarr(js, "encrypted_recipient_data", path->encrypted_recipient_data);
+	json_add_pubkey(js, "blinded_node_id", &hop->blinded_node_id);
+	json_add_hex_talarr(js, "encrypted_recipient_data", hop->encrypted_recipient_data);
 	if (payinfo) {
 		json_add_u32(js, "fee_base_msat", payinfo->fee_base_msat);
 		json_add_u32(js, "fee_proportional_millionths",
@@ -321,6 +254,7 @@ static bool json_add_blinded_paths(struct json_stream *js,
 	json_array_start(js, "paths");
 	for (size_t i = 0; i < tal_count(paths); i++) {
 		json_object_start(js, NULL);
+		json_add_pubkey(js, "first_node_id", &paths[i]->first_node_id);
 		json_add_pubkey(js, "blinding", &paths[i]->blinding);
 		json_array_start(js, "path");
 		for (size_t j = 0; j < tal_count(paths[i]->path); j++) {
@@ -457,7 +391,7 @@ static void json_add_offer(struct json_stream *js, const struct tlv_offer *offer
 	}
 
 	if (offer->node_id)
-		json_add_point32(js, "node_id", offer->node_id);
+		json_add_pubkey(js, "node_id", offer->node_id);
 	else
 		valid = false;
 
@@ -623,7 +557,7 @@ static void json_add_b12_invoice(struct json_stream *js,
 	}
 
 	if (invoice->payer_key)
-		json_add_point32(js, "payer_key", invoice->payer_key);
+		json_add_pubkey(js, "payer_key", invoice->payer_key);
 	if (invoice->payer_info)
 		json_add_hex_talarr(js, "payer_info", invoice->payer_info);
 	if (invoice->payer_note)
@@ -711,7 +645,7 @@ static void json_add_b12_invoice(struct json_stream *js,
 	}
 
 	/* invoice_decode checked these */
-	json_add_point32(js, "node_id", invoice->node_id);
+	json_add_pubkey(js, "node_id", invoice->node_id);
 	json_add_bip340sig(js, "signature", invoice->signature);
 
 	json_add_bool(js, "valid", valid);
@@ -753,7 +687,7 @@ static void json_add_invoice_request(struct json_stream *js,
 		json_add_u32(js, "recurrence_start",
 			     *invreq->recurrence_start);
 	if (invreq->payer_key)
-		json_add_point32(js, "payer_key", invreq->payer_key);
+		json_add_pubkey(js, "payer_key", invreq->payer_key);
 	else {
 		json_add_string(js, "warning_invoice_request_missing_payer_key",
 				"invoice_request requires payer_key");
@@ -993,9 +927,7 @@ static const char *init(struct plugin *p,
 	rpc_scan(p, "getinfo",
 		 take(json_out_obj(NULL, NULL, NULL)),
 		 "{id:%}", JSON_SCAN(json_to_pubkey, &k));
-	if (secp256k1_xonly_pubkey_from_pubkey(secp256k1_ctx, &id.pubkey,
-					       NULL, &k.pubkey) != 1)
-		abort();
+	id.pubkey = k.pubkey;
 
 	rpc_scan(p, "listconfigs",
 		 take(json_out_obj(NULL, NULL, NULL)),

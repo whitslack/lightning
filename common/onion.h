@@ -5,15 +5,9 @@
 #include <common/amount.h>
 
 struct route_step;
-
-enum onion_payload_type {
-	ONION_V0_PAYLOAD = 0,
-	ONION_TLV_PAYLOAD = 1,
-};
+struct tlv_encrypted_data_tlv_payment_relay;
 
 struct onion_payload {
-	enum onion_payload_type type;
-
 	struct amount_msat amt_to_forward;
 	u32 outgoing_cltv;
 	struct amount_msat *total_msat;
@@ -32,56 +26,47 @@ struct onion_payload {
 u8 *onion_nonfinal_hop(const tal_t *ctx,
 		       const struct short_channel_id *scid,
 		       struct amount_msat forward,
-		       u32 outgoing_cltv,
-		       const struct pubkey *blinding,
-		       const u8 *enctlv);
+		       u32 outgoing_cltv);
 
 /* Note that this can fail if we supply payment_secret or payment_metadata and !use_tlv! */
 u8 *onion_final_hop(const tal_t *ctx,
 		    struct amount_msat forward,
 		    u32 outgoing_cltv,
 		    struct amount_msat total_msat,
-		    const struct pubkey *blinding,
-		    const u8 *enctlv,
 		    const struct secret *payment_secret,
 		    const u8 *payment_metadata);
 
-/**
- * onion_payload_length: measure payload length in decrypted onion.
- * @raw_payload: payload to look at.
- * @len: length of @raw_payload in bytes.
- * @has_realm: used for HTLCs, where first byte 0 is magical.
- * @valid: set to true if it is valid, false otherwise.
- * @type: if non-NULL, set to type of payload if *@valid is true.
- *
- * If @valid is set, there is room for the HMAC immediately following,
- * as the return value is <= ROUTING_INFO_SIZE - HMAC_SIZE.  Otherwise,
- * the return value is @len (i.e. the entire payload).
- */
-size_t onion_payload_length(const u8 *raw_payload, size_t len,
-			    bool has_realm,
-			    bool *valid,
-			    enum onion_payload_type *type);
+/* Blinding has more complex rules on what fields are encoded: this is the
+ * generic interface, as used by blindedpay.h */
+u8 *onion_blinded_hop(const tal_t *ctx,
+		      const struct amount_msat *amt_to_forward,
+		      const u32 *outgoing_cltv_value,
+		      const u8 *enctlv,
+		      const struct pubkey *blinding)
+	NON_NULL_ARGS(4);
 
 /**
  * onion_decode: decode payload from a decrypted onion.
  * @ctx: context to allocate onion_contents off.
+ * @blinding_support: --experimental-route-blinding?
  * @rs: the route_step, whose raw_payload is of at least length
  *       onion_payload_length().
  * @blinding: the optional incoming blinding point.
- * @blinding_ss: the shared secret derived from @blinding (iff that's non-NULL)
  * @accepted_extra_tlvs: Allow these types to be in the TLV without failing
+ * @amount_in: Incoming HTLC amount
+ * @cltv_expiry: Incoming HTLC cltv_expiry
  * @failtlvtype: (out) the tlv type which failed to parse.
  * @failtlvpos: (out) the offset in the tlv which failed to parse.
  *
  * If the payload is not valid, returns NULL.
  */
 struct onion_payload *onion_decode(const tal_t *ctx,
+				   bool blinding_support,
 				   const struct route_step *rs,
 				   const struct pubkey *blinding,
-				   const struct secret *blinding_ss,
 				   const u64 *accepted_extra_tlvs,
+				   struct amount_msat amount_in,
+				   u32 cltv_expiry,
 				   u64 *failtlvtype,
 				   size_t *failtlvpos);
-
 #endif /* LIGHTNING_COMMON_ONION_H */

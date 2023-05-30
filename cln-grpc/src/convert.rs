@@ -50,6 +50,7 @@ impl From<responses::GetinfoResponse> for pb::GetinfoResponse {
             lightning_dir: c.lightning_dir, // Rule #2 for type string
             blockheight: c.blockheight, // Rule #2 for type u32
             network: c.network, // Rule #2 for type string
+            msatoshi_fees_collected: c.msatoshi_fees_collected, // Rule #2 for type u64?
             fees_collected_msat: Some(c.fees_collected_msat.into()), // Rule #2 for type msat
             address: c.address.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
             binding: c.binding.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
@@ -877,6 +878,7 @@ impl From<responses::GetrouteRoute> for pb::GetrouteRoute {
             id: c.id.serialize().to_vec(), // Rule #2 for type pubkey
             channel: c.channel.to_string(), // Rule #2 for type short_channel_id
             direction: c.direction, // Rule #2 for type u32
+            msatoshi: c.msatoshi, // Rule #2 for type u64?
             amount_msat: Some(c.amount_msat.into()), // Rule #2 for type msat
             delay: c.delay, // Rule #2 for type u32
             style: c.style as i32,
@@ -954,6 +956,32 @@ impl From<responses::PingResponse> for pb::PingResponse {
     fn from(c: responses::PingResponse) -> Self {
         Self {
             totlen: c.totlen.into(), // Rule #2 for type u16
+        }
+    }
+}
+
+#[allow(unused_variables)]
+impl From<responses::SetchannelChannels> for pb::SetchannelChannels {
+    fn from(c: responses::SetchannelChannels) -> Self {
+        Self {
+            peer_id: c.peer_id.serialize().to_vec(), // Rule #2 for type pubkey
+            channel_id: hex::decode(&c.channel_id).unwrap(), // Rule #2 for type hex
+            short_channel_id: c.short_channel_id.map(|v| v.to_string()), // Rule #2 for type short_channel_id?
+            fee_base_msat: Some(c.fee_base_msat.into()), // Rule #2 for type msat
+            fee_proportional_millionths: c.fee_proportional_millionths, // Rule #2 for type u32
+            minimum_htlc_out_msat: Some(c.minimum_htlc_out_msat.into()), // Rule #2 for type msat
+            warning_htlcmin_too_low: c.warning_htlcmin_too_low, // Rule #2 for type string?
+            maximum_htlc_out_msat: Some(c.maximum_htlc_out_msat.into()), // Rule #2 for type msat
+            warning_htlcmax_too_high: c.warning_htlcmax_too_high, // Rule #2 for type string?
+        }
+    }
+}
+
+#[allow(unused_variables)]
+impl From<responses::SetchannelResponse> for pb::SetchannelResponse {
+    fn from(c: responses::SetchannelResponse) -> Self {
+        Self {
+            channels: c.channels.into_iter().map(|i| i.into()).collect(), // Rule #3 for type SetchannelChannels 
         }
     }
 }
@@ -1345,6 +1373,7 @@ impl From<pb::KeysendRequest> for requests::KeysendRequest {
             maxdelay: c.maxdelay, // Rule #1 for type u32?
             exemptfee: c.exemptfee.map(|a| a.into()), // Rule #1 for type msat?
             routehints: c.routehints.map(|rl| rl.into()), // Rule #1 for type RoutehintList?
+            extratlvs: c.extratlvs.map(|s| s.into()), // Rule #1 for type TlvStream?
         }
     }
 }
@@ -1353,7 +1382,7 @@ impl From<pb::KeysendRequest> for requests::KeysendRequest {
 impl From<pb::FundpsbtRequest> for requests::FundpsbtRequest {
     fn from(c: pb::FundpsbtRequest) -> Self {
         Self {
-            satoshi: c.satoshi.unwrap().into(), // Rule #1 for type msat
+            satoshi: c.satoshi.unwrap().into(), // Rule #1 for type msat_or_all
             feerate: c.feerate.unwrap().into(), // Rule #1 for type feerate
             startweight: c.startweight, // Rule #1 for type u32
             minconf: c.minconf, // Rule #1 for type u32?
@@ -1516,6 +1545,20 @@ impl From<pb::PingRequest> for requests::PingRequest {
             id: PublicKey::from_slice(&c.id).unwrap(), // Rule #1 for type pubkey
             len: c.len, // Rule #1 for type number?
             pongbytes: c.pongbytes, // Rule #1 for type number?
+        }
+    }
+}
+
+#[allow(unused_variables)]
+impl From<pb::SetchannelRequest> for requests::SetchannelRequest {
+    fn from(c: pb::SetchannelRequest) -> Self {
+        Self {
+            id: c.id, // Rule #1 for type string
+            feebase: c.feebase.map(|a| a.into()), // Rule #1 for type msat?
+            feeppm: c.feeppm, // Rule #1 for type u32?
+            htlcmin: c.htlcmin.map(|a| a.into()), // Rule #1 for type msat?
+            htlcmax: c.htlcmax.map(|a| a.into()), // Rule #1 for type msat?
+            enforcedelay: c.enforcedelay, // Rule #1 for type u32?
         }
     }
 }

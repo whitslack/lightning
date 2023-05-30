@@ -2,11 +2,6 @@
  * your policy for accepting/dual-funding incoming
  * v2 channel-open requests.
  *
- *  "They say marriages are made in Heaven.
- *   But so is funder and lightning."
- *     - Clint Eastwood
- *  (because funder rhymes with thunder)
- *
  */
 #include "config.h"
 #include <bitcoin/feerate.h>
@@ -134,12 +129,115 @@ command_hook_cont_psbt(struct command *cmd, struct wally_psbt *psbt)
 }
 
 static struct command_result *
+datastore_del_fail(struct command *cmd,
+		   const char *buf,
+		   const jsmntok_t *error,
+		   void *data UNUSED)
+{
+	/* Eh, ok fine */
+	return notification_handled(cmd);
+}
+
+static struct command_result *
+datastore_del_success(struct command *cmd,
+		      const char *buf,
+		      const jsmntok_t *result,
+		      void *data UNUSED)
+{
+	/* Cool we deleted some stuff */
+	plugin_log(cmd->plugin, LOG_DBG,
+		   "`datastore` del succeeded: %*.s",
+		   json_tok_full_len(result),
+		   json_tok_full(buf, result));
+
+	return notification_handled(cmd);
+}
+
+static struct command_result *
+datastore_add_fail(struct command *cmd,
+		   const char *buf,
+		   const jsmntok_t *error,
+		   struct wally_psbt *signed_psbt)
+{
+	/* Oops, something's broken */
+	plugin_log(cmd->plugin, LOG_BROKEN,
+		   "`datastore` add failed: %*.s",
+		   json_tok_full_len(error),
+		   json_tok_full(buf, error));
+
+	return command_hook_cont_psbt(cmd, signed_psbt);
+}
+
+static struct command_result *
+datastore_add_success(struct command *cmd,
+		      const char *buf,
+		      const jsmntok_t *result,
+		      struct wally_psbt *signed_psbt)
+{
+	const char *key, *err;
+
+	err = json_scan(tmpctx, buf, result,
+			"{key:%}",
+			JSON_SCAN_TAL(cmd, json_strdup, &key));
+
+	if (err)
+		plugin_err(cmd->plugin,
+			   "`datastore` payload did not scan. %s: %*.s",
+			   err, json_tok_full_len(result),
+			   json_tok_full(buf, result));
+
+	/* We saved the infos! */
+	plugin_log(cmd->plugin, LOG_DBG,
+		   "Saved utxos for channel (%s) to datastore",
+		   key);
+
+	return command_hook_cont_psbt(cmd, signed_psbt);
+}
+
+static struct command_result *
+remember_channel_utxos(struct command *cmd,
+		       struct pending_open *open,
+		       struct wally_psbt *signed_psbt)
+{
+	struct out_req *req;
+	u8 *utxos_bin;
+	char *chan_key = tal_fmt(cmd, "funder/%s",
+				 type_to_string(cmd, struct channel_id,
+						&open->channel_id));
+
+	req = jsonrpc_request_start(cmd->plugin, cmd,
+				    "datastore",
+				    &datastore_add_success,
+				    &datastore_add_fail,
+				    signed_psbt);
+
+	utxos_bin = tal_arr(cmd, u8, 0);
+	for (size_t i = 0; i < signed_psbt->tx->num_inputs; i++) {
+		struct bitcoin_outpoint outpoint;
+
+		/* Don't save peer's UTXOS */
+		if (!psbt_input_is_ours(&signed_psbt->inputs[i]))
+			continue;
+
+		wally_tx_input_get_outpoint(&signed_psbt->tx->inputs[i],
+					    &outpoint);
+		towire_bitcoin_outpoint(&utxos_bin, &outpoint);
+	}
+	json_add_string(req->js, "key", chan_key);
+	/* We either update the existing or add a new one, nbd */
+	json_add_string(req->js, "mode", "create-or-replace");
+	json_add_hex(req->js, "hex", utxos_bin, tal_bytelen(utxos_bin));
+	return send_outreq(cmd->plugin, req);
+}
+
+static struct command_result *
 signpsbt_done(struct command *cmd,
 	      const char *buf,
 	      const jsmntok_t *result,
 	      struct pending_open *open)
 {
 	struct wally_psbt *signed_psbt;
+	struct command_result *res;
 	const char *err;
 
 	plugin_log(cmd->plugin, LOG_DBG,
@@ -156,11 +254,15 @@ signpsbt_done(struct command *cmd,
 			   err, json_tok_full_len(result),
 			   json_tok_full(buf, result));
 
-	/* This finishes the open (successfully!) */
+	/* Save the list of utxos to the datastore! We'll need
+	 * them again if we rbf */
+	res = remember_channel_utxos(cmd, open, signed_psbt);
+
+	/* The in-flight open is done, let's clean it up! */
 	list_del_from(&pending_opens, &open->list);
 	tal_free(open);
 
-	return command_hook_cont_psbt(cmd, signed_psbt);
+	return res;
 }
 
 static struct command_result *
@@ -272,21 +374,33 @@ struct open_info {
 	struct node_id id;
 	struct amount_sat our_funding;
 	struct amount_sat their_funding;
+
+	/* If this is an RBF, we'll have this */
+	struct amount_sat *their_last_funding;
+	struct amount_sat *our_last_funding;
+
 	struct amount_sat channel_max;
 	u64 funding_feerate_perkw;
 	u32 locktime;
 	u32 lease_blockheight;
 	u32 node_blockheight;
+
 	struct amount_sat requested_lease;
+
+	/* List of previously-used utxos */
+	struct bitcoin_outpoint **prev_outs;
 };
 
 static struct open_info *new_open_info(const tal_t *ctx)
 {
 	struct open_info *info = tal(ctx, struct open_info);
 
+	info->their_last_funding = NULL;
+	info->our_last_funding = NULL;
 	info->requested_lease = AMOUNT_SAT(0);
 	info->lease_blockheight = 0;
 	info->node_blockheight = 0;
+	info->prev_outs = NULL;
 
 	return info;
 }
@@ -386,17 +500,79 @@ static struct command_result *param_msat_as_sat(struct command *cmd,
 				     "should be a millisatoshi amount");
 }
 
+static struct bitcoin_outpoint *
+previously_reserved(struct bitcoin_outpoint **prev_outs,
+		    struct bitcoin_outpoint *out)
+{
+	for (size_t i = 0; i < tal_count(prev_outs); i++) {
+		if (bitcoin_outpoint_eq(prev_outs[i], out))
+			return prev_outs[i];
+	}
+
+	return NULL;
+}
+
+struct funder_utxo {
+	struct bitcoin_outpoint out;
+	struct amount_sat val;
+};
+
+static struct out_req *
+build_utxopsbt_request(struct command *cmd,
+		       struct open_info *info,
+		       struct bitcoin_outpoint **prev_outs,
+		       struct amount_sat requested_funds,
+		       struct amount_sat committed_funds,
+		       struct funder_utxo **avail_utxos)
+{
+	struct out_req *req;
+
+	req = jsonrpc_request_start(cmd->plugin, cmd,
+				    "utxopsbt",
+				    &psbt_funded,
+				    &psbt_fund_failed,
+				    info);
+	/* Add every prev_out */
+	json_array_start(req->js, "utxos");
+	for (size_t i = 0; i < tal_count(prev_outs); i++)
+		json_add_outpoint(req->js, NULL, prev_outs[i]);
+
+	/* Next add available utxos until we surpass the
+	 * requested funds goal */
+	/* FIXME: Update `utxopsbt` to automatically add more inputs? */
+	for (size_t i = 0; i < tal_count(avail_utxos); i++) {
+		/* If we've already hit our goal, break */
+		if (amount_sat_greater_eq(committed_funds, requested_funds))
+			break;
+
+		/* Add this output to the UTXO */
+		json_add_outpoint(req->js, NULL, &avail_utxos[i]->out);
+
+		/* Account for it */
+		if (!amount_sat_add(&committed_funds, committed_funds,
+				    avail_utxos[i]->val))
+			/* This should really never happen */
+			plugin_err(cmd->plugin, "overflow adding committed");
+	}
+	json_array_end(req->js);
+	return req;
+}
+
 static struct command_result *
 listfunds_success(struct command *cmd,
 		  const char *buf,
 		  const jsmntok_t *result,
 		  struct open_info *info)
 {
-	struct amount_sat available_funds, est_fee;
+	struct amount_sat available_funds, committed_funds, est_fee;
 	const jsmntok_t *outputs_tok, *tok;
 	struct out_req *req;
+	struct bitcoin_outpoint **avail_prev_outs;
 	size_t i;
 	const char *funding_err;
+
+	/* We only use this for RBFs, when there's a prev_outs list */
+	struct funder_utxo **avail_utxos = tal_arr(cmd, struct funder_utxo *, 0);
 
 	outputs_tok = json_get_member(buf, result, "outputs");
 	if (!outputs_tok)
@@ -406,19 +582,27 @@ listfunds_success(struct command *cmd,
 			   json_tok_full(buf, result));
 
 	available_funds = AMOUNT_SAT(0);
+	committed_funds = AMOUNT_SAT(0);
+	avail_prev_outs = tal_arr(info, struct bitcoin_outpoint *, 0);
 	json_for_each_arr(i, tok, outputs_tok) {
-		struct amount_sat val;
+		struct funder_utxo *utxo;
 		bool is_reserved, is_p2sh;
+		struct bitcoin_outpoint *prev_out;
 		char *status;
 		const char *err;
 
+		utxo = tal(cmd, struct funder_utxo);
 		err = json_scan(tmpctx, buf, tok,
 				"{amount_msat:%"
 				",status:%"
-				",reserved:%}",
-				JSON_SCAN(json_to_msat_as_sats, &val),
+				",reserved:%"
+				",txid:%"
+				",output:%}",
+				JSON_SCAN(json_to_msat_as_sats, &utxo->val),
 				JSON_SCAN_TAL(cmd, json_strdup, &status),
-				JSON_SCAN(json_to_bool, &is_reserved));
+				JSON_SCAN(json_to_bool, &is_reserved),
+				JSON_SCAN(json_to_txid, &utxo->out.txid),
+				JSON_SCAN(json_to_number, &utxo->out.n));
 		if (err)
 			plugin_err(cmd->plugin,
 				   "`listfunds` payload did not scan. %s: %*.s",
@@ -435,8 +619,12 @@ listfunds_success(struct command *cmd,
 		est_fee = amount_tx_fee(info->funding_feerate_perkw,
 					bitcoin_tx_input_weight(is_p2sh, 110));
 
-		/* we skip reserved funds */
-		if (is_reserved)
+		/* Did we use this utxo on a previous attempt? */
+		prev_out = previously_reserved(info->prev_outs, &utxo->out);
+
+		/* we skip reserved funds that aren't in our previous
+		 * inputs list! */
+		if (is_reserved && !prev_out)
 			continue;
 
 		/* we skip unconfirmed+spent funds */
@@ -445,17 +633,39 @@ listfunds_success(struct command *cmd,
 
 		/* Don't include outputs that can't cover their weight;
 		 *  subtract the fee for this utxo out of the utxo */
-		if (!amount_sat_sub(&val, val, est_fee))
+		if (!amount_sat_sub(&utxo->val, utxo->val, est_fee))
 			continue;
 
-		if (!amount_sat_add(&available_funds, available_funds, val))
+		if (!amount_sat_add(&available_funds, available_funds,
+				    utxo->val))
 			plugin_err(cmd->plugin,
 				   "`listfunds` overflowed output values");
+
+		/* If this is an RBF, we keep track of available utxos */
+		if (info->prev_outs) {
+			/* if not previously reserved, it's committed */
+			if (!prev_out) {
+				tal_arr_expand(&avail_utxos, utxo);
+				continue;
+			}
+
+			if (!amount_sat_add(&committed_funds,
+					    committed_funds, utxo->val))
+				plugin_err(cmd->plugin,
+					   "`listfunds` overflowed"
+					   " committed output values");
+
+			/* We also keep a second list of utxos,
+			 * as it's possible some utxos got spent
+			 * between last attempt + this one! */
+			tal_arr_expand(&avail_prev_outs, prev_out);
+		}
 	}
 
 	funding_err = calculate_our_funding(current_policy,
 					    info->id,
 					    info->their_funding,
+					    info->our_last_funding,
 					    available_funds,
 					    info->channel_max,
 					    info->requested_lease,
@@ -478,11 +688,21 @@ listfunds_success(struct command *cmd,
 		   type_to_string(tmpctx, struct amount_sat,
 				  &info->their_funding));
 
-	req = jsonrpc_request_start(cmd->plugin, cmd,
-				    "fundpsbt",
-				    &psbt_funded,
-				    &psbt_fund_failed,
-				    info);
+	/* If there's prevouts, we compose a psbt with those first,
+	 * then add more funds for anything missing */
+	if (info->prev_outs) {
+		req = build_utxopsbt_request(cmd, info,
+					     avail_prev_outs,
+					     info->our_funding,
+					     committed_funds,
+					     avail_utxos);
+		json_add_bool(req->js, "reservedok", true);
+	} else
+		req = jsonrpc_request_start(cmd->plugin, cmd,
+					    "fundpsbt",
+					    &psbt_funded,
+					    &psbt_fund_failed,
+					    info);
 	json_add_string(req->js, "satoshi",
 			type_to_string(tmpctx, struct amount_sat,
 				       &info->our_funding));
@@ -490,6 +710,7 @@ listfunds_success(struct command *cmd,
 			tal_fmt(tmpctx, "%"PRIu64"%s",
 				info->funding_feerate_perkw,
 				feerate_style_name(FEERATE_PER_KSIPA)));
+
 	/* Our startweight is zero because we're freeriding on their open
 	 * transaction ! */
 	json_add_num(req->js, "startweight", 0);
@@ -526,7 +747,7 @@ json_openchannel2_call(struct command *cmd,
 		       const char *buf,
 		       const jsmntok_t *params)
 {
-	struct open_info *info = tal(cmd, struct open_info);
+	struct open_info *info = new_open_info(cmd);
 	struct amount_msat max_htlc_inflight, htlc_minimum;
 	u64 commitment_feerate_perkw,
 	    feerate_our_max, feerate_our_min;
@@ -549,7 +770,8 @@ json_openchannel2_call(struct command *cmd,
 			",to_self_delay:%"
 			",max_accepted_htlcs:%"
 			",channel_flags:%"
-			",locktime:%}}",
+			",locktime:%"
+			",channel_max_msat:%}}",
 			JSON_SCAN(json_to_node_id, &info->id),
 			JSON_SCAN(json_to_channel_id, &info->cid),
 			JSON_SCAN(json_to_msat_as_sats, &info->their_funding),
@@ -562,7 +784,8 @@ json_openchannel2_call(struct command *cmd,
 			JSON_SCAN(json_to_u32, &to_self_delay),
 			JSON_SCAN(json_to_u32, &max_accepted_htlcs),
 			JSON_SCAN(json_to_u16, &channel_flags),
-			JSON_SCAN(json_to_u32, &info->locktime));
+			JSON_SCAN(json_to_u32, &info->locktime),
+			JSON_SCAN(json_to_msat_as_sats, &info->channel_max));
 
 	if (err)
 		plugin_err(cmd->plugin,
@@ -570,28 +793,15 @@ json_openchannel2_call(struct command *cmd,
 			   err, json_tok_full_len(params),
 			   json_tok_full(buf, params));
 
-	err = json_scan(tmpctx, buf, params,
-			"{openchannel2:{"
-			"requested_lease_msat:%"
-			",lease_blockheight_start:%"
-			",node_blockheight:%}}",
-			JSON_SCAN(json_to_msat_as_sats, &info->requested_lease),
-			JSON_SCAN(json_to_u32, &info->node_blockheight),
-			JSON_SCAN(json_to_u32, &info->lease_blockheight));
-
-	/* These aren't necessarily included */
-	if (err) {
-		info->requested_lease = AMOUNT_SAT(0);
-		info->node_blockheight = 0;
-		info->lease_blockheight = 0;
-	}
-
-	/* If there's no channel_max, it's actually infinity */
-	err = json_scan(tmpctx, buf, params,
-			"{openchannel2:{channel_max_msat:%}}",
-			JSON_SCAN(json_to_msat_as_sats, &info->channel_max));
-	if (err)
-		info->channel_max = AMOUNT_SAT(UINT64_MAX);
+	/* Channel lease info isn't necessarily included, ignore any err */
+	json_scan(tmpctx, buf, params,
+		  "{openchannel2:{"
+		  "requested_lease_msat:%"
+		  ",lease_blockheight_start:%"
+		  ",node_blockheight:%}}",
+		  JSON_SCAN(json_to_msat_as_sats, &info->requested_lease),
+		  JSON_SCAN(json_to_u32, &info->lease_blockheight),
+		  JSON_SCAN(json_to_u32, &info->node_blockheight));
 
 	/* We don't fund anything that's above or below our feerate */
 	if (info->funding_feerate_perkw < feerate_our_min
@@ -664,6 +874,99 @@ json_openchannel2_call(struct command *cmd,
 	return send_outreq(cmd->plugin, req);
 }
 
+static struct command_result *
+datastore_list_fail(struct command *cmd,
+		    const char *buf,
+		    const jsmntok_t *error,
+		    struct open_info *info)
+{
+	struct out_req *req;
+
+	/* Oops, something's broken */
+	plugin_log(cmd->plugin, LOG_BROKEN,
+		   "`datastore` list failed: %*.s",
+		   json_tok_full_len(error),
+		   json_tok_full(buf, error));
+
+	/* Figure out what our funds are... same flow
+	 * as with openchannel2 callback.  */
+	req = jsonrpc_request_start(cmd->plugin, cmd,
+				    "listfunds",
+				    &listfunds_success,
+				    &listfunds_failed,
+				    info);
+	return send_outreq(cmd->plugin, req);
+}
+
+static struct command_result *
+datastore_list_success(struct command *cmd,
+		       const char *buf,
+		       const jsmntok_t *result,
+		       struct open_info *info)
+{
+	struct out_req *req;
+	const char *key, *err;
+	const u8 *utxos_bin;
+	size_t len, i;
+	const jsmntok_t *ds_arr_tok, *ds_result;
+
+	ds_arr_tok = json_get_member(buf, result, "datastore");
+	assert(ds_arr_tok->type == JSMN_ARRAY);
+
+	/* There should only be one result */
+	utxos_bin = NULL;
+	json_for_each_arr(i, ds_result, ds_arr_tok) {
+		err = json_scan(tmpctx, buf, ds_result,
+				"{key:%,hex:%}",
+				JSON_SCAN_TAL(cmd, json_strdup, &key),
+				JSON_SCAN_TAL(cmd, json_tok_bin_from_hex,
+					      &utxos_bin));
+
+		if (err)
+			plugin_err(cmd->plugin,
+				   "`listdatastore` payload did"
+				   " not scan. %s: %*.s",
+				   err, json_tok_full_len(result),
+				   json_tok_full(buf, result));
+
+		/* We found the prev utxo list */
+		plugin_log(cmd->plugin, LOG_DBG,
+			   "Saved utxos for channel (%s)"
+			   " pulled from datastore", key);
+
+		/* There should only be one result */
+		break;
+	}
+
+	/* Resurrect outpoints from stashed binary */
+	len = tal_bytelen(utxos_bin);
+	while (len > 0) {
+		struct bitcoin_outpoint *outpoint =
+			tal(info, struct bitcoin_outpoint);
+		fromwire_bitcoin_outpoint(&utxos_bin,
+					  &len, outpoint);
+		/* Cursor gets set to null if above fails */
+		if (!utxos_bin)
+			plugin_err(cmd->plugin,
+				   "Unable to parse saved utxos: %.*s",
+				   json_tok_full_len(result),
+				   json_tok_full(buf, result));
+
+		if (!info->prev_outs)
+			info->prev_outs =
+				tal_arr(info, struct bitcoin_outpoint *, 0);
+
+		tal_arr_expand(&info->prev_outs, outpoint);
+	}
+
+	req = jsonrpc_request_start(cmd->plugin, cmd,
+				    "listfunds",
+				    &listfunds_success,
+				    &listfunds_failed,
+				    info);
+	return send_outreq(cmd->plugin, req);
+}
+
 /* Peer has asked us to RBF */
 static struct command_result *
 json_rbf_channel_call(struct command *cmd,
@@ -672,25 +975,36 @@ json_rbf_channel_call(struct command *cmd,
 {
 	struct open_info *info = new_open_info(cmd);
 	u64 feerate_our_max, feerate_our_min;
-	const char *err;
+	const char *err, *chan_key;
 	struct out_req *req;
 
+	info->their_last_funding = tal(info, struct amount_sat);
+	info->our_last_funding = tal(info, struct amount_sat);
 	err = json_scan(tmpctx, buf, params,
 			"{rbf_channel:"
 			"{id:%"
 			",channel_id:%"
+			",their_last_funding_msat:%"
 			",their_funding_msat:%"
+			",our_last_funding_msat:%"
 			",funding_feerate_per_kw:%"
 			",feerate_our_max:%"
 			",feerate_our_min:%"
-			",locktime:%}}",
+			",locktime:%"
+			",channel_max_msat:%}}",
 			JSON_SCAN(json_to_node_id, &info->id),
 			JSON_SCAN(json_to_channel_id, &info->cid),
-			JSON_SCAN(json_to_msat_as_sats, &info->their_funding),
+			JSON_SCAN(json_to_msat_as_sats,
+				  info->their_last_funding),
+			JSON_SCAN(json_to_msat_as_sats,
+				  &info->their_funding),
+			JSON_SCAN(json_to_msat_as_sats,
+				  info->our_last_funding),
 			JSON_SCAN(json_to_u64, &info->funding_feerate_perkw),
 			JSON_SCAN(json_to_u64, &feerate_our_max),
 			JSON_SCAN(json_to_u64, &feerate_our_min),
-			JSON_SCAN(json_to_u32, &info->locktime));
+			JSON_SCAN(json_to_u32, &info->locktime),
+			JSON_SCAN(json_to_msat_as_sats, &info->channel_max));
 
 	if (err)
 		plugin_err(cmd->plugin,
@@ -698,12 +1012,12 @@ json_rbf_channel_call(struct command *cmd,
 			   err, json_tok_full_len(params),
 			   json_tok_full(buf, params));
 
-	/* If there's no channel_max, it's actually infinity */
-	err = json_scan(tmpctx, buf, params,
-			"{rbf_channel:{channel_max_msat:%}}",
-			JSON_SCAN(json_to_msat_as_sats, &info->channel_max));
-	if (err)
-		info->channel_max = AMOUNT_SAT(UINT64_MAX);
+	/* Lease info isn't necessarily included, ignore any err */
+	/* FIXME: blockheights?? */
+	json_scan(tmpctx, buf, params,
+		  "{rbf_channel:{"
+		  "requested_lease_msat:%}}",
+		  JSON_SCAN(json_to_msat_as_sats, &info->requested_lease));
 
 	/* We don't fund anything that's above or below our feerate */
 	if (info->funding_feerate_perkw < feerate_our_min
@@ -719,15 +1033,16 @@ json_rbf_channel_call(struct command *cmd,
 		return command_hook_success(cmd);
 	}
 
-	/* Figure out what our funds are... same flow
-	 * as with openchannel2 callback. We assume that THEY
-	 * will use the same inputs, so we use whatever we want here */
+	/* Fetch out previous utxos from the datastore */
 	req = jsonrpc_request_start(cmd->plugin, cmd,
-				    "listfunds",
-				    &listfunds_success,
-				    &listfunds_failed,
+				    "listdatastore",
+				    &datastore_list_success,
+				    &datastore_list_fail,
 				    info);
-
+	chan_key = tal_fmt(cmd, "funder/%s",
+			   type_to_string(cmd, struct channel_id,
+					  &info->cid));
+	json_add_string(req->js, "key", chan_key);
 	return send_outreq(cmd->plugin, req);
 }
 
@@ -757,6 +1072,64 @@ static struct command_result *json_disconnect(struct command *cmd,
 	return notification_handled(cmd);
 }
 
+static struct command_result *
+delete_channel_from_datastore(struct command *cmd,
+			      struct channel_id *cid)
+{
+	const struct out_req *req;
+
+	/* Fetch out previous utxos from the datastore.
+	 * If we were clever, we'd have some way of tracking
+	 * channels that we actually might have data for
+	 * but this is much easier */
+	req = jsonrpc_request_start(cmd->plugin, cmd,
+				    "deldatastore",
+				    &datastore_del_success,
+				    &datastore_del_fail,
+				    NULL);
+	json_add_string(req->js, "key",
+			tal_fmt(cmd, "funder/%s",
+				type_to_string(cmd, struct channel_id, cid)));
+	return send_outreq(cmd->plugin, req);
+}
+
+static struct command_result *json_channel_state_changed(struct command *cmd,
+							 const char *buf,
+							 const jsmntok_t *params)
+{
+	struct channel_id cid;
+	const char *err, *old_state, *new_state;
+
+	err = json_scan(tmpctx, buf, params,
+			"{channel_state_changed:"
+			"{channel_id:%"
+			",old_state:%"
+			",new_state:%}}",
+			JSON_SCAN(json_to_channel_id, &cid),
+			JSON_SCAN_TAL(cmd, json_strdup, &old_state),
+			JSON_SCAN_TAL(cmd, json_strdup, &new_state));
+
+	if (err)
+		plugin_err(cmd->plugin,
+			   "`channel_state_changed` notification payload did"
+			   " not scan %s: %.*s",
+			   err, json_tok_full_len(params),
+			   json_tok_full(buf, params));
+
+	/* Moving out of "awaiting lockin",
+	 * means we clean up the datastore */
+	/* FIXME: splicing state? */
+	if (!streq(old_state, "DUALOPEND_AWAITING_LOCKIN")
+	    && !streq(old_state, "CHANNELD_AWAITING_LOCKIN"))
+		return notification_handled(cmd);
+
+	plugin_log(cmd->plugin, LOG_DBG,
+		   "Cleaning up datastore for channel_id %s",
+		   type_to_string(tmpctx, struct channel_id, &cid));
+
+	return delete_channel_from_datastore(cmd, &cid);
+}
+
 static struct command_result *json_channel_open_failed(struct command *cmd,
 						       const char *buf,
 						       const jsmntok_t *params)
@@ -784,7 +1157,8 @@ static struct command_result *json_channel_open_failed(struct command *cmd,
 	if (open)
 		unreserve_psbt(open);
 
-	return notification_handled(cmd);
+	/* Also clean up datastore for this channel */
+	return delete_channel_from_datastore(cmd, &cid);
 }
 
 static void json_add_policy(struct json_stream *stream,
@@ -1136,6 +1510,10 @@ const struct plugin_notification notifs[] = {
 	{
 		"disconnect",
 		json_disconnect,
+	},
+	{
+		"channel_state_changed",
+		json_channel_state_changed,
 	},
 };
 

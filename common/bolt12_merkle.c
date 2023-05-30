@@ -220,15 +220,17 @@ void sighash_from_merkle(const char *messagename,
 }
 
 /* We use the SHA(pubkey | publictweak); so reader cannot figure out the
- * tweak and derive the base key */
-void payer_key_tweak(const struct point32 *bolt12,
+ * tweak and derive the base key.
+ */
+void payer_key_tweak(const struct pubkey *bolt12,
 		     const u8 *publictweak, size_t publictweaklen,
 		     struct sha256 *tweak)
 {
-	u8 rawkey[32];
+	u8 rawkey[PUBKEY_CMPR_LEN];
 	struct sha256_ctx sha;
 
-	secp256k1_xonly_pubkey_serialize(secp256k1_ctx, rawkey, &bolt12->pubkey);
+	pubkey_to_der(rawkey, bolt12);
+
 	sha256_init(&sha);
 	sha256_update(&sha, rawkey, sizeof(rawkey));
 	sha256_update(&sha,
