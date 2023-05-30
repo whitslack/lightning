@@ -3,6 +3,7 @@
 #include "config.h"
 #include <ccan/asort/asort.h>
 #include <ccan/cast/cast.h>
+#include <ccan/ccan/opt/opt.h>
 #include <ccan/mem/mem.h>
 #include <common/daemon_conn.h>
 #include <common/features.h>
@@ -44,8 +45,10 @@ static u8 *create_node_announcement(const tal_t *ctx, struct daemon *daemon,
 		tal_arr_expand(&was, daemon->announceable[i]);
 
 	/* Add discovered IPs v4/v6 verified by peer `remote_addr` feature. */
-	/* Only do that if we don't have addresses announced. */
-	if (count_announceable == 0) {
+	/* Only do that if we don't have any addresses announced or
+	 * `config.ip_discovery` is explicitly enabled. */
+	if ((daemon->ip_discovery == OPT_AUTOBOOL_AUTO && count_announceable == 0) ||
+	     daemon->ip_discovery == OPT_AUTOBOOL_TRUE) {
 		if (daemon->discovered_ip_v4 != NULL &&
 		    !wireaddr_arr_contains(was, daemon->discovered_ip_v4))
 			tal_arr_expand(&was, *daemon->discovered_ip_v4);
@@ -339,7 +342,8 @@ static void update_own_node_announcement_after_startup(struct daemon *daemon)
 static void force_self_nannounce_regen(struct daemon *daemon)
 {
 	struct node *self = get_node(daemon->rstate, &daemon->id);
-
+	/* Clear timer pointer now. */
+	daemon->node_announce_regen_timer = NULL;
 	/* No channels left?  We'll restart timer once we have one. */
 	if (!self || !self->bcast.index)
 		return;

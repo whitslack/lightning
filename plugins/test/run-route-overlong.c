@@ -12,6 +12,7 @@
 u8 **blinded_onion_hops(const tal_t *ctx UNNEEDED,
 			struct amount_msat final_amount UNNEEDED,
 			u32 final_cltv UNNEEDED,
+			struct amount_msat total_amount UNNEEDED,
 			const struct blinded_path *path UNNEEDED)
 { fprintf(stderr, "blinded_onion_hops called!\n"); abort(); }
 /* Generated stub for command_finished */
@@ -107,6 +108,9 @@ void json_array_start(struct json_stream *js UNNEEDED, const char *fieldname UNN
 const jsmntok_t *json_get_member(const char *buffer UNNEEDED, const jsmntok_t tok[] UNNEEDED,
 				 const char *label UNNEEDED)
 { fprintf(stderr, "json_get_member called!\n"); abort(); }
+/* Generated stub for json_id_prefix */
+const char *json_id_prefix(const tal_t *ctx UNNEEDED, const struct command *cmd UNNEEDED)
+{ fprintf(stderr, "json_id_prefix called!\n"); abort(); }
 /* Generated stub for json_next */
 const jsmntok_t *json_next(const jsmntok_t *tok UNNEEDED)
 { fprintf(stderr, "json_next called!\n"); abort(); }
@@ -119,9 +123,6 @@ void json_object_start(struct json_stream *ks UNNEEDED, const char *fieldname UN
 /* Generated stub for json_strdup */
 char *json_strdup(const tal_t *ctx UNNEEDED, const char *buffer UNNEEDED, const jsmntok_t *tok UNNEEDED)
 { fprintf(stderr, "json_strdup called!\n"); abort(); }
-/* Generated stub for json_to_bool */
-bool json_to_bool(const char *buffer UNNEEDED, const jsmntok_t *tok UNNEEDED, bool *b UNNEEDED)
-{ fprintf(stderr, "json_to_bool called!\n"); abort(); }
 /* Generated stub for json_to_createonion_response */
 struct createonion_response *json_to_createonion_response(const tal_t *ctx UNNEEDED,
 							  const char *buffer UNNEEDED,
@@ -130,11 +131,11 @@ struct createonion_response *json_to_createonion_response(const tal_t *ctx UNNEE
 /* Generated stub for json_to_int */
 bool json_to_int(const char *buffer UNNEEDED, const jsmntok_t *tok UNNEEDED, int *num UNNEEDED)
 { fprintf(stderr, "json_to_int called!\n"); abort(); }
-/* Generated stub for json_to_listpeers_result */
-struct listpeers_result *json_to_listpeers_result(const tal_t *ctx UNNEEDED,
-						  const char *buffer UNNEEDED,
-						  const jsmntok_t *tok UNNEEDED)
-{ fprintf(stderr, "json_to_listpeers_result called!\n"); abort(); }
+/* Generated stub for json_to_listpeers_channels */
+struct listpeers_channel **json_to_listpeers_channels(const tal_t *ctx UNNEEDED,
+						      const char *buffer UNNEEDED,
+						      const jsmntok_t *tok UNNEEDED)
+{ fprintf(stderr, "json_to_listpeers_channels called!\n"); abort(); }
 /* Generated stub for json_to_msat */
 bool json_to_msat(const char *buffer UNNEEDED, const jsmntok_t *tok UNNEEDED,
 		  struct amount_msat *msat UNNEEDED)
@@ -184,6 +185,7 @@ bool json_tok_streq(const char *buffer UNNEEDED, const jsmntok_t *tok UNNEEDED, 
 struct out_req *jsonrpc_request_start_(struct plugin *plugin UNNEEDED,
 				       struct command *cmd UNNEEDED,
 				       const char *method UNNEEDED,
+				       const char *id_prefix UNNEEDED,
 				       struct command_result *(*cb)(struct command *command UNNEEDED,
 								    const char *buf UNNEEDED,
 								    const jsmntok_t *result UNNEEDED,
@@ -242,7 +244,8 @@ static void write_to_store(int store_fd, const u8 *msg)
 {
 	struct gossip_hdr hdr;
 
-	hdr.len = cpu_to_be32(tal_count(msg));
+	hdr.flags = cpu_to_be16(0);
+	hdr.len = cpu_to_be16(tal_count(msg));
 	/* We don't actually check these! */
 	hdr.crc = 0;
 	hdr.timestamp = 0;

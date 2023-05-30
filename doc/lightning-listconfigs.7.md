@@ -88,7 +88,9 @@ On success, an object is returned, containing:
 - **autolisten** (boolean, optional): `autolisten` field from config or cmdline, or default
 - **proxy** (string, optional): `proxy` field from config or cmdline, or default
 - **disable-dns** (boolean, optional): `true` if `disable-dns` was set in config or cmdline
-- **disable-ip-discovery** (boolean, optional): `true` if `disable-ip-discovery` was set in config or cmdline
+- **disable-ip-discovery** (boolean, optional): `true` if `disable-ip-discovery` was set in config or cmdline **deprecated, removal in v23.11**
+- **announce-addr-discovered** (string, optional): `true`/`false`/`auto` depending on how `announce-addr-discovered` was set in config or cmdline *(added v23.02)*
+- **announce-addr-discovered-port** (integer, optional): Sets the announced TCP port for dynamically discovered IPs. *(added v23.02)*
 - **encrypted-hsm** (boolean, optional): `true` if `encrypted-hsm` was set in config or cmdline
 - **rpc-file-mode** (string, optional): `rpc-file-mode` field from config or cmdline, or default
 - **log-level** (string, optional): `log-level` field from config or cmdline, or default
@@ -98,10 +100,10 @@ On success, an object is returned, containing:
 - **force-feerates** (string, optional): force-feerate configuration setting, if any
 - **subdaemon** (string, optional): `subdaemon` fields from config or cmdline if any (can be more than one)
 - **fetchinvoice-noconnect** (boolean, optional): `fetchinvoice-noconnect` fields from config or cmdline, or default
-- **accept-htlc-tlv-types** (string, optional): `accept-extra-tlvs-type` fields from config or cmdline, or not present
+- **accept-htlc-tlv-types** (string, optional): `accept-htlc-tlv-types` fields from config or cmdline, or not present
 - **tor-service-password** (string, optional): `tor-service-password` field from config or cmdline, if any
 - **dev-allowdustreserve** (boolean, optional): Whether we allow setting dust reserves
-- **announce-addr-dns** (boolean, optional): Whether we put DNS entries into node_announcement
+- **announce-addr-dns** (boolean, optional): Whether we put DNS entries into node\_announcement *(added v22.11.1)*
 
 [comment]: # (GENERATE-FROM-SCHEMA-END)
 
@@ -219,4 +221,5 @@ RESOURCES
 ---------
 
 Main web site: <https://github.com/ElementsProject/lightning>
-[comment]: # ( SHA256STAMP:745268f7f4e4eb19d04ec1a221fbb734d89b4a266049cde3adc3131d86423294)
+
+[comment]: # ( SHA256STAMP:11ff355ba2ee2d5c636cf140f54349a536f3d33554c3ec33fe2a096c0b6fb29c)

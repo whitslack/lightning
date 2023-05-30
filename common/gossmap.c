@@ -59,10 +59,10 @@ struct gossmap {
 	size_t map_end, map_size;
 
 	/* Map of node id -> node */
-	struct nodeidx_htable nodes;
+	struct nodeidx_htable *nodes;
 
 	/* Map of short_channel_id id -> channel */
-	struct chanidx_htable channels;
+	struct chanidx_htable *channels;
 
 	/* Array of nodes, so we can use simple index. */
 	struct gossmap_node *node_arr;
@@ -235,7 +235,7 @@ static struct node_id nodeidx_id(const ptrint_t *pidx)
 struct gossmap_node *gossmap_find_node(const struct gossmap *map,
 				       const struct node_id *id)
 {
-	ptrint_t *pi = nodeidx_htable_get(&map->nodes, *id);
+	ptrint_t *pi = nodeidx_htable_get(map->nodes, *id);
 	if (pi)
 		return ptrint2node(pi);
 	return NULL;
@@ -244,7 +244,7 @@ struct gossmap_node *gossmap_find_node(const struct gossmap *map,
 struct gossmap_chan *gossmap_find_chan(const struct gossmap *map,
 				       const struct short_channel_id *scid)
 {
-	ptrint_t *pi = chanidx_htable_get(&map->channels, *scid);
+	ptrint_t *pi = chanidx_htable_get(map->channels, *scid);
 	if (pi)
 		return ptrint2chan(pi);
 	return NULL;
@@ -295,7 +295,7 @@ static u32 new_node(struct gossmap *map)
 static void remove_node(struct gossmap *map, struct gossmap_node *node)
 {
 	u32 nodeidx = gossmap_node_idx(map, node);
-	if (!nodeidx_htable_del(&map->nodes, node2ptrint(node)))
+	if (!nodeidx_htable_del(map->nodes, node2ptrint(node)))
 		abort();
 	node->nann_off = map->freed_nodes;
 	free(node->chan_idxs);
@@ -359,7 +359,7 @@ static struct gossmap_chan *new_channel(struct gossmap *map,
 	chan->half[1].nodeidx = n2idx;
 	node_add_channel(map->node_arr + n1idx, gossmap_chan_idx(map, chan));
 	node_add_channel(map->node_arr + n2idx, gossmap_chan_idx(map, chan));
-	chanidx_htable_add(&map->channels, chan2ptrint(chan));
+	chanidx_htable_add(map->channels, chan2ptrint(chan));
 
 	return chan;
 }
@@ -386,7 +386,7 @@ static void remove_chan_from_node(struct gossmap *map,
 void gossmap_remove_chan(struct gossmap *map, struct gossmap_chan *chan)
 {
 	u32 chanidx = gossmap_chan_idx(map, chan);
-	if (!chanidx_htable_del(&map->channels, chan2ptrint(chan)))
+	if (!chanidx_htable_del(map->channels, chan2ptrint(chan)))
 		abort();
 	remove_chan_from_node(map, gossmap_nth_node(map, chan, 0), chanidx);
 	remove_chan_from_node(map, gossmap_nth_node(map, chan, 1), chanidx);
@@ -460,10 +460,10 @@ static struct gossmap_chan *add_channel(struct gossmap *map,
 
 	/* Now we have a channel, we can add nodes to htable */
 	if (!n[0])
-		nodeidx_htable_add(&map->nodes,
+		nodeidx_htable_add(map->nodes,
 				   node2ptrint(map->node_arr + nidx[0]));
 	if (!n[1])
-		nodeidx_htable_add(&map->nodes,
+		nodeidx_htable_add(map->nodes,
 				   node2ptrint(map->node_arr + nidx[1]));
 
 	return chan;
@@ -611,13 +611,16 @@ static bool map_catchup(struct gossmap *map, size_t *num_rejected)
 	     map->map_end += reclen) {
 		struct gossip_hdr ghdr;
 		size_t off;
-		u16 type;
+		u16 type, flags;
 
 		map_copy(map, map->map_end, &ghdr, sizeof(ghdr));
-		reclen = (be32_to_cpu(ghdr.len) & GOSSIP_STORE_LEN_MASK)
-			+ sizeof(ghdr);
+		reclen = be16_to_cpu(ghdr.len) + sizeof(ghdr);
 
-		if (be32_to_cpu(ghdr.len) & GOSSIP_STORE_LEN_DELETED_BIT)
+		flags = be16_to_cpu(ghdr.flags);
+		if (flags & GOSSIP_STORE_DELETED_BIT)
+			continue;
+
+		if (flags & GOSSIP_STORE_ZOMBIE_BIT)
 			continue;
 
 		/* Partial write, this can happen. */
@@ -678,8 +681,10 @@ static bool load_gossip_store(struct gossmap *map, size_t *num_rejected)
 	 * and 10000 nodes, let's assume each channel gets about 750 bytes.
 	 *
 	 * We halve this, since often some records are deleted. */
-	chanidx_htable_init_sized(&map->channels, map->map_size / 750 / 2);
-	nodeidx_htable_init_sized(&map->nodes, map->map_size / 2500 / 2);
+	map->channels = tal(map, struct chanidx_htable);
+	chanidx_htable_init_sized(map->channels, map->map_size / 750 / 2);
+	map->nodes = tal(map, struct nodeidx_htable);
+	nodeidx_htable_init_sized(map->nodes, map->map_size / 2500 / 2);
 
 	map->num_chan_arr = map->map_size / 750 / 2 + 1;
 	map->chan_arr = tal_arr(map, struct gossmap_chan, map->num_chan_arr);
@@ -697,8 +702,6 @@ static void destroy_map(struct gossmap *map)
 {
 	if (map->mmap)
 		munmap(map->mmap, map->map_size);
-	chanidx_htable_clear(&map->channels);
-	nodeidx_htable_clear(&map->nodes);
 
 	for (size_t i = 0; i < tal_count(map->node_arr); i++)
 		free(map->node_arr[i].chan_idxs);
@@ -1011,7 +1014,7 @@ bool gossmap_chan_get_capacity(const struct gossmap *map,
 	/* Skip over this record to next; expect a gossip_store_channel_amount */
 	off = c->cann_off - sizeof(ghdr);
 	map_copy(map, off, &ghdr, sizeof(ghdr));
-	off += sizeof(ghdr) + (be32_to_cpu(ghdr.len) & GOSSIP_STORE_LEN_MASK);
+	off += sizeof(ghdr) + be16_to_cpu(ghdr.len);
 
 	/* Partial write, this can happen. */
 	if (off + sizeof(ghdr) + 2 > map->map_size)
@@ -1059,7 +1062,7 @@ struct gossmap_node *gossmap_nth_node(const struct gossmap *map,
 
 size_t gossmap_num_nodes(const struct gossmap *map)
 {
-	return nodeidx_htable_count(&map->nodes);
+	return nodeidx_htable_count(map->nodes);
 }
 
 static struct gossmap_node *node_iter(const struct gossmap *map, size_t start)
@@ -1084,7 +1087,7 @@ struct gossmap_node *gossmap_next_node(const struct gossmap *map,
 
 size_t gossmap_num_chans(const struct gossmap *map)
 {
-	return chanidx_htable_count(&map->channels);
+	return chanidx_htable_count(map->channels);
 }
 
 static struct gossmap_chan *chan_iter(const struct gossmap *map, size_t start)
@@ -1125,7 +1128,7 @@ u8 *gossmap_chan_get_announce(const tal_t *ctx,
 			      const struct gossmap *map,
 			      const struct gossmap_chan *c)
 {
-	u32 len;
+	u16 len;
 	u8 *msg;
 	u32 pre_off;
 
@@ -1134,7 +1137,8 @@ u8 *gossmap_chan_get_announce(const tal_t *ctx,
 		pre_off = 2 + 8 + 2 + sizeof(struct gossip_hdr);
 	else
 		pre_off = sizeof(struct gossip_hdr);
-	len = (map_be32(map, c->cann_off - pre_off) & GOSSIP_STORE_LEN_MASK);
+	len = map_be16(map, c->cann_off - pre_off
+		       + offsetof(struct gossip_hdr, len));
 
 	msg = tal_arr(ctx, u8, len);
 	map_copy(map, c->cann_off, msg, len);
@@ -1146,14 +1150,14 @@ u8 *gossmap_node_get_announce(const tal_t *ctx,
 			      const struct gossmap *map,
 			      const struct gossmap_node *n)
 {
-	u32 len;
+	u16 len;
 	u8 *msg;
 
 	if (n->nann_off == 0)
 		return NULL;
 
-	len = (map_be32(map, n->nann_off - sizeof(struct gossip_hdr))
-	       & GOSSIP_STORE_LEN_MASK);
+	len = map_be16(map, n->nann_off - sizeof(struct gossip_hdr)
+		       + offsetof(struct gossip_hdr, len));
 	msg = tal_arr(ctx, u8, len);
 
 	map_copy(map, n->nann_off, msg, len);

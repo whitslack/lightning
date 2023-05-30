@@ -12,7 +12,7 @@ DESCRIPTION
 The **delpay** RPC command deletes a payment with the given `payment_hash` if its status is either `complete` or `failed`. Deleting a `pending` payment is an error.  If *partid* and *groupid* are not specified, all payment parts are deleted.
 
 - *payment\_hash*: The unique identifier of a payment.
-- *status*: Expected status of the payment. 
+- *status*: Expected status of the payment.
 - *partid*: Specific partid to delete (must be paired with *groupid*)
 - *groupid*: Specific groupid to delete (must be paired with *partid*)
 
@@ -42,7 +42,7 @@ payments will be returned -- one payment object for each partid.
 On success, an object containing **payments** is returned.  It is an array of objects, where each object contains:
 
 - **id** (u64): unique ID for this payment attempt
-- **payment\_hash** (hex): the hash of the *payment_preimage* which will prove payment (always 64 characters)
+- **payment\_hash** (hash): the hash of the *payment\_preimage* which will prove payment
 - **status** (string): status of the payment (one of "pending", "failed", "complete")
 - **amount\_sent\_msat** (msat): the amount we actually sent, including fees
 - **created\_at** (u64): the UNIX timestamp showing when this payment was initiated
@@ -50,8 +50,8 @@ On success, an object containing **payments** is returned.  It is an array of ob
 - **destination** (pubkey, optional): the final destination of the payment if known
 - **amount\_msat** (msat, optional): the amount the destination received, if known
 - **completed\_at** (u64, optional): the UNIX timestamp showing when this payment was completed
-- **groupid** (u64, optional): Grouping key to disambiguate multiple attempts to pay an invoice or the same payment_hash
-- **payment\_preimage** (hex, optional): proof of payment (always 64 characters)
+- **groupid** (u64, optional): Grouping key to disambiguate multiple attempts to pay an invoice or the same payment\_hash
+- **payment\_preimage** (secret, optional): proof of payment
 - **label** (string, optional): the label, if given to sendpay
 - **bolt11** (string, optional): the bolt11 string (if pay supplied one)
 - **bolt12** (string, optional): the bolt12 string (if supplied for pay: **experimental-offers** only).
@@ -106,4 +106,5 @@ RESOURCES
 ---------
 
 Main web site: <https://github.com/ElementsProject/lightning>
-[comment]: # ( SHA256STAMP:1ce2241eeae759ed5566342fb7810e62fa2c618f2465314f17376ebe9b6d24f8)
+
+[comment]: # ( SHA256STAMP:a7736b0f340fce7c02a7bdfeb2c5321656c490a5046129895d6689c2d82cc431)

@@ -1,5 +1,5 @@
 tonic::include_proto!("cln");
-use bitcoin_hashes::Hash;
+use bitcoin::hashes::Hash;
 use std::str::FromStr;
 
 use cln_rpc::primitives::{
@@ -31,7 +31,7 @@ impl From<JOutpoint> for Outpoint {
 impl From<Outpoint> for JOutpoint {
     fn from(a: Outpoint) -> Self {
         JOutpoint {
-            txid: bitcoin_hashes::sha256::Hash::from_slice(&a.txid).unwrap(),
+            txid: bitcoin::hashes::sha256::Hash::from_slice(&a.txid).unwrap(),
             outnum: a.outnum,
         }
     }
@@ -190,7 +190,9 @@ mod test {
                   "funding": {
                     "local_msat": "0msat",
                     "remote_msat": "1000000000msat",
-                    "pushed_msat": "0msat"
+                    "pushed_msat": "0msat",
+                    "local_funds_msat": "0msat",
+                    "remote_funds_msat": "0msat"
                   },
                   "msatoshi_to_us": 0,
                   "to_us_msat": "0msat",
@@ -289,7 +291,9 @@ mod test {
                   "funding": {
                     "local_msat": "1000000000msat",
                     "remote_msat": "0msat",
-                    "pushed_msat": "0msat"
+                    "pushed_msat": "0msat",
+                    "local_funds_msat": "0msat",
+                    "remote_funds_msat": "0msat"
                   },
                   "msatoshi_to_us": 1000000000,
                   "to_us_msat": "1000000000msat",

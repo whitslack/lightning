@@ -163,9 +163,13 @@ class Millisatoshi:
         return self.millisatoshis
 
     def __lt__(self, other: 'Millisatoshi') -> bool:
+        if isinstance(other, int):
+            return self.millisatoshis < other
         return self.millisatoshis < other.millisatoshis
 
     def __le__(self, other: 'Millisatoshi') -> bool:
+        if isinstance(other, int):
+            return self.millisatoshis <= other
         return self.millisatoshis <= other.millisatoshis
 
     def __eq__(self, other: object) -> bool:
@@ -177,9 +181,13 @@ class Millisatoshi:
             return False
 
     def __gt__(self, other: 'Millisatoshi') -> bool:
+        if isinstance(other, int):
+            return self.millisatoshis > other
         return self.millisatoshis > other.millisatoshis
 
     def __ge__(self, other: 'Millisatoshi') -> bool:
+        if isinstance(other, int):
+            return self.millisatoshis >= other
         return self.millisatoshis >= other.millisatoshis
 
     def __add__(self, other: 'Millisatoshi') -> 'Millisatoshi':
@@ -603,6 +611,26 @@ class LightningRpc(UnixDomainSocketRpc):
         }
         return self.call("connect", payload)
 
+    def datastore(self, key, string=None, hex=None, mode=None, generation=None):
+        """
+        Add/replace an entry in the datastore; either string or hex.
+        {key} can be a single string, or a sequence of strings.
+        {mode} defaults to 'must-create', but other options are possible:
+          - 'must-replace': fail it it doesn't already exist.
+          - 'create-or-replace': don't fail.
+          - 'must-append': must exist, and append to existing.
+          - 'create-or-append': set, or append to existing.
+        {generation} only succeeds if the current entry has this generation count (mode must be 'must-replace' or 'must-append').
+        """
+        payload = {
+            "key": key,
+            "string": string,
+            "hex": hex,
+            "mode": mode,
+            "generation": generation,
+        }
+        return self.call("datastore", payload)
+
     def decodepay(self, bolt11, description=None):
         """
         Decode {bolt11}, using {description} if necessary.
@@ -612,6 +640,18 @@ class LightningRpc(UnixDomainSocketRpc):
             "description": description
         }
         return self.call("decodepay", payload)
+
+    def deldatastore(self, key, generation=None):
+        """
+        Remove an existing entry from the datastore.
+        {key} can be a single string, or a sequence of strings.
+        {generation} means delete only succeeds if the current entry has this generation count.
+        """
+        payload = {
+            "key": key,
+            "generation": generation,
+        }
+        return self.call("deldatastore", payload)
 
     def delexpiredinvoice(self, maxexpirytime=None):
         """
@@ -943,6 +983,16 @@ class LightningRpc(UnixDomainSocketRpc):
         }
         return self.call("listconfigs", payload)
 
+    def listdatastore(self, key=None):
+        """
+        Show entries in the heirarchical datastore, or just one from one {key}root.
+        {key} can be a single string, or a sequence of strings.
+        """
+        payload = {
+            "key": key,
+        }
+        return self.call("listdatastore", payload)
+
     def listforwards(self, status=None, in_channel=None, out_channel=None):
         """List all forwarded payments and their information matching
         forward {status}, {in_channel} and {out_channel}.
@@ -1019,6 +1069,16 @@ class LightningRpc(UnixDomainSocketRpc):
             "level": level,
         }
         return self.call("listpeers", payload)
+
+    def listpeerchannels(self, peer_id=None):
+        """
+        Show current peers channels, and if the {peer_id} is specified
+        all the channels for the peer are returned.
+        """
+        payload = {
+            "id": peer_id,
+        }
+        return self.call("listpeerchannels", payload)
 
     def listsendpays(self, bolt11=None, payment_hash=None, status=None):
         """Show all sendpays results, or only for `bolt11` or `payment_hash`."""
@@ -1258,20 +1318,6 @@ class LightningRpc(UnixDomainSocketRpc):
             "destination": destination,
         }
         return self.call("sendonion", payload)
-
-    def setchannelfee(self, id, base=None, ppm=None, enforcedelay=None):
-        """
-        Set routing fees for a channel/peer {id} (or 'all'). {base} is a value in millisatoshi
-        that is added as base fee to any routed payment. {ppm} is a value added proportionally
-        per-millionths to any routed payment volume in satoshi. {enforcedelay} is the number of seconds before enforcing this change.
-        """
-        payload = {
-            "id": id,
-            "base": base,
-            "ppm": ppm,
-            "enforcedelay": enforcedelay,
-        }
-        return self.call("setchannelfee", payload)
 
     def setchannel(self, id, feebase=None, feeppm=None, htlcmin=None, htlcmax=None, enforcedelay=None):
         """Set configuration a channel/peer {id} (or 'all').

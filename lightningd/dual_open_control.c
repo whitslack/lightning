@@ -105,7 +105,9 @@ static void channel_err_broken(struct channel *channel,
 }
 
 void json_add_unsaved_channel(struct json_stream *response,
-			      const struct channel *channel)
+			      const struct channel *channel,
+			      /* Only set for listpeerchannels */
+			      const struct peer *peer)
 {
 	struct amount_msat total;
 	struct open_attempt *oa;
@@ -125,6 +127,11 @@ void json_add_unsaved_channel(struct json_stream *response,
 	oa = channel->open_attempt;
 
 	json_object_start(response, NULL);
+	/* listpeerchannels only */
+	if (peer) {
+		json_add_node_id(response, "peer_id", &peer->id);
+		json_add_bool(response, "peer_connected", peer->connected == PEER_CONNECTED);
+	}
 	json_add_string(response, "state", channel_state_name(channel));
 	json_add_string(response, "owner", channel->owner->name);
 	json_add_string(response, "opener", channel->opener == LOCAL ?
@@ -154,9 +161,14 @@ void json_add_unsaved_channel(struct json_stream *response,
 	}
 
 	json_array_start(response, "features");
-	/* v2 channels assumed to have both static_remotekey + anchor_outputs */
+	/* v2 channels assume static_remotekey */
 	json_add_string(response, NULL, "option_static_remotekey");
-	json_add_string(response, NULL, "option_anchor_outputs");
+
+	if (feature_negotiated(channel->peer->ld->our_features,
+			       channel->peer->their_features,
+			       OPT_ANCHOR_OUTPUTS))
+		json_add_string(response, NULL, "option_anchor_outputs");
+
 	json_array_end(response);
 	json_object_end(response);
 }
@@ -1142,8 +1154,7 @@ wallet_update_channel(struct lightningd *ld,
 
 	channel_set_last_tx(channel,
 			    tal_steal(channel, remote_commit),
-			    remote_commit_sig,
-			    TX_CHANNEL_UNILATERAL);
+			    remote_commit_sig);
 
 	/* Update in database */
 	wallet_channel_save(ld->wallet, channel);
@@ -1188,7 +1199,8 @@ wallet_commit_channel(struct lightningd *ld,
 		      const struct amount_sat lease_fee,
 		      secp256k1_ecdsa_signature *lease_commit_sig STEALS,
 		      const u32 lease_chan_max_msat,
-		      const u16 lease_chan_max_ppt)
+		      const u16 lease_chan_max_ppt,
+		      const struct channel_type *type)
 {
 	struct amount_msat our_msat, lease_fee_msat;
 	struct channel_inflight *inflight;
@@ -1231,7 +1243,6 @@ wallet_commit_channel(struct lightningd *ld,
 
 	channel->last_tx = tal_steal(channel, remote_commit);
 	channel->last_sig = *remote_commit_sig;
-	channel->last_tx_type = TX_CHANNEL_UNILATERAL;
 
 	channel->channel_info = *channel_info;
 	channel->fee_states = new_fee_states(channel,
@@ -1246,7 +1257,9 @@ wallet_commit_channel(struct lightningd *ld,
 	channel->scb->funding = *funding;
 	channel->scb->cid = channel->cid;
 	channel->scb->funding_sats = total_funding;
-	channel->scb->type = channel_type_dup(channel->scb, channel->type);
+
+	channel->type = channel_type_dup(channel, type);
+	channel->scb->type = channel_type_dup(channel->scb, type);
 
 	if (our_upfront_shutdown_script)
 		channel->shutdown_scriptpubkey[LOCAL]
@@ -1364,7 +1377,7 @@ static void handle_peer_wants_to_close(struct subd *dualopend,
 	 *  - if the `scriptpubkey` is not in one of the above forms:
 	 *    - SHOULD send a `warning`
 	 */
-	if (!valid_shutdown_scriptpubkey(scriptpubkey, anysegwit, anchors)) {
+	if (!valid_shutdown_scriptpubkey(scriptpubkey, anysegwit, !anchors)) {
 		u8 *warning = towire_warningfmt(NULL,
 						&channel->cid,
 						"Bad shutdown scriptpubkey %s",
@@ -2595,8 +2608,6 @@ static struct command_result *init_set_feerate(struct command *cmd,
 	}
 	if (!*feerate_per_kw) {
 		*feerate_per_kw = tal(cmd, u32);
-		/* FIXME: Anchors are on by default, we should use the lowest
-		 * possible feerate */
 		**feerate_per_kw = **feerate_per_kw_funding;
 	}
 
@@ -2907,6 +2918,7 @@ static void handle_commit_received(struct subd *dualopend,
 	struct openchannel2_psbt_payload *payload;
 	struct channel_inflight *inflight;
 	struct command *cmd = oa->cmd;
+	struct channel_type *channel_type;
 	secp256k1_ecdsa_signature *lease_commit_sig;
 
 	if (!fromwire_dualopend_commit_rcvd(tmpctx, msg,
@@ -2934,7 +2946,8 @@ static void handle_commit_received(struct subd *dualopend,
 					    &lease_fee,
 					    &lease_commit_sig,
 					    &lease_chan_max_msat,
-					    &lease_chan_max_ppt)) {
+					    &lease_chan_max_ppt,
+					    &channel_type)) {
 		channel_internal_error(channel,
 				       "Bad WIRE_DUALOPEND_COMMIT_RCVD: %s",
 				       tal_hex(msg, msg));
@@ -2968,7 +2981,8 @@ static void handle_commit_received(struct subd *dualopend,
 						       lease_fee,
 						       lease_commit_sig,
 						       lease_chan_max_msat,
-						       lease_chan_max_ppt))) {
+						       lease_chan_max_ppt,
+						       channel_type))) {
 			channel_internal_error(channel,
 					       "wallet_commit_channel failed"
 					       " (chan %s)",
@@ -3516,7 +3530,8 @@ bool peer_restart_dualopend(struct peer *peer,
 				      inflight->lease_chan_max_msat,
 				      inflight->lease_chan_max_ppt,
 				      /* FIXME: requested lease? */
-				      NULL);
+				      NULL,
+				      channel->type);
 
 	subd_send_msg(channel->owner, take(msg));
 	return true;

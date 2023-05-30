@@ -4,6 +4,12 @@
 # https://creativecommons.org/publicdomain/zero/1.0/
 from argparse import ArgumentParser
 import json
+import re
+
+
+def esc_underscores(s):
+    """Backslash-escape underscores outside of backtick-enclosed spans"""
+    return ''.join(['\\_' if x == '_' else x for x in re.findall(r'[^`_\\]+|`(?:[^`\\]|\\.)*`|\\.|_', s)])
 
 
 def json_value(obj):
@@ -13,7 +19,7 @@ def json_value(obj):
             return '*true*'
         return '*false*'
     if type(obj) is str:
-        return '"' + obj + '"'
+        return '"' + esc_underscores(obj) + '"'
     if obj is None:
         return '*null*'
     assert False
@@ -30,9 +36,9 @@ def output(line):
 
 
 def output_type(properties, is_optional):
-    typename = properties['type'].replace('_', '\\_')
+    typename = esc_underscores(properties['type'])
     if typename == 'array':
-        typename += ' of {}s'.format(properties['items']['type'].replace('_', '\\_'))
+        typename += ' of {}s'.format(esc_underscores(properties['items']['type']))
     if is_optional:
         typename += ", optional"
     output(" ({})".format(typename))
@@ -67,7 +73,22 @@ def output_range(properties):
 
 def fmt_propname(propname):
     """Pretty-print format a property name"""
-    return '**{}**'.format(propname.replace('_', '\\_'))
+    return '**{}**'.format(esc_underscores(propname))
+
+
+def deprecated_to_deleted(vername):
+    """We promise a 6 month minumum deprecation period, and versions are every 3 months"""
+    assert vername.startswith('v')
+    base = [int(s) for s in vername[1:].split('.')[0:2]]
+    if base == [0, 12]:
+        base = [22, 8]
+    base[1] += 9
+    if base[1] > 12:
+        base[0] += 1
+        base[1] -= 12
+    # Christian points out versions should sort well lexographically,
+    # so we zero-pad single-digits.
+    return 'v{}.{:0>2}'.format(base[0], base[1])
 
 
 def output_member(propname, properties, is_optional, indent, print_type=True, prefix=None):
@@ -84,9 +105,14 @@ def output_member(propname, properties, is_optional, indent, print_type=True, pr
         output_type(properties, is_optional)
 
     if 'description' in properties:
-        output(": {}".format(properties['description']))
+        output(": {}".format(esc_underscores(properties['description'])))
 
     output_range(properties)
+
+    if 'deprecated' in properties:
+        output(" **deprecated, removal in {}**".format(deprecated_to_deleted(properties['deprecated'])))
+    if 'added' in properties:
+        output(" *(added {})*".format(properties['added']))
 
     if not is_untyped and properties['type'] == 'object':
         output(':\n')
@@ -103,10 +129,10 @@ def output_array(items, indent):
     if items['type'] == 'object':
         output_members(items, indent)
     elif items['type'] == 'array':
-        output(indent + '- {}:\n'.format(items['description']))
+        output(indent + '- {}:\n'.format(esc_underscores(items['description'])))
         output_array(items['items'], indent + '  ')
     else:
-        output(indent + '- {}'.format(items['description']))
+        output(indent + '- {}'.format(esc_underscores(items['description'])))
         output_range(items)
         output('\n')
 
@@ -116,7 +142,7 @@ def has_members(sub):
     for p in list(sub['properties'].keys()):
         if len(sub['properties'][p]) == 0:
             continue
-        if 'deprecated' in sub['properties'][p]:
+        if sub['properties'][p].get('deprecated') is True:
             continue
         return True
     return False
@@ -126,7 +152,7 @@ def output_members(sub, indent=''):
     """Generate lines for these properties"""
     warnings = []
 
-    # Remove deprecated and stub properties, collect warnings
+    # Remove deprecated: True and stub properties, collect warnings
     # (Stubs required to keep additionalProperties: false happy)
 
     # FIXME: It fails for schemas which have only an array type with
@@ -140,7 +166,7 @@ def output_members(sub, indent=''):
     # }
     # Checkout the schema of `staticbackup`.
     for p in list(sub['properties'].keys()):
-        if len(sub['properties'][p]) == 0 or 'deprecated' in sub['properties'][p]:
+        if len(sub['properties'][p]) == 0 or sub['properties'][p].get('deprecated') is True:
             del sub['properties'][p]
         elif p.startswith('warning'):
             warnings.append(p)
@@ -234,7 +260,7 @@ def generate_from_schema(schema):
         # Don't have a description field here, it's not used.
         assert 'description' not in toplevels[0]
         sub = props[toplevels[0]]
-    elif len(toplevels) == 1 and props[toplevels[0]]['type'] == 'array':
+    elif len(toplevels) == 1 and props[toplevels[0]]['type'] == 'array' and props[toplevels[0]]['items']['type'] == 'object':
         output('On success, an object containing {} is returned.  It is an array of objects, where each object contains:\n\n'.format(fmt_propname(toplevels[0])))
         # Don't have a description field here, it's not used.
         assert 'description' not in toplevels[0]

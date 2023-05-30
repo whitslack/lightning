@@ -4,17 +4,17 @@ lightning-getroute -- Command for routing a payment (low-level)
 SYNOPSIS
 --------
 
-**getroute** *id* *msatoshi* *riskfactor* [*cltv*] [*fromid*]
+**getroute** *id* *amount\_msat* *riskfactor* [*cltv*] [*fromid*]
 [*fuzzpercent*] [*exclude*] [*maxhops*]
 
 DESCRIPTION
 -----------
 
 The **getroute** RPC command attempts to find the best route for the
-payment of *msatoshi* to lightning node *id*, such that the payment will
+payment of *amount\_msat* to lightning node *id*, such that the payment will
 arrive at *id* with *cltv*-blocks to spare (default 9).
 
-*msatoshi* is in millisatoshi precision; it can be a whole number, or a
+*amount\_msat* is in millisatoshi precision; it can be a whole number, or a
 whole number ending in *msat* or *sat*, or a number with three decimal
 places ending in *sat*, or a number with 1 to 11 decimal places ending
 in *btc*.
@@ -286,11 +286,12 @@ On success, an object containing **route** is returned.  It is an array of objec
 - **amount\_msat** (msat): The amount expected by the node at the end of this hop
 - **delay** (u32): The total CLTV expected by the node at the end of this hop
 - **style** (string): The features understood by the destination node (always "tlv")
+- **msatoshi** (u64, optional) **deprecated, removal in v23.05**
 
 [comment]: # (GENERATE-FROM-SCHEMA-END)
 
 The final *id* will be the destination *id* given in the input. The
-difference between the first *msatoshi* minus the *msatoshi* given in
+difference between the first *amount\_msat* minus the *amount\_msat* given in
 the input is the fee (assuming the first hop is free). The first
 *delay* is the very worst case timeout for the payment failure, in
 blocks.
@@ -310,4 +311,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:e592a238b3701399c1e8de45cb7186b9714742daefa2f33287019f860c1cc24d)
+[comment]: # ( SHA256STAMP:336fb7d687a26e733ca0cc5f0ca49fb00edfaf311edc43773375201b1180f716)

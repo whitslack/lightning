@@ -42,6 +42,9 @@ bool json_str_to_u64(const char *buffer, const jsmntok_t *tok, u64 *num);
 /* Extract number from this (may be a string, or a number literal) */
 bool json_to_u32(const char *buffer, const jsmntok_t *tok, u32 *num);
 
+/* Extract double from this (generally a bad idea!) */
+bool json_to_double(const char *buffer, const jsmntok_t *tok, double *num);
+
 /* Extract boolean from this */
 bool json_to_bool(const char *buffer, const jsmntok_t *tok, bool *b);
 
@@ -66,7 +69,7 @@ const jsmntok_t *json_get_member(const char *buffer, const jsmntok_t tok[],
 /* Get index'th array member. */
 const jsmntok_t *json_get_arr(const jsmntok_t tok[], size_t index);
 
-/* Helper to get "id" field from object. */
+/* Helper to get "id" field from object (including any quotes!). */
 const char *json_get_id(const tal_t *ctx,
 			const char *buffer, const jsmntok_t *obj);
 

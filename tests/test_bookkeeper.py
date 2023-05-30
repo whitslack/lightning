@@ -4,7 +4,8 @@ from pyln.client import Millisatoshi
 from db import Sqlite3Db
 from fixtures import TEST_NETWORK
 from utils import (
-    sync_blockheight, wait_for, only_one, first_channel_id, TIMEOUT
+    sync_blockheight, wait_for, only_one, first_channel_id, TIMEOUT,
+    anchor_expected
 )
 
 from pathlib import Path
@@ -80,6 +81,9 @@ def test_bookkeeping_closing_subsat_htlcs(node_factory, bitcoind, chainparams):
     l1.pay(l2, 111)
     l1.pay(l2, 222)
     l1.pay(l2, 4000000)
+
+    # Make sure l2 bookkeeper processes event before we stop it!
+    wait_for(lambda: len([e for e in l2.rpc.bkpr_listaccountevents()['events'] if e['tag'] == 'invoice']) == 3)
 
     l2.stop()
     l1.rpc.close(l2.info['id'], 1)
@@ -329,6 +333,7 @@ def test_bookkeeping_rbf_withdraw(node_factory, bitcoind):
 @pytest.mark.openchannel('v2')
 @unittest.skipIf(os.getenv('TEST_DB_PROVIDER', 'sqlite3') != 'sqlite3', "turns off bookkeeper at start")
 @unittest.skipIf(TEST_NETWORK != 'regtest', "network fees hardcoded")
+@pytest.mark.developer("dev-force-features")
 def test_bookkeeping_missed_chans_leases(node_factory, bitcoind):
     """
     Test that a lease is correctly recorded if bookkeeper was off
@@ -339,6 +344,10 @@ def test_bookkeeping_missed_chans_leases(node_factory, bitcoind):
             'lease-fee-base-sat': '100sat', 'lease-fee-basis': 100,
             'plugin': str(coin_mvt_plugin),
             'disable-plugin': 'bookkeeper'}
+
+    if not anchor_expected():
+        opts['dev-force-features'] = '+21'
+
     l1, l2 = node_factory.get_nodes(2, opts=opts)
 
     open_amt = 500000
@@ -386,13 +395,13 @@ def test_bookkeeping_missed_chans_leases(node_factory, bitcoind):
 
     # l1 events
     exp_events = [('channel_open', open_amt * 1000 + lease_fee, 0),
-                  ('onchain_fee', 1408000, 0),
+                  ('onchain_fee', 1224000, 0),
                   ('lease_fee', 0, lease_fee),
                   ('journal_entry', 0, invoice_msat)]
     _check_events(l1, channel_id, exp_events)
 
     exp_events = [('channel_open', open_amt * 1000, 0),
-                  ('onchain_fee', 980000, 0),
+                  ('onchain_fee', 796000, 0),
                   ('lease_fee', lease_fee, 0),
                   ('journal_entry', invoice_msat, 0)]
     _check_events(l2, channel_id, exp_events)
@@ -452,7 +461,7 @@ def test_bookkeeping_missed_chans_pushed(node_factory, bitcoind):
 
     # l1 events
     exp_events = [('channel_open', open_amt * 1000, 0),
-                  ('onchain_fee', 5257000, 0),
+                  ('onchain_fee', 4567000, 0),
                   ('pushed', 0, push_amt),
                   ('journal_entry', 0, invoice_msat)]
     _check_events(l1, channel_id, exp_events)
@@ -525,7 +534,7 @@ def test_bookkeeping_missed_chans_pay_after(node_factory, bitcoind):
 
     # l1 events
     exp_events = [('channel_open', open_amt * 1000, 0),
-                  ('onchain_fee', 5257000, 0),
+                  ('onchain_fee', 4567000, 0),
                   ('invoice', 0, invoice_msat)]
     _check_events(l1, channel_id, exp_events)
 
@@ -536,6 +545,7 @@ def test_bookkeeping_missed_chans_pay_after(node_factory, bitcoind):
 
 
 @unittest.skipIf(os.getenv('TEST_DB_PROVIDER', 'sqlite3') != 'sqlite3', "turns off bookkeeper at start")
+@pytest.mark.developer("wait for announce times out otherwise")
 def test_bookkeeping_onchaind_txs(node_factory, bitcoind):
     """
     Test for a channel that's closed, but whose close tx
@@ -702,7 +712,7 @@ def test_rebalance_tracking(node_factory, bitcoind):
 
     wait_for(lambda: 'invoice' not in [ev['tag'] for ev in l1.rpc.bkpr_listincome()['income_events']])
     inc_evs = l1.rpc.bkpr_listincome()['income_events']
-    outbound_chan_id = only_one(only_one(l1.rpc.listpeers(l2.info['id'])['peers'])['channels'])['channel_id']
+    outbound_chan_id = only_one(l1.rpc.listpeerchannels(l2.info['id'])['channels'])['channel_id']
 
     outbound_ev = only_one([ev for ev in inc_evs if ev['tag'] == 'rebalance_fee'])
     assert outbound_ev['account'] == outbound_chan_id

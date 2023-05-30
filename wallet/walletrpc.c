@@ -1,6 +1,7 @@
 #include "config.h"
 #include <bitcoin/base58.h>
 #include <bitcoin/script.h>
+#include <ccan/array_size/array_size.h>
 #include <ccan/cast/cast.h>
 #include <common/addr.h>
 #include <common/bech32.h>
@@ -77,12 +78,13 @@ encode_pubkey_to_addr(const tal_t *ctx,
 }
 
 enum addrtype {
+	/* Deprecated! */
 	ADDR_P2SH_SEGWIT = 1,
 	ADDR_BECH32 = 2,
 	ADDR_ALL = (ADDR_P2SH_SEGWIT + ADDR_BECH32)
 };
 
-/* Extract  bool indicating "p2sh-segwit" or "bech32" */
+/* Extract bool indicating "bech32" */
 static struct command_result *param_newaddr(struct command *cmd,
 					    const char *name,
 					    const char *buffer,
@@ -90,7 +92,7 @@ static struct command_result *param_newaddr(struct command *cmd,
 					    enum addrtype **addrtype)
 {
 	*addrtype = tal(cmd, enum addrtype);
-	if (json_tok_streq(buffer, tok, "p2sh-segwit"))
+	if (deprecated_apis && json_tok_streq(buffer, tok, "p2sh-segwit"))
 		**addrtype = ADDR_P2SH_SEGWIT;
 	else if (json_tok_streq(buffer, tok, "bech32"))
 		**addrtype = ADDR_BECH32;
@@ -98,7 +100,7 @@ static struct command_result *param_newaddr(struct command *cmd,
 		**addrtype = ADDR_ALL;
 	else
 		return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
-				    "'%s' should be 'bech32', 'p2sh-segwit' or 'all', not '%.*s'",
+				    "'%s' should be 'bech32', or 'all', not '%.*s'",
 				    name, tok->end - tok->start, buffer + tok->start);
 	return NULL;
 }
@@ -131,7 +133,7 @@ static struct command_result *json_newaddr(struct command *cmd,
 	b32script = scriptpubkey_p2wpkh(tmpctx, &pubkey);
 	if (*addrtype & ADDR_BECH32)
 		txfilter_add_scriptpubkey(cmd->ld->owned_txfilter, b32script);
-	if (*addrtype & ADDR_P2SH_SEGWIT)
+	if (deprecated_apis && (*addrtype & ADDR_P2SH_SEGWIT))
 		txfilter_add_scriptpubkey(cmd->ld->owned_txfilter,
 					  scriptpubkey_p2sh(tmpctx, b32script));
 
@@ -145,7 +147,7 @@ static struct command_result *json_newaddr(struct command *cmd,
 	response = json_stream_success(cmd);
 	if (*addrtype & ADDR_BECH32)
 		json_add_string(response, "bech32", bech32);
-	if (*addrtype & ADDR_P2SH_SEGWIT)
+	if (deprecated_apis && (*addrtype & ADDR_P2SH_SEGWIT))
 		json_add_string(response, "p2sh-segwit", p2sh);
 	return command_success(cmd, response);
 }
@@ -154,8 +156,8 @@ static const struct json_command newaddr_command = {
 	"newaddr",
 	"bitcoin",
 	json_newaddr,
-	"Get a new {bech32, p2sh-segwit} (or all) address to fund a channel (default is bech32)", false,
-	"Generates a new address (or both) that belongs to the internal wallet. Funds sent to these addresses will be managed by lightningd. Use `withdraw` to withdraw funds to an external wallet."
+	"Get a new {bech32} (or all) address to fund a channel", false,
+	"Generates a new address that belongs to the internal wallet. Funds sent to these addresses will be managed by lightningd. Use `withdraw` to withdraw funds to an external wallet."
 };
 AUTODATA(json_command, &newaddr_command);
 
@@ -312,6 +314,7 @@ static struct command_result *json_listfunds(struct command *cmd,
 {
 	struct json_stream *response;
 	struct peer *p;
+	struct peer_node_id_map_iter it;
 	struct utxo **utxos, **reserved_utxos, **spent_utxos;
 	bool *spent;
 
@@ -338,7 +341,9 @@ static struct command_result *json_listfunds(struct command *cmd,
 
 	/* Add funds that are allocated to channels */
 	json_array_start(response, "channels");
-	list_for_each(&cmd->ld->peers, p, list) {
+	for (p = peer_node_id_map_first(cmd->ld->peers, &it);
+	     p;
+	     p = peer_node_id_map_next(cmd->ld->peers, &it)) {
 		struct channel *c;
 		list_for_each(&p->channels, c, list) {
 			/* We don't print out uncommitted channels */
@@ -479,28 +484,18 @@ struct {
     {TX_CHANNEL_HTLC_TIMEOUT, "channel_htlc_timeout"},
     {TX_CHANNEL_PENALTY, "channel_penalty"},
     {TX_CHANNEL_CHEAT, "channel_unilateral_cheat"},
-    {0, NULL}
 };
 
 #if EXPERIMENTAL_FEATURES
 static const char *txtype_to_string(enum wallet_tx_type t)
 {
-	for (size_t i = 0; wallet_tx_type_display_names[i].name != NULL; i++)
+	for (size_t i = 0; i < ARRAY_SIZE(wallet_tx_type_display_names); i++)
 		if (t == wallet_tx_type_display_names[i].t)
 			return wallet_tx_type_display_names[i].name;
 	return NULL;
 }
-
-static void json_add_txtypes(struct json_stream *result, const char *fieldname, enum wallet_tx_type value)
-{
-	json_array_start(result, fieldname);
-	for (size_t i = 0; wallet_tx_type_display_names[i].name != NULL; i++) {
-		if (value & wallet_tx_type_display_names[i].t)
-			json_add_string(result, NULL, wallet_tx_type_display_names[i].name);
-	}
-	json_array_end(result);
-}
 #endif
+
 static void json_transaction_details(struct json_stream *response,
 				     const struct wallet_transaction *tx)
 {
@@ -511,13 +506,6 @@ static void json_transaction_details(struct json_stream *response,
 		json_add_hex_talarr(response, "rawtx", tx->rawtx);
 		json_add_num(response, "blockheight", tx->blockheight);
 		json_add_num(response, "txindex", tx->txindex);
-#if EXPERIMENTAL_FEATURES
-		if (tx->annotation.type != 0)
-			json_add_txtypes(response, "type", tx->annotation.type);
-
-		if (tx->annotation.channel.u64 != 0)
-			json_add_short_channel_id(response, "channel", &tx->annotation.channel);
-#endif
 		json_add_u32(response, "locktime", wtx->locktime);
 		json_add_u32(response, "version", wtx->version);
 

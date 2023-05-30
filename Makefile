@@ -535,7 +535,7 @@ check-python-flake8:
 	@# E731 do not assign a lambda expression, use a def
 	@# W503: line break before binary operator
 	@# E741: ambiguous variable name
-	@flake8 --ignore=E501,E731,E741,W503,F541 --exclude $(shell echo ${PYTHON_GENERATED} | sed 's/ \+/,/g') ${PYSRC}
+	@flake8 --ignore=E501,E731,E741,W503,F541,E275 --exclude $(shell echo ${PYTHON_GENERATED} | sed 's/ \+/,/g') ${PYSRC}
 
 check-pytest-pyln-proto:
 	PATH=$(PYLN_PATH) PYTHONPATH=$(MY_CHECK_PYTHONPATH) $(PYTEST) contrib/pyln-proto/tests/
@@ -802,6 +802,27 @@ install-data: installdirs $(MAN1PAGES) $(MAN5PAGES) $(MAN7PAGES) $(MAN8PAGES) $(
 	$(INSTALL_DATA) $(DOC_DATA) $(DESTDIR)$(docdir)
 
 install: install-program install-data
+
+# Non-artifacts that are needed for testing. These are added to the
+# testpack.tar, used to transfer things between builder and tester
+# phase. If you get a missing file/executable while testing on CI it
+# is likely missing from this variable.
+TESTBINS = \
+	target/${RUST_PROFILE}/examples/cln-rpc-getinfo \
+	target/${RUST_PROFILE}/examples/cln-plugin-startup \
+	tests/plugins/test_libplugin \
+	tests/plugins/test_selfdisable_after_getmanifest \
+	tools/hsmtool
+
+# The testpack is used in CI to transfer built artefacts between the
+# build and the test phase. This is necessary because the fixtures in
+# `tests/` explicitly use the binaries built in the current directory
+# rather than using `$PATH`, as that may pick up some other installed
+# version of `lightningd` leading to bogus results. We bundle up all
+# built artefacts here, and will unpack them on the tester (overlaying
+# on top of the checked out repo as if we had just built it in place).
+testpack.tar.bz2: $(BIN_PROGRAMS) $(PKGLIBEXEC_PROGRAMS) $(PLUGINS) $(MAN1PAGES) $(MAN5PAGES) $(MAN7PAGES) $(MAN8PAGES) $(DOC_DATA) config.vars $(TESTBINS) $(DEVTOOLS)
+	tar -caf $@ $^
 
 uninstall:
 	@$(NORMAL_UNINSTALL)

@@ -15,10 +15,7 @@ struct peer_fd;
 struct wally_psbt;
 
 struct peer {
-	/* Inside ld->peers. */
-	struct list_node list;
-
-	/* Master context */
+	/* Master context (we're in the hashtable ld->peers) */
 	struct lightningd *ld;
 
 	/* Database ID of the peer */
@@ -105,6 +102,9 @@ u8 *p2wpkh_for_keyidx(const tal_t *ctx, struct lightningd *ld, u64 keyidx);
 /* We've loaded peers from database, set them going. */
 void setup_peers(struct lightningd *ld);
 
+/* When database first writes peer into db, it sets the dbid */
+void peer_set_dbid(struct peer *peer, u64 dbid);
+
 /* At startup, re-send any transactions we want bitcoind to have */
 void resend_closing_transactions(struct lightningd *ld);
 
@@ -142,5 +142,41 @@ command_find_channel(struct command *cmd,
 
 /* Ancient (0.7.0 and before) releases could create invalid commitment txs! */
 bool invalid_last_tx(const struct bitcoin_tx *tx);
+
+static const struct node_id *peer_node_id(const struct peer *peer)
+{
+	return &peer->id;
+}
+
+static bool peer_node_id_eq(const struct peer *peer,
+			    const struct node_id *node_id)
+{
+	return node_id_eq(&peer->id, node_id);
+}
+
+/* Defines struct peer_node_id_map */
+HTABLE_DEFINE_TYPE(struct peer,
+		   peer_node_id, node_id_hash, peer_node_id_eq,
+		   peer_node_id_map);
+
+static inline size_t dbid_hash(u64 dbid)
+{
+	return siphash24(siphash_seed(), &dbid, sizeof(dbid));
+}
+
+static u64 peer_dbid(const struct peer *peer)
+{
+	assert(peer->dbid);
+	return peer->dbid;
+}
+
+static bool peer_dbid_eq(const struct peer *peer, u64 dbid)
+{
+	return peer->dbid == dbid;
+}
+/* Defines struct peer_dbid_map */
+HTABLE_DEFINE_TYPE(struct peer,
+		   peer_dbid, dbid_hash, peer_dbid_eq,
+		   peer_dbid_map);
 
 #endif /* LIGHTNING_LIGHTNINGD_PEER_CONTROL_H */

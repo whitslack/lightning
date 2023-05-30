@@ -1,8 +1,11 @@
 #ifndef LIGHTNING_LIGHTNINGD_LIGHTNINGD_H
 #define LIGHTNING_LIGHTNINGD_LIGHTNINGD_H
 #include "config.h"
+#include <ccan/ccan/opt/opt.h>
 #include <lightningd/htlc_end.h>
 #include <lightningd/htlc_set.h>
+#include <lightningd/options.h>
+#include <lightningd/peer_control.h>
 #include <signal.h>
 #include <sys/stat.h>
 #include <wallet/wallet.h>
@@ -56,8 +59,11 @@ struct config {
 	/* Are we allowed to use DNS lookup for peers. */
 	bool use_dns;
 
-	/* Turn off IP address announcement discovered via peer `remote_addr` */
-	bool disable_ip_discovery;
+	/* Excplicitly turns 'on' or 'off' IP discovery feature. */
+	enum opt_autobool ip_discovery;
+
+	/* Public TCP port assumed for IP discovery. Defaults to chainparams. */
+	u32 ip_discovery_port;
 
 	/* Minimal amount of effective funding_satoshis for accepting channels */
 	u64 min_capacity_sat;
@@ -177,9 +183,13 @@ struct lightningd {
 
 	/* Daemon looking after peers during init / before channel. */
 	struct subd *connectd;
+	/* Reconnection attempts */
+	struct delayed_reconnect_map *delayed_reconnect_map;
 
-	/* All peers we're tracking. */
-	struct list_head peers;
+	/* All peers we're tracking (by node_id) */
+	struct peer_node_id_map *peers;
+	/* And those in database by dbid */
+	struct peer_dbid_map *peers_by_dbid;
 
 	/* Outstanding connect commands. */
 	struct list_head connects;
@@ -191,11 +201,11 @@ struct lightningd {
 	u32 blockheight;
 
 	/* HTLCs in flight. */
-	struct htlc_in_map htlcs_in;
-	struct htlc_out_map htlcs_out;
+	struct htlc_in_map *htlcs_in;
+	struct htlc_out_map *htlcs_out;
 
 	/* Sets of HTLCs we are holding onto for MPP. */
-	struct htlc_set_map htlc_sets;
+	struct htlc_set_map *htlc_sets;
 
 	struct wallet *wallet;
 

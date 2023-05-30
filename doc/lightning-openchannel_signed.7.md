@@ -4,7 +4,7 @@ lightning-openchannel\_signed -- Command to conclude a channel open
 SYNOPSIS
 --------
 
-**openchannel_signed** *channel_id* *signed_psbt*
+**openchannel\_signed** *channel\_id* *signed\_psbt*
 
 DESCRIPTION
 -----------
@@ -14,15 +14,15 @@ open with the specified peer. It uses the v2 openchannel protocol, which
 allows for interactive transaction construction.
 
 This command should be called after `openchannel_update` returns
-*commitments_secured* `true`.
+*commitments\_secured* `true`.
 
 This command will broadcast the finalized funding transaction,
 if we receive valid signatures from the peer.
 
-*channel_id* is the id of the channel.
+*channel\_id* is the id of the channel.
 
-*signed_psbt* is the PSBT returned from `openchannel_update` (where
-*commitments_secured* was true) with partial signatures or finalized
+*signed\_psbt* is the PSBT returned from `openchannel_update` (where
+*commitments\_secured* was true) with partial signatures or finalized
 witness stacks included for every input that we contributed to the
 PSBT.
 
@@ -67,4 +67,5 @@ RESOURCES
 ---------
 
 Main web site: <https://github.com/ElementsProject/lightning>
-[comment]: # ( SHA256STAMP:41e2a4aed1aaac01675f99e91326197afa370a05e32b2ef20cbbb8247de57289)
+
+[comment]: # ( SHA256STAMP:694c288e5a49a662b2b7d01cbe46b6c0c024242bd1745b20e3a1eae123e569fe)

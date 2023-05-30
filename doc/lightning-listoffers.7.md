@@ -5,13 +5,13 @@ SYNOPSIS
 --------
 **(WARNING: experimental-offers only)**
 
-**listoffers** [*offer_id*] [*active_only*]
+**listoffers** [*offer\_id*] [*active\_only*]
 
 DESCRIPTION
 -----------
 
 The **listoffers** RPC command list all offers, or with `offer_id`,
-only the offer with that offer_id (if it exists).  If `active_only` is
+only the offer with that offer\_id (if it exists).  If `active_only` is
 set and is true, only offers with `active` true are returned.
 
 EXAMPLE JSON REQUEST
@@ -32,7 +32,7 @@ RETURN VALUE
 [comment]: # (GENERATE-FROM-SCHEMA-START)
 On success, an object containing **offers** is returned.  It is an array of objects, where each object contains:
 
-- **offer\_id** (hex): the id of this offer (merkle hash of non-signature fields) (always 64 characters)
+- **offer\_id** (hash): the id of this offer (merkle hash of non-signature fields)
 - **active** (boolean): whether this can still be used
 - **single\_use** (boolean): whether this expires as soon as it's paid
 - **bolt12** (string): the bolt12 encoding of the offer
@@ -74,10 +74,11 @@ Rusty Russell <<rusty@rustcorp.com.au>> is mainly responsible.
 SEE ALSO
 --------
 
-lightning-offer(7), lightning-offerout(7), lightning-listoffers(7).
+lightning-offer(7), lightning-listoffers(7).
 
 RESOURCES
 ---------
 
 Main web site: <https://github.com/ElementsProject/lightning>
-[comment]: # ( SHA256STAMP:985a6bae4b0a1702cd02998859c8072eee44b219c15294af4f4078465531c8c9)
+
+[comment]: # ( SHA256STAMP:863d9f666cbbbd013b86b4075a7c8b7e7bda47049c562cba080d0a88626636a1)

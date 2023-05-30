@@ -6,7 +6,7 @@ SYNOPSIS
 
 **(WARNING: experimental-onion-messages only)**
 
-**sendonionmessage** *first_id* *blinding* *hops*
+**sendonionmessage** *first\_id* *blinding* *hops*
 
 DESCRIPTION
 -----------
@@ -43,4 +43,4 @@ Main web site: <https://github.com/ElementsProject/lightning>
 
 [bolt04]: https://github.com/lightning/bolts/blob/master/04-onion-routing.md
 
-[comment]: # ( SHA256STAMP:200de829c6635242cb2dd8ec0650c2fa8f5fcbf413f4a704884516df80492fcb)
+[comment]: # ( SHA256STAMP:636acc798ed7ae1cd307ada4dbde424c1ed8aa514600bec9adeacd5778f4d036)

@@ -1018,56 +1018,6 @@ static struct command_result *param_positive_msat_or_any(struct command *cmd,
 				     "should be positive msat or 'any'");
 }
 
-/* Parse time with optional suffix, return seconds */
-static struct command_result *param_time(struct command *cmd, const char *name,
-					 const char *buffer,
-					 const jsmntok_t *tok,
-					 uint64_t **secs)
-{
-	/* We need to manipulate this, so make copy */
-	jsmntok_t timetok = *tok;
-	u64 mul;
-	char s;
-	struct {
-		char suffix;
-		u64 mul;
-	} suffixes[] = {
-		{ 's', 1 },
-		{ 'm', 60 },
-		{ 'h', 60*60 },
-		{ 'd', 24*60*60 },
-		{ 'w', 7*24*60*60 } };
-
-	if (!deprecated_apis)
-		return param_u64(cmd, name, buffer, tok, secs);
-
-	mul = 1;
-	if (timetok.end == timetok.start)
-		s = '\0';
-	else
-		s = buffer[timetok.end - 1];
-	for (size_t i = 0; i < ARRAY_SIZE(suffixes); i++) {
-		if (s == suffixes[i].suffix) {
-			mul = suffixes[i].mul;
-			timetok.end--;
-			break;
-		}
-	}
-
-	*secs = tal(cmd, uint64_t);
-	if (json_to_u64(buffer, &timetok, *secs)) {
-		if (mul_overflows_u64(**secs, mul)) {
-			return command_fail_badparam(cmd, name, buffer, tok,
-						     "value too large");
-		}
-		**secs *= mul;
-		return NULL;
-	}
-
-	return command_fail_badparam(cmd, name, buffer, tok,
-				     "should be a number");
-}
-
 static struct command_result *param_chanhints(struct command *cmd,
 					      const char *name,
 					      const char *buffer,
@@ -1153,7 +1103,7 @@ static struct command_result *json_invoice(struct command *cmd,
 		   p_req("amount_msat|msatoshi", param_positive_msat_or_any, &msatoshi_val),
 		   p_req("label", param_label, &info->label),
 		   p_req("description", param_escaped_string, &desc_val),
-		   p_opt_def("expiry", param_time, &expiry, 3600*24*7),
+		   p_opt_def("expiry", param_u64, &expiry, 3600*24*7),
 		   p_opt("fallbacks", param_array, &fallbacks),
 		   p_opt("preimage", param_preimage, &preimage),
 		   p_opt("exposeprivatechannels", param_chanhints,
@@ -1701,7 +1651,7 @@ static struct command_result *json_createinvoice(struct command *cmd,
 	struct json_stream *response;
 	struct bolt11 *b11;
 	struct sha256 hash;
-	u5 *sig;
+	const u5 *sig;
 	bool have_n;
 	char *fail;
 
@@ -1858,3 +1808,92 @@ static const struct json_command createinvoice_command = {
 };
 
 AUTODATA(json_command, &createinvoice_command);
+
+static struct command_result *json_preapproveinvoice(struct command *cmd,
+						     const char *buffer,
+						     const jsmntok_t *obj UNNEEDED,
+						     const jsmntok_t *params)
+{
+	const char *invstring;
+	struct json_stream *response;
+	bool approved;
+
+	if (!param(cmd, buffer, params,
+		   /* FIXME: parameter should be invstring now */
+		   p_req("bolt11", param_string, &invstring),
+		   NULL))
+		return command_param_failed();
+
+	/* Strip optional URI preamble. */
+	if (strncmp(invstring, "lightning:", 10) == 0 ||
+	    strncmp(invstring, "LIGHTNING:", 10) == 0)
+		invstring += 10;
+
+	u8 *msg = towire_hsmd_preapprove_invoice(NULL, invstring);
+
+	if (!wire_sync_write(cmd->ld->hsm_fd, take(msg)))
+		fatal("Could not write to HSM: %s", strerror(errno));
+
+	msg = wire_sync_read(tmpctx, cmd->ld->hsm_fd);
+        if (!fromwire_hsmd_preapprove_invoice_reply(msg, &approved))
+		return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
+				    "HSM gave bad preapprove_invoice_reply %s", tal_hex(msg, msg));
+
+	if (!approved)
+		return command_fail(cmd, PAY_INVOICE_PREAPPROVAL_DECLINED, "invoice was declined");
+
+	response = json_stream_success(cmd);
+	return command_success(cmd, response);
+}
+
+static const struct json_command preapproveinvoice_command = {
+	"preapproveinvoice",
+	"payment",
+	json_preapproveinvoice,
+	"Ask the HSM to preapprove an invoice."
+};
+AUTODATA(json_command, &preapproveinvoice_command);
+
+static struct command_result *json_preapprovekeysend(struct command *cmd,
+						     const char *buffer,
+						     const jsmntok_t *obj UNNEEDED,
+						     const jsmntok_t *params)
+{
+	struct node_id *destination;
+	struct sha256 *payment_hash;
+	struct amount_msat *amount;
+
+	struct json_stream *response;
+	bool approved;
+
+	if (!param(cmd, buffer, params,
+		   p_req("destination", param_node_id, &destination),
+		   p_req("payment_hash", param_sha256, &payment_hash),
+		   p_req("amount_msat|msatoshi", param_msat, &amount),
+		   NULL))
+		return command_param_failed();
+
+	u8 *msg = towire_hsmd_preapprove_keysend(NULL, destination, payment_hash, *amount);
+
+	if (!wire_sync_write(cmd->ld->hsm_fd, take(msg)))
+		fatal("Could not write to HSM: %s", strerror(errno));
+
+	msg = wire_sync_read(tmpctx, cmd->ld->hsm_fd);
+        if (!fromwire_hsmd_preapprove_keysend_reply(msg, &approved))
+		return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
+				    "HSM gave bad preapprove_keysend_reply %s", tal_hex(msg, msg));
+
+	if (!approved)
+		return command_fail(cmd, PAY_KEYSEND_PREAPPROVAL_DECLINED, "keysend was declined");
+
+	response = json_stream_success(cmd);
+	return command_success(cmd, response);
+}
+
+static const struct json_command preapprovekeysend_command = {
+	"preapprovekeysend",
+	"payment",
+	json_preapprovekeysend,
+	"Ask the HSM to preapprove a keysend payment."
+};
+AUTODATA(json_command, &preapprovekeysend_command);

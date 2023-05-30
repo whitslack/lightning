@@ -7,7 +7,9 @@ variety of ways:
 
  - **Command line option passthrough** allows plugins to register their
    own command line options that are exposed through `lightningd` so
-   that only the main process needs to be configured[^options].
+   that only the main process needs to be configured. Option values are not
+   remembered when a plugin is stopped or killed, but can be passed as parameters
+   to [`plugin start`][lightning-plugin].
  - **JSON-RPC command passthrough** adds a way for plugins to add their
    own commands to the JSON-RPC interface.
  - **Event stream subscriptions** provide plugins with a push-based
@@ -23,13 +25,10 @@ server and `lightningd` acting as client. The plugin file needs to be
 executable (e.g. use `chmod a+x plugin_name`)
 
 A `helloworld.py` example plugin based on [pyln-client][pyln-client]
-can be found [here](../contrib/plugins/helloworld.py). There is also a
-[repository](https://github.com/lightningd/plugins) with a collection of
+can be found [here][contrib/plugins].
+There is also a [repository](https://github.com/lightningd/plugins) with a collection of
 actively maintained plugins and finally, `lightningd`'s own internal
-[tests](../tests) can be a useful (and most reliable) resource.
-
-[^options]:  Only for plugins that start when `lightningd` starts, option
-    values are not remembered when a plugin is stopped or killed.
+[tests][tests] can be a useful (and most reliable) resource.
 
 ### Warning
 
@@ -160,7 +159,7 @@ you plan on removing them: this will disable them if the user sets
 right?).
 
 The `nonnumericids` indicates that the plugin can handle
-string JSON request `id` fields: prior to v22.11 lightningd used numbers 
+string JSON request `id` fields: prior to v22.11 lightningd used numbers
 for these, and the change to strings broke some plugins.  If not set,
 then strings will be used once this feature is removed after v23.05.
 See [the lightning-rpc documentation][lightning-rpc.7.md] for how to handle
@@ -480,6 +479,7 @@ old and new channel states, the type of `cause` and a `message`.
         "peer_id": "03bc9337c7a28bb784d67742ebedd30a93bacdf7e4ca16436ef3798000242b2251",
         "channel_id": "a2d0851832f0e30a0cf778a826d72f077ca86b69f72677e0267f23f63a0599b4",
         "short_channel_id" : "561820x1020x1",
+        "timestamp":"2023-01-05T18:27:12.145Z",
         "old_state": "CHANNELD_NORMAL",
         "new_state": "CHANNELD_SHUTTING_DOWN",
         "cause" : "remote",
@@ -1783,10 +1783,12 @@ The plugin must broadcast it and respond with the following fields:
 [bolt4-failure-messages]: https://github.com/lightning/bolts/blob/master/04-onion-routing.md#failure-messages
 [bolt4-failure-onion]: https://github.com/lightning/bolts/blob/master/04-onion-routing.md#returning-errors
 [bolt2-open-channel]: https://github.com/lightning/bolts/blob/master/02-peer-protocol.md#the-open_channel-message
-[sendcustommsg]: lightning-sendcustommsg.7.html
+[sendcustommsg]: lightning-sendcustommsg.7.md
 [oddok]: https://github.com/lightning/bolts/blob/master/00-introduction.md#its-ok-to-be-odd
-[spec]: [https://github.com/lightning/bolts]
+[spec]: https://github.com/lightning/bolts
 [bolt9]: https://github.com/lightning/bolts/blob/master/09-features.md
 [lightning-plugin]: lightning-plugin.7.md
-[pyln-client]: ../contrib/pyln-client
-[lightning-rpc.7.md]: lightning-rpc.7.md
+[pyln-client]: https://github.com/ElementsProject/lightning/tree/master/contrib/pyln-client
+[contrib/plugins]: https://github.com/ElementsProject/lightning/tree/master/contrib/plugins
+[tests]: https://github.com/ElementsProject/lightning/tree/master/tests
+[lightning-rpc.7.md]: lightningd-rpc.7.md

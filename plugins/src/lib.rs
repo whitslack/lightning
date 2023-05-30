@@ -1,5 +1,6 @@
 use crate::codec::{JsonCodec, JsonRpcCodec};
-use anyhow::{anyhow, Context};
+pub use anyhow::anyhow;
+use anyhow::Context;
 use futures::sink::SinkExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 extern crate log;
@@ -494,6 +495,12 @@ where
             .filter(|o| o.name() == name)
             .next()
             .map(|co| co.value.clone().unwrap_or(co.default().clone()))
+    }
+
+    /// return the cln configuration send to the
+    /// plugin after the initialization.
+    pub fn configuration(&self) -> Configuration {
+        self.configuration.clone()
     }
 }
 

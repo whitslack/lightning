@@ -172,19 +172,32 @@ static void disable_request_cb(struct command *cmd, struct out_req *out)
 	out->cmd = NULL;
 }
 
-static const char *get_json_id(const tal_t *ctx,
-			       struct plugin *plugin,
-			       const char *cmd_id,
-			       const char *method)
+const char *json_id_prefix(const tal_t *ctx, const struct command *cmd)
 {
-	if (cmd_id)
-		return tal_fmt(ctx, "%s/%s:%s#%"PRIu64,
-			       cmd_id,
-			       plugin->id, method,
-			       plugin->next_outreq_id++);
-	return tal_fmt(ctx, "%s:%s#%"PRIu64,
-		       plugin->id, method,
-		       plugin->next_outreq_id++);
+	if (!cmd)
+		return "";
+
+	/* Notifications have no cmd->id, use methodname */
+	if (!cmd->id)
+		return tal_fmt(ctx, "%s/", cmd->methodname);
+
+	/* Strip quotes! */
+	if (strstarts(cmd->id, "\"")) {
+		assert(strlen(cmd->id) >= 2);
+		assert(strends(cmd->id, "\""));
+		return tal_fmt(ctx, "%.*s/",
+			       (int)strlen(cmd->id) - 2, cmd->id + 1);
+	}
+	return tal_fmt(ctx, "%s/", cmd->id);
+}
+
+static const char *append_json_id(const tal_t *ctx,
+				  struct plugin *plugin,
+				  const char *method,
+				  const char *prefix)
+{
+	return tal_fmt(ctx, "\"%s%s:%s#%"PRIu64"\"",
+		       prefix, plugin->id, method, plugin->next_outreq_id++);
 }
 
 static void destroy_out_req(struct out_req *out_req, struct plugin *plugin)
@@ -197,6 +210,7 @@ static void destroy_out_req(struct out_req *out_req, struct plugin *plugin)
 struct out_req *
 jsonrpc_request_start_(struct plugin *plugin, struct command *cmd,
 		       const char *method,
+		       const char *id_prefix,
 		       struct command_result *(*cb)(struct command *command,
 						    const char *buf,
 						    const jsmntok_t *result,
@@ -210,7 +224,7 @@ jsonrpc_request_start_(struct plugin *plugin, struct command *cmd,
 	struct out_req *out;
 
 	out = tal(cmd, struct out_req);
-	out->id = get_json_id(out, plugin, cmd ? cmd->id : NULL, method);
+	out->id = append_json_id(out, plugin, method, id_prefix);
 	out->cmd = cmd;
 	out->cb = cb;
 	out->errcb = errcb;
@@ -225,7 +239,7 @@ jsonrpc_request_start_(struct plugin *plugin, struct command *cmd,
 	out->js = new_json_stream(NULL, cmd, NULL);
 	json_object_start(out->js, NULL);
 	json_add_string(out->js, "jsonrpc", "2.0");
-	json_add_string(out->js, "id", out->id);
+	json_add_id(out->js, out->id);
 	json_add_string(out->js, "method", method);
 	if (out->errcb)
 		json_object_start(out->js, "params");
@@ -251,7 +265,7 @@ static struct json_stream *jsonrpc_stream_start(struct command *cmd)
 
 	json_object_start(js, NULL);
 	json_add_string(js, "jsonrpc", "2.0");
-	json_add_string(js, "id", cmd->id);
+	json_add_id(js, cmd->id);
 
 	return js;
 }
@@ -548,10 +562,12 @@ static const jsmntok_t *sync_req(const tal_t *ctx,
 	const jsmntok_t *contents;
 	int reqlen;
 	struct json_out *jout = json_out_new(tmpctx);
+	const char *id = append_json_id(tmpctx, plugin, method, "init/");
 
 	json_out_start(jout, NULL, '{');
 	json_out_addstr(jout, "jsonrpc", "2.0");
-	json_out_addstr(jout, "id", get_json_id(tmpctx, plugin, "init", method));
+	/* Copy in id *literally* */
+	memcpy(json_out_member_direct(jout, "id", strlen(id)), id, strlen(id));
 	json_out_addstr(jout, "method", method);
 	json_out_add_splice(jout, "params", params);
 	if (taken(params))
@@ -721,6 +737,82 @@ struct command_result *jsonrpc_set_datastore_(struct plugin *plugin,
 	return send_outreq(plugin, req);
 }
 
+struct get_ds_info {
+	struct command_result *(*string_cb)(struct command *command,
+					    const char *val,
+					    void *arg);
+	struct command_result *(*binary_cb)(struct command *command,
+					    const u8 *val,
+					    void *arg);
+	void *arg;
+};
+
+static struct command_result *listdatastore_done(struct command *cmd,
+						 const char *buf,
+						 const jsmntok_t *result,
+						 struct get_ds_info *dsi)
+{
+	const jsmntok_t *ds = json_get_member(buf, result, "datastore");
+	void *val;
+
+	if (ds->size == 0)
+		val = NULL;
+	else {
+		/* First element in array is object */
+		ds = ds + 1;
+		if (dsi->string_cb) {
+			const jsmntok_t *s;
+			s = json_get_member(buf, ds, "string");
+			if (!s) {
+				/* Complain loudly, since they
+				 * expected string! */
+				plugin_log(cmd->plugin, LOG_BROKEN,
+					   "Datastore gave nonstring result %.*s",
+					   json_tok_full_len(result),
+					   json_tok_full(buf, result));
+				val = NULL;
+			} else {
+				val = json_strdup(cmd, buf, s);
+			}
+		} else {
+			const jsmntok_t *hex;
+			hex = json_get_member(buf, ds, "hex");
+			val = json_tok_bin_from_hex(cmd, buf, hex);
+		}
+	}
+
+	if (dsi->string_cb)
+		return dsi->string_cb(cmd, val, dsi->arg);
+	return dsi->binary_cb(cmd, val, dsi->arg);
+}
+
+struct command_result *jsonrpc_get_datastore_(struct plugin *plugin,
+					      struct command *cmd,
+					      const char *path,
+					      struct command_result *(*string_cb)(struct command *command,
+									   const char *val,
+									   void *arg),
+					      struct command_result *(*binary_cb)(struct command *command,
+									   const u8 *val,
+									   void *arg),
+					      void *arg)
+{
+	struct out_req *req;
+	struct get_ds_info *dsi = tal(NULL, struct get_ds_info);
+
+	dsi->string_cb = string_cb;
+	dsi->binary_cb = binary_cb;
+	dsi->arg = arg;
+
+	/* listdatastore doesn't fail (except API misuse) */
+	req = jsonrpc_request_start(plugin, cmd, "listdatastore",
+				    listdatastore_done, datastore_fail, dsi);
+	tal_steal(req, dsi);
+
+	json_add_keypath(req->js->jout, "key", path);
+	return send_outreq(plugin, req);
+}
+
 static void handle_rpc_reply(struct plugin *plugin, const jsmntok_t *toks)
 {
 	const jsmntok_t *idtok, *contenttok;
@@ -734,8 +826,8 @@ static void handle_rpc_reply(struct plugin *plugin, const jsmntok_t *toks)
 		return;
 
 	out = strmap_getn(&plugin->out_reqs,
-			  buf + idtok->start,
-			  idtok->end - idtok->start);
+			  json_tok_full(buf, idtok),
+			  json_tok_full_len(idtok));
 	if (!out) {
 		/* This can actually happen, if they free req! */
 		plugin_log(plugin, LOG_DBG, "JSON reply with unknown id '%.*s'",
@@ -1300,7 +1392,7 @@ struct json_stream *plugin_notify_start(struct command *cmd, const char *method)
 	json_add_string(js, "method", method);
 
 	json_object_start(js, "params");
-	json_add_string(js, "id", cmd->id);
+	json_add_id(js, cmd->id);
 
 	return js;
 }
@@ -1820,19 +1912,16 @@ static struct listpeers_channel *json_to_listpeers_channel(const tal_t *ctx,
 			*tmsattok = json_get_member(buffer, tok, "total_msat"),
 			*smsattok =
 			    json_get_member(buffer, tok, "spendable_msat"),
-			*aliastok = json_get_member(buffer, tok, "alias");
-
-	if (privtok == NULL || privtok->type != JSMN_PRIMITIVE ||
-	    statetok == NULL || statetok->type != JSMN_STRING ||
-	    ftxidtok == NULL || ftxidtok->type != JSMN_STRING ||
-	    (scidtok != NULL && scidtok->type != JSMN_STRING) ||
-	    (dirtok != NULL && dirtok->type != JSMN_PRIMITIVE) ||
-	    tmsattok == NULL ||
-	    smsattok == NULL)
-		return NULL;
+			*aliastok = json_get_member(buffer, tok, "alias"),
+			*max_htlcs = json_get_member(buffer, tok, "max_accepted_htlcs"),
+			*htlcstok = json_get_member(buffer, tok, "htlcs"),
+			*idtok = json_get_member(buffer, tok, "peer_id"),
+			*conntok = json_get_member(buffer, tok, "peer_connected");
 
 	chan = tal(ctx, struct listpeers_channel);
 
+	json_to_node_id(buffer, idtok, &chan->id);
+	json_to_bool(buffer, conntok, &chan->connected);
 	json_to_bool(buffer, privtok, &chan->private);
 	chan->state = json_strdup(chan, buffer, statetok);
 	json_to_txid(buffer, ftxidtok, &chan->funding_txid);
@@ -1842,14 +1931,6 @@ static struct listpeers_channel *json_to_listpeers_channel(const tal_t *ctx,
 		json_to_short_channel_id(buffer, scidtok, chan->scid);
 	} else {
 		chan->scid = NULL;
-		chan->direction = NULL;
-	}
-
-	if (dirtok != NULL) {
-		chan->direction = tal(chan, int);
-		json_to_int(buffer, dirtok, chan->direction);
-	} else {
-		chan->direction = NULL;
 	}
 
 	if (aliastok != NULL) {
@@ -1875,76 +1956,39 @@ static struct listpeers_channel *json_to_listpeers_channel(const tal_t *ctx,
 		chan->alias[REMOTE] = NULL;
 	}
 
+	/* If we catch a channel during opening, these might not be set.
+	 * It's not a real channel (yet), so ignore it! */
+	if (!chan->scid && !chan->alias[LOCAL])
+		return tal_free(chan);
+
+	json_to_int(buffer, dirtok, &chan->direction);
 	json_to_msat(buffer, tmsattok, &chan->total_msat);
 	json_to_msat(buffer, smsattok, &chan->spendable_msat);
+	json_to_u16(buffer, max_htlcs, &chan->max_accepted_htlcs);
+	chan->num_htlcs = htlcstok->size;
 
 	return chan;
 }
 
-static struct listpeers_peer *json_to_listpeers_peer(const tal_t *ctx,
-						  const char *buffer,
-						  const jsmntok_t *tok)
+struct listpeers_channel **json_to_listpeers_channels(const tal_t *ctx,
+						      const char *buffer,
+						      const jsmntok_t *tok)
 {
-	struct listpeers_peer *res;
 	size_t i;
 	const jsmntok_t *iter;
-	const jsmntok_t *idtok = json_get_member(buffer, tok, "id"),
-			*conntok = json_get_member(buffer, tok, "connected"),
-			*netaddrtok = json_get_member(buffer, tok, "netaddr"),
-			*channelstok = json_get_member(buffer, tok, "channels");
+	const jsmntok_t *channelstok = json_get_member(buffer, tok, "channels");
+	struct listpeers_channel **chans;
 
-	/* Preliminary sanity checks. */
-	if (idtok == NULL || idtok->type != JSMN_STRING || conntok == NULL ||
-	    conntok->type != JSMN_PRIMITIVE ||
-	    (netaddrtok != NULL && netaddrtok->type != JSMN_ARRAY) ||
-	    channelstok == NULL || channelstok->type != JSMN_ARRAY)
-		return NULL;
-
-	res = tal(ctx, struct listpeers_peer);
-	json_to_node_id(buffer, idtok, &res->id);
-	json_to_bool(buffer, conntok, &res->connected);
-
-	res->netaddr = tal_arr(res, const char *, 0);
-	if (netaddrtok != NULL) {
-		json_for_each_arr(i, iter, netaddrtok) {
-			tal_arr_expand(&res->netaddr,
-				       json_strdup(res, buffer, iter));
-		}
-	}
-
-	res->channels = tal_arr(res, struct listpeers_channel *, 0);
+	chans = tal_arr(ctx, struct listpeers_channel *, 0);
 	json_for_each_arr(i, iter, channelstok) {
-		struct listpeers_channel *chan = json_to_listpeers_channel(res, buffer, iter);
-		assert(chan != NULL);
-		tal_arr_expand(&res->channels, chan);
+		struct listpeers_channel *chan;
+
+		chan = json_to_listpeers_channel(chans, buffer, iter);
+		if (!chan)
+			continue;
+		tal_arr_expand(&chans, chan);
 	}
-
-	return res;
-}
-
-struct listpeers_result *json_to_listpeers_result(const tal_t *ctx,
-							  const char *buffer,
-							  const jsmntok_t *toks)
-{
-	size_t i;
-	const jsmntok_t *iter;
-	struct listpeers_result *res;
-	const jsmntok_t *peerstok = json_get_member(buffer, toks, "peers");
-
-	if (peerstok == NULL || peerstok->type != JSMN_ARRAY)
-		return NULL;
-
-	res = tal(ctx, struct listpeers_result);
-	res->peers = tal_arr(res, struct listpeers_peer *, 0);
-
-	json_for_each_obj(i, iter, peerstok) {
-		struct listpeers_peer *p =
-		    json_to_listpeers_peer(res, buffer, iter);
-		if (p == NULL)
-			return tal_free(res);
-		tal_arr_expand(&res->peers, p);
-	}
-	return res;
+	return chans;
 }
 
 struct createonion_response *json_to_createonion_response(const tal_t *ctx,

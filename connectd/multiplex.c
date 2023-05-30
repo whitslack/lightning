@@ -10,7 +10,6 @@
 #include <common/dev_disconnect.h>
 #include <common/features.h>
 #include <common/gossip_constants.h>
-#include <common/gossip_store.h>
 #include <common/memleak.h>
 #include <common/per_peer_state.h>
 #include <common/ping.h>
@@ -23,6 +22,7 @@
 #include <connectd/connectd_gossipd_wiregen.h>
 #include <connectd/connectd_wiregen.h>
 #include <connectd/gossip_rcvd_filter.h>
+#include <connectd/gossip_store.h>
 #include <connectd/multiplex.h>
 #include <connectd/onion_message.h>
 #include <errno.h>
@@ -355,6 +355,7 @@ static bool is_urgent(enum peer_wire type)
 	case WIRE_TX_REMOVE_INPUT:
 	case WIRE_TX_REMOVE_OUTPUT:
 	case WIRE_TX_COMPLETE:
+	case WIRE_TX_ABORT:
 	case WIRE_TX_SIGNATURES:
 	case WIRE_OPEN_CHANNEL:
 	case WIRE_ACCEPT_CHANNEL:
@@ -363,8 +364,8 @@ static bool is_urgent(enum peer_wire type)
 	case WIRE_CHANNEL_READY:
 	case WIRE_OPEN_CHANNEL2:
 	case WIRE_ACCEPT_CHANNEL2:
-	case WIRE_INIT_RBF:
-	case WIRE_ACK_RBF:
+	case WIRE_TX_INIT_RBF:
+	case WIRE_TX_ACK_RBF:
 	case WIRE_SHUTDOWN:
 	case WIRE_CLOSING_SIGNED:
 	case WIRE_UPDATE_ADD_HTLC:
@@ -592,7 +593,7 @@ void send_custommsg(struct daemon *daemon, const u8 *msg)
 		master_badmsg(WIRE_CONNECTD_CUSTOMMSG_OUT, msg);
 
 	/* Races can happen: this might be gone by now. */
-	peer = peer_htable_get(&daemon->peers, &id);
+	peer = peer_htable_get(daemon->peers, &id);
 	if (peer)
 		inject_peer_msg(peer, take(custommsg));
 }
@@ -1242,7 +1243,7 @@ void peer_connect_subd(struct daemon *daemon, const u8 *msg, int fd)
 		master_badmsg(WIRE_CONNECTD_PEER_CONNECT_SUBD, msg);
 
 	/* Races can happen: this might be gone by now (or reconnected!). */
-	peer = peer_htable_get(&daemon->peers, &id);
+	peer = peer_htable_get(daemon->peers, &id);
 	if (!peer || peer->counter != counter) {
 		close(fd);
 		return;
@@ -1276,7 +1277,7 @@ void send_manual_ping(struct daemon *daemon, const u8 *msg)
 	if (!fromwire_connectd_ping(msg, &id, &num_pong_bytes, &len))
 		master_badmsg(WIRE_CONNECTD_PING, msg);
 
-	peer = peer_htable_get(&daemon->peers, &id);
+	peer = peer_htable_get(daemon->peers, &id);
 	if (!peer) {
 		daemon_conn_send(daemon->master,
 				 take(towire_connectd_ping_reply(NULL,

@@ -351,8 +351,9 @@ static void channel_hints_update(struct payment *p,
 				hint->estimated_capacity = *estimated_capacity;
 				modified = true;
 			}
-			if (htlc_budget != NULL && *htlc_budget < hint->htlc_budget) {
-				hint->htlc_budget = *htlc_budget;
+			if (htlc_budget != NULL) {
+				assert(hint->local);
+				hint->local->htlc_budget = *htlc_budget;
 				modified = true;
 			}
 
@@ -376,12 +377,14 @@ static void channel_hints_update(struct payment *p,
 	newhint.enabled = enabled;
 	newhint.scid.scid = scid;
 	newhint.scid.dir = direction;
-	newhint.local = local;
+	if (local) {
+		newhint.local = tal(root->channel_hints, struct local_hint);
+		assert(htlc_budget);
+		newhint.local->htlc_budget = *htlc_budget;
+	} else
+		newhint.local = NULL;
 	if (estimated_capacity != NULL)
 		newhint.estimated_capacity = *estimated_capacity;
-
-	if (htlc_budget != NULL)
-		newhint.htlc_budget = *htlc_budget;
 
 	tal_arr_expand(&root->channel_hints, newhint);
 
@@ -511,7 +514,8 @@ static bool payment_chanhints_apply_route(struct payment *p, bool remove)
 
 		/* For local channels we check that we don't overwhelm
 		 * them with too many HTLCs. */
-		apply = (!curhint->local) || curhint->htlc_budget > 0;
+		apply = (!curhint->local) ||
+			(curhint->local->htlc_budget > 0);
 
 		/* For all channels we check that they have a
 		 * sufficiently large estimated capacity to have some
@@ -534,12 +538,15 @@ static bool payment_chanhints_apply_route(struct payment *p, bool remove)
 			paymod_log(
 			    p, LOG_DBG,
 			    "Capacity: estimated_capacity=%s, hop_amount=%s. "
-			    "HTLC Budget: htlc_budget=%d, local=%d",
+			    "local=%s%s",
 			    type_to_string(tmpctx, struct amount_msat,
 					   &curhint->estimated_capacity),
 			    type_to_string(tmpctx, struct amount_msat,
 					   &curhop->amount),
-			    curhint->htlc_budget, curhint->local);
+			    curhint->local ? "Y" : "N",
+			    curhint->local ?
+			    tal_fmt(tmpctx, " HTLC Budget: htlc_budget=%d",
+				    curhint->local->htlc_budget) : "");
 			return false;
 		}
 	}
@@ -554,10 +561,12 @@ apply_changes:
 
 		/* Update the number of htlcs for any local
 		 * channel in the route */
-		if (curhint->local && remove)
-			curhint->htlc_budget++;
-		else if (curhint->local)
-			curhint->htlc_budget--;
+		if (curhint->local) {
+			if (remove)
+				curhint->local->htlc_budget++;
+			else
+				curhint->local->htlc_budget--;
+		}
 
 		if (remove && !amount_msat_add(
 			    &curhint->estimated_capacity,
@@ -598,7 +607,7 @@ payment_get_excluded_channels(const tal_t *ctx, struct payment *p)
 					     hint->estimated_capacity))
 			tal_arr_expand(&res, hint->scid);
 
-		else if (hint->local && hint->htlc_budget == 0)
+		else if (hint->local && hint->local->htlc_budget == 0)
 			/* If we cannot add any HTLCs to the channel we
 			 * shouldn't look for a route through that channel */
 			tal_arr_expand(&res, hint->scid);
@@ -675,7 +684,7 @@ static bool payment_route_check(const struct gossmap *gossmap,
 		 * estimate to the smallest failed attempt. */
 		return false;
 
-	if (hint->local && hint->htlc_budget == 0)
+	if (hint->local && hint->local->htlc_budget == 0)
 		/* If we cannot add any HTLCs to the channel we
 		 * shouldn't look for a route through that channel */
 		return false;
@@ -1569,6 +1578,7 @@ static struct command_result *payment_createonion_success(struct command *cmd,
 	json_add_amount_msat_only(req->js, "amount_msat", first->amount);
 	json_add_num(req->js, "delay", first->delay);
 	json_add_node_id(req->js, "id", &first->node_id);
+	json_add_short_channel_id(req->js, "channel", &first->scid);
 	json_object_end(req->js);
 
 	json_add_sha256(req->js, "payment_hash", p->payment_hash);
@@ -1671,7 +1681,8 @@ static void payment_add_blindedpath(const tal_t *ctx,
 {
 	/* It's a bit of a weird API for us, so we convert it back to
 	 * the struct tlv_tlv_payload */
-	u8 **tlvs = blinded_onion_hops(tmpctx, final_amt, final_cltv, bpath);
+	u8 **tlvs = blinded_onion_hops(tmpctx, final_amt, final_cltv,
+				       final_amt, bpath);
 
 	for (size_t i = 0; i < tal_count(tlvs); i++) {
 		const u8 *cursor = tlvs[i];
@@ -2347,76 +2358,42 @@ REGISTER_PAYMENT_MODIFIER(retry, struct retry_mod_data *, retry_data_init,
 			  retry_step_cb);
 
 static struct command_result *
-local_channel_hints_listpeers(struct command *cmd, const char *buffer,
-			      const jsmntok_t *toks, struct payment *p)
+local_channel_hints_listpeerchannels(struct command *cmd, const char *buffer,
+				     const jsmntok_t *toks, struct payment *p)
 {
-	const jsmntok_t *peers, *peer, *channels, *channel, *spendsats, *scid,
-	    *dir, *connected, *max_htlc, *htlcs, *state, *alias, *alias_local;
-	size_t i, j;
-	peers = json_get_member(buffer, toks, "peers");
+	struct listpeers_channel **chans;
 
-	if (peers == NULL)
-		goto done;
-        /* cppcheck-suppress uninitvar - cppcheck can't undestand these macros. */
-	json_for_each_arr(i, peer, peers) {
-		channels = json_get_member(buffer, peer, "channels");
-		if (channels == NULL)
-			continue;
+	chans = json_to_listpeers_channels(tmpctx, buffer, toks);
 
-		connected = json_get_member(buffer, peer, "connected");
+	for (size_t i = 0; i < tal_count(chans); i++) {
+		struct short_channel_id scid;
+		bool enabled;
+		u16 htlc_budget;
 
-		json_for_each_arr(j, channel, channels) {
-			struct channel_hint h;
-			spendsats = json_get_member(buffer, channel, "spendable_msat");
-			scid = json_get_member(buffer, channel, "short_channel_id");
+		/* Filter out local channels if they are
+		 * either a) disconnected, or b) not in normal
+		 * state. */
+		enabled = chans[i]->connected && streq(chans[i]->state, "CHANNELD_NORMAL");
 
-			alias = json_get_member(buffer, channel, "alias");
-			if (alias != NULL)
-				alias_local = json_get_member(buffer, alias, "local");
-			else
-				alias_local = NULL;
+		if (chans[i]->scid != NULL)
+			scid = *chans[i]->scid;
+		else
+			scid = *chans[i]->alias[LOCAL];
 
-			dir = json_get_member(buffer, channel, "direction");
-			max_htlc = json_get_member(buffer, channel, "max_accepted_htlcs");
-			htlcs = json_get_member(buffer, channel, "htlcs");
-			state = json_get_member(buffer, channel, "state");
-			if (spendsats == NULL ||
-			    (scid == NULL && alias_local == NULL) ||
-			    dir == NULL || max_htlc == NULL || state == NULL ||
-			    max_htlc->type != JSMN_PRIMITIVE || htlcs == NULL ||
-			    htlcs->type != JSMN_ARRAY)
-				continue;
+		/* Take the configured number of max_htlcs and
+		 * subtract any HTLCs that might already be added to
+		 * the channel. This is a best effort estimate and
+		 * mostly considers stuck htlcs, concurrent payments
+		 * may throw us off a bit. */
+		if (chans[i]->num_htlcs > chans[i]->max_accepted_htlcs)
+			htlc_budget = 0;
+		else
+			htlc_budget = chans[i]->max_accepted_htlcs - chans[i]->num_htlcs;
 
-			/* Filter out local channels if they are
-			 * either a) disconnected, or b) not in normal
-			 * state. */
-			json_to_bool(buffer, connected, &h.enabled);
-			h.enabled &= json_tok_streq(buffer, state, "CHANNELD_NORMAL");
-
-			if (scid != NULL)
-				json_to_short_channel_id(buffer, scid, &h.scid.scid);
-			else
-				json_to_short_channel_id(buffer, alias_local, &h.scid.scid);
-
-			json_to_int(buffer, dir, &h.scid.dir);
-
-			json_to_msat(buffer, spendsats, &h.estimated_capacity);
-
-			/* Take the configured number of max_htlcs and
-			 * subtract any HTLCs that might already be added to
-			 * the channel. This is a best effort estimate and
-			 * mostly considers stuck htlcs, concurrent payments
-			 * may throw us off a bit. */
-			json_to_u16(buffer, max_htlc, &h.htlc_budget);
-			h.htlc_budget -= htlcs->size;
-			h.local = true;
-
-			channel_hints_update(p, h.scid.scid, h.scid.dir,
-					     h.enabled, true, &h.estimated_capacity, &h.htlc_budget);
-		}
+		channel_hints_update(p, scid, chans[i]->direction, enabled, true,
+				     &chans[i]->spendable_msat, &htlc_budget);
 	}
 
-done:
 	payment_continue(p);
 	return command_still_pending(cmd);
 }
@@ -2432,9 +2409,9 @@ static void local_channel_hints_cb(void *d UNUSED, struct payment *p)
 	if (p->parent != NULL || p->step != PAYMENT_STEP_INITIALIZED)
 		return payment_continue(p);
 
-	req = jsonrpc_request_start(p->plugin, NULL, "listpeers",
-				    local_channel_hints_listpeers,
-				    local_channel_hints_listpeers, p);
+	req = jsonrpc_request_start(p->plugin, NULL, "listpeerchannels",
+				    local_channel_hints_listpeerchannels,
+				    local_channel_hints_listpeerchannels, p);
 	send_outreq(p->plugin, req);
 }
 
@@ -3276,42 +3253,39 @@ static void direct_pay_override(struct payment *p) {
 	payment_continue(p);
 }
 
-/* Now that we have the listpeers result for the root payment, let's search
+/* Now that we have the listpeerchannels result for the root payment, let's search
  * for a direct channel that is a) connected and b) in state normal. We will
  * check the capacity based on the channel_hints in the override. */
-static struct command_result *direct_pay_listpeers(struct command *cmd,
-						   const char *buffer,
-						   const jsmntok_t *toks,
-						   struct payment *p)
+static struct command_result *direct_pay_listpeerchannels(struct command *cmd,
+							  const char *buffer,
+							  const jsmntok_t *toks,
+							  struct payment *p)
 {
-	struct listpeers_result *r =
-	    json_to_listpeers_result(tmpctx, buffer, toks);
+	struct listpeers_channel **channels = json_to_listpeers_channels(tmpctx, buffer, toks);
 	struct direct_pay_data *d = payment_mod_directpay_get_data(p);
 
-	if (r && tal_count(r->peers) == 1) {
-		struct listpeers_peer *peer = r->peers[0];
-		if (!peer->connected)
-			goto cont;
+	for (size_t i=0; i<tal_count(channels); i++) {
+		struct listpeers_channel *chan = channels[i];
 
-		for (size_t i=0; i<tal_count(peer->channels); i++) {
-			struct listpeers_channel *chan = r->peers[0]->channels[i];
-			if (!streq(chan->state, "CHANNELD_NORMAL"))
-			    continue;
+		if (!chan->connected)
+			continue;
 
-			/* Must have either a local alias for zeroconf
-			 * channels or a final scid. */
-			assert(chan->alias[LOCAL] || chan->scid);
-			d->chan = tal(d, struct short_channel_id_dir);
-			if (chan->scid) {
-				d->chan->scid = *chan->scid;
-				d->chan->dir = *chan->direction;
-			} else {
-				d->chan->scid = *chan->alias[LOCAL];
-				d->chan->dir = 0; /* Don't care. */
-			}
+		if (!streq(chan->state, "CHANNELD_NORMAL"))
+			continue;
+
+		/* Must have either a local alias for zeroconf
+		 * channels or a final scid. */
+		assert(chan->alias[LOCAL] || chan->scid);
+		tal_free(d->chan);
+		d->chan = tal(d, struct short_channel_id_dir);
+		if (chan->scid) {
+			d->chan->scid = *chan->scid;
+		} else {
+			d->chan->scid = *chan->alias[LOCAL];
 		}
+		d->chan->dir = chan->direction;
 	}
-cont:
+
 	direct_pay_override(p);
 	return command_still_pending(cmd);
 
@@ -3327,8 +3301,9 @@ static void direct_pay_cb(struct direct_pay_data *d, struct payment *p)
 
 
 
-	req = jsonrpc_request_start(p->plugin, NULL, "listpeers",
-				    direct_pay_listpeers, direct_pay_listpeers,
+	req = jsonrpc_request_start(p->plugin, NULL, "listpeerchannels",
+				    direct_pay_listpeerchannels,
+				    direct_pay_listpeerchannels,
 				    p);
 	json_add_node_id(req->js, "id", p->destination);
 	send_outreq(p->plugin, req);
@@ -3501,7 +3476,7 @@ static u32 payment_max_htlcs(const struct payment *p)
 	for (size_t i = 0; i < tal_count(p->channel_hints); i++) {
 		h = &p->channel_hints[i];
 		if (h->local && h->enabled)
-			res += h->htlc_budget;
+			res += h->local->htlc_budget;
 	}
 	root = p;
 	while (root->parent)
@@ -3941,6 +3916,54 @@ static void payee_incoming_limit_step_cb(void *d UNUSED, struct payment *p)
 
 REGISTER_PAYMENT_MODIFIER(payee_incoming_limit, void *, NULL,
 			  payee_incoming_limit_step_cb);
+
+/*****************************************************************************
+ * check_preapproveinvoice
+ *
+ * @desc submit the invoice to the HSM for approval, fail the payment if not approved.
+ *
+ * This paymod checks the invoice for approval with the HSM, which might:
+ * - check with the user for specific approval
+ * - enforce velocity controls
+ * - automatically approve the invoice (default)
+ */
+
+static struct command_result *
+check_preapproveinvoice_allow(struct command *cmd,
+			      const char *buf,
+			      const jsmntok_t *result,
+			      struct payment *p)
+{
+	/* On success, an empty object is returned. */
+	payment_continue(p);
+	return command_still_pending(cmd);
+}
+
+static struct command_result *preapproveinvoice_rpc_failure(struct command *cmd,
+							    const char *buffer,
+							    const jsmntok_t *toks,
+							    struct payment *p)
+{
+	payment_abort(p,
+		      "Failing payment due to a failed RPC call: %.*s",
+		      toks->end - toks->start, buffer + toks->start);
+	return command_still_pending(cmd);
+}
+
+static void check_preapproveinvoice_start(void *d UNUSED, struct payment *p)
+{
+	/* Ask the HSM if the invoice is OK to pay */
+	struct out_req *req;
+	req = jsonrpc_request_start(p->plugin, NULL, "preapproveinvoice",
+				    &check_preapproveinvoice_allow,
+				    &preapproveinvoice_rpc_failure, p);
+	/* FIXME: rename parameter to invstring */
+	json_add_string(req->js, "bolt11", p->invstring);
+	(void) send_outreq(p->plugin, req);
+}
+
+REGISTER_PAYMENT_MODIFIER(check_preapproveinvoice, void *, NULL,
+			  check_preapproveinvoice_start);
 
 static struct route_exclusions_data *
 route_exclusions_data_init(struct payment *p)

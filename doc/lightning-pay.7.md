@@ -4,8 +4,8 @@ lightning-pay -- Command for sending a payment to a BOLT11 invoice
 SYNOPSIS
 --------
 
-**pay** *bolt11* [*msatoshi*] [*label*] [*riskfactor*]
-[*maxfeepercent*] [*retry_for*] [*maxdelay*] [*exemptfee*]
+**pay** *bolt11* [*amount\_msat*] [*label*] [*riskfactor*]
+[*maxfeepercent*] [*retry\_for*] [*maxdelay*] [*exemptfee*]
 [*localinvreqid*] [*exclude*] [*maxfee*] [*description*]
 
 DESCRIPTION
@@ -13,8 +13,8 @@ DESCRIPTION
 
 The **pay** RPC command attempts to find a route to the given
 destination, and send the funds it asks for. If the *bolt11* does not
-contain an amount, *msatoshi* is required, otherwise if it is specified
-it must be *null*. *msatoshi* is in millisatoshi precision; it can be a
+contain an amount, *amount\_msat* is required, otherwise if it is specified
+it must be *null*. *amount\_msat* is in millisatoshi precision; it can be a
 whole number, or a whole number with suffix *msat* or *sat*, or a three
 decimal point number with suffix *sat*, or an 1 to 11 decimal point
 number suffixed by *btc*.
@@ -44,7 +44,8 @@ implement your own heuristics rather than the primitive ones used
 here.
 
 *description* is only required for bolt11 invoices which do not
-contain a description themselves, but contain a description hash.
+contain a description themselves, but contain a description hash:
+in this case *description* is required.
 *description* is then checked against the hash inside the invoice
 before it will be paid.
 
@@ -95,8 +96,8 @@ RETURN VALUE
 [comment]: # (GENERATE-FROM-SCHEMA-START)
 On success, an object is returned, containing:
 
-- **payment\_preimage** (secret): the proof of payment: SHA256 of this **payment_hash** (always 64 characters)
-- **payment\_hash** (hash): the hash of the *payment_preimage* which will prove payment (always 64 characters)
+- **payment\_preimage** (secret): the proof of payment: SHA256 of this **payment\_hash**
+- **payment\_hash** (hash): the hash of the *payment\_preimage* which will prove payment
 - **created\_at** (number): the UNIX timestamp showing when this payment was initiated
 - **parts** (u32): how many attempts this took
 - **amount\_msat** (msat): Amount the recipient received
@@ -167,4 +168,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:6f7640af4859e4605f4369a4e17fcfbaead1be53928ad8101cc44fde6f441a97)
+[comment]: # ( SHA256STAMP:f72845c2600efdf48d5c9d32be5f3154c48bd5852df28b3a941f8e7f65bd1193)

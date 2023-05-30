@@ -16,7 +16,7 @@ update its internal state using the gossip message.
 Note that currently some paths will still silently reject the gossip: it
 is best effort.
 
-This is particularly used by plugins which may receive channel_update
+This is particularly used by plugins which may receive channel\_update
 messages within error replies.
 
 RETURN VALUE
@@ -42,4 +42,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:326e5801f65998e13e909d8b682e9fbc9824f3a43aa7da1d76b871882e52f293)
+[comment]: # ( SHA256STAMP:41d0ca6a956520453538c8ad5c5afce681540f4ce26017570cdc2356c3aab599)

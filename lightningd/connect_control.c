@@ -76,7 +76,8 @@ static void try_connect(const tal_t *ctx,
 			struct lightningd *ld,
 			const struct node_id *id,
 			u32 seconds_delay,
-			const struct wireaddr_internal *addrhint);
+			const struct wireaddr_internal *addrhint,
+			bool dns_fallback);
 
 struct id_and_addr {
 	struct node_id id;
@@ -226,7 +227,7 @@ static struct command_result *json_connect(struct command *cmd,
 					   &peer->addr);
 	}
 
- 	try_connect(cmd, cmd->ld, &id_addr.id, 0, addr);
+	try_connect(cmd, cmd->ld, &id_addr.id, 0, addr, true);
 
 	/* Leave this here for peer_connected, connect_failed or peer_disconnect_done. */
 	new_connect(cmd->ld, &id_addr.id, cmd);
@@ -248,7 +249,24 @@ struct delayed_reconnect {
 	struct lightningd *ld;
 	struct node_id id;
 	struct wireaddr_internal *addrhint;
+	bool dns_fallback;
 };
+
+static const struct node_id *delayed_reconnect_keyof(const struct delayed_reconnect *d)
+{
+	return &d->id;
+}
+
+static bool node_id_delayed_reconnect_eq(const struct delayed_reconnect *d,
+					 const struct node_id *node_id)
+{
+	return node_id_eq(node_id, &d->id);
+}
+
+HTABLE_DEFINE_TYPE(struct delayed_reconnect,
+		   delayed_reconnect_keyof,
+		   node_id_hash, node_id_delayed_reconnect_eq,
+		   delayed_reconnect_map);
 
 static void gossipd_got_addrs(struct subd *subd,
 			      const u8 *msg,
@@ -265,7 +283,8 @@ static void gossipd_got_addrs(struct subd *subd,
 	connectmsg = towire_connectd_connect_to_peer(NULL,
 						     &d->id,
 						     addrs,
-						     d->addrhint);
+						     d->addrhint,
+						     d->dns_fallback);
 	subd_send_msg(d->ld->connectd, take(connectmsg));
 	tal_free(d);
 }
@@ -278,19 +297,38 @@ static void do_connect(struct delayed_reconnect *d)
 	subd_req(d, d->ld->gossip, take(msg), -1, 0, gossipd_got_addrs, d);
 }
 
+static void destroy_delayed_reconnect(struct delayed_reconnect *d)
+{
+	delayed_reconnect_map_del(d->ld->delayed_reconnect_map, d);
+}
+
 static void try_connect(const tal_t *ctx,
 			struct lightningd *ld,
 			const struct node_id *id,
 			u32 seconds_delay,
-			const struct wireaddr_internal *addrhint)
+			const struct wireaddr_internal *addrhint,
+			bool dns_fallback)
 {
 	struct delayed_reconnect *d;
 	struct peer *peer;
+
+	/* Don't stack, unless this is an instant reconnect */
+	d = delayed_reconnect_map_get(ld->delayed_reconnect_map, id);
+	if (d) {
+		if (seconds_delay) {
+			log_peer_debug(ld->log, id, "Already reconnecting");
+			return;
+		}
+		tal_free(d);
+	}
 
 	d = tal(ctx, struct delayed_reconnect);
 	d->ld = ld;
 	d->id = *id;
 	d->addrhint = tal_dup_or_null(d, struct wireaddr_internal, addrhint);
+	d->dns_fallback = dns_fallback;
+	delayed_reconnect_map_add(ld->delayed_reconnect_map, d);
+	tal_add_destructor(d, destroy_delayed_reconnect);
 
 	if (!seconds_delay) {
 		do_connect(d);
@@ -347,11 +385,14 @@ void try_reconnect(const tal_t *ctx,
 	} else
 		peer->reconnect_delay = INITIAL_WAIT_SECONDS;
 
+	/* We only do DNS fallback lookups for manual connections, to
+	 * avoid stressing DNS servers for private nodes (sorry!) */
 	try_connect(ctx,
 		    peer->ld,
 		    &peer->id,
 		    peer->reconnect_delay,
-		    addrhint);
+		    addrhint,
+		    false);
 }
 
 /* We were trying to connect, but they disconnected. */
@@ -568,6 +609,9 @@ int connectd_init(struct lightningd *ld)
 	enum addr_listen_announce *listen_announce = ld->proposed_listen_announce;
 	const char *websocket_helper_path;
 	void *ret;
+
+	ld->delayed_reconnect_map = tal(ld, struct delayed_reconnect_map);
+	delayed_reconnect_map_init(ld->delayed_reconnect_map);
 
 	websocket_helper_path = subdaemon_path(tmpctx, ld,
 					       "lightning_websocketd");

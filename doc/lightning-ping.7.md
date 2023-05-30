@@ -9,7 +9,7 @@ SYNOPSIS
 DESCRIPTION
 -----------
 
-The **ping** command checks if the node with *id* is ready to talk. 
+The **ping** command checks if the node with *id* is ready to talk.
 It currently only works for peers we have a channel with.
 
 It accepts the following parameters:
@@ -70,4 +70,5 @@ RESOURCES
 ---------
 
 Main web site: <https://github.com/ElementsProject/lightning>
-[comment]: # ( SHA256STAMP:f33aa4d93ca623ff7cd5e4062e0533f617b00372797f8ee0d2498479d2fe08a9)
+
+[comment]: # ( SHA256STAMP:7fe1120c251ffe6d51057a94823376a512dee3ec4f251be82a7dc4b2f044a165)

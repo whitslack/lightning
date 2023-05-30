@@ -245,7 +245,18 @@
     },
     "disable-ip-discovery": {
       "type": "boolean",
-      "description": "`true` if `disable-ip-discovery` was set in config or cmdline"
+      "description": "`true` if `disable-ip-discovery` was set in config or cmdline",
+      "deprecated": "v23.02"
+    },
+    "announce-addr-discovered": {
+      "type": "string",
+      "description": "`true`/`false`/`auto` depending on how `announce-addr-discovered` was set in config or cmdline",
+      "added": "v23.02"
+    },
+    "announce-addr-discovered-port": {
+      "type": "integer",
+      "description": "Sets the announced TCP port for dynamically discovered IPs.",
+      "added": "v23.02"
     },
     "encrypted-hsm": {
       "type": "boolean",
@@ -285,7 +296,7 @@
     },
     "accept-htlc-tlv-types": {
       "type": "string",
-      "description": "`accept-extra-tlvs-type` fields from config or cmdline, or not present"
+      "description": "`accept-htlc-tlv-types` fields from config or cmdline, or not present"
     },
     "tor-service-password": {
       "type": "string",
@@ -297,7 +308,8 @@
     },
     "announce-addr-dns": {
       "type": "boolean",
-      "description": "Whether we put DNS entries into node_announcement"
+      "description": "Whether we put DNS entries into node_announcement",
+      "added": "v22.11.1"
     }
   }
 }

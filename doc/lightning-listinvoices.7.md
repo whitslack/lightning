@@ -4,7 +4,7 @@ lightning-listinvoices -- Command for querying invoice status
 SYNOPSIS
 --------
 
-**listinvoices** [*label*] [*invstring*] [*payment_hash*] [*offer_id*]
+**listinvoices** [*label*] [*invstring*] [*payment\_hash*] [*offer\_id*]
 
 DESCRIPTION
 -----------
@@ -24,22 +24,22 @@ RETURN VALUE
 On success, an object containing **invoices** is returned.  It is an array of objects, where each object contains:
 
 - **label** (string): unique label supplied at invoice creation
-- **payment\_hash** (hash): the hash of the *payment_preimage* which will prove payment (always 64 characters)
+- **payment\_hash** (hash): the hash of the *payment\_preimage* which will prove payment
 - **status** (string): Whether it's paid, unpaid or unpayable (one of "unpaid", "paid", "expired")
 - **expires\_at** (u64): UNIX timestamp of when it will become / became unpayable
 - **description** (string, optional): description used in the invoice
 - **amount\_msat** (msat, optional): the amount required to pay this invoice
 - **bolt11** (string, optional): the BOLT11 string (always present unless *bolt12* is)
 - **bolt12** (string, optional): the BOLT12 string (always present unless *bolt11* is)
-- **local\_offer\_id** (hex, optional): the *id* of our offer which created this invoice (**experimental-offers** only). (always 64 characters)
-- **invreq\_payer\_note** (string, optional): the optional *invreq_payer_note* from invoice_request which created this invoice (**experimental-offers** only).
+- **local\_offer\_id** (hash, optional): the *id* of our offer which created this invoice (**experimental-offers** only).
+- **invreq\_payer\_note** (string, optional): the optional *invreq\_payer\_note* from invoice\_request which created this invoice (**experimental-offers** only).
 
 If **status** is "paid":
 
   - **pay\_index** (u64): Unique incrementing index for this payment
-  - **amount\_received\_msat** (msat): the amount actually received (could be slightly greater than *amount_msat*, since clients may overpay)
+  - **amount\_received\_msat** (msat): the amount actually received (could be slightly greater than *amount\_msat*, since clients may overpay)
   - **paid\_at** (u64): UNIX timestamp of when it was paid
-  - **payment\_preimage** (secret): proof of payment (always 64 characters)
+  - **payment\_preimage** (secret): proof of payment
 
 [comment]: # (GENERATE-FROM-SCHEMA-END)
 
@@ -58,4 +58,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:5c64a05bbf7485840010b16005c6f5d57725e4b0bf0a2a2106febe91ff0d4eb8)
+[comment]: # ( SHA256STAMP:7b1b70f04245395de28eb378e364537920e2f690db3c97ee638cefd282712dca)

@@ -21,17 +21,11 @@ static size_t rehash(const void *key, void *unused)
 	return ptr2int(key);
 }
 
-static void destroy_msg_map(struct htable *ht)
-{
-	htable_clear(ht);
-}
-
 static struct htable *new_msg_map(const tal_t *ctx)
 {
 	struct htable *ht = tal(ctx, struct htable);
 
 	htable_init(ht, rehash, NULL);
-	tal_add_destructor(ht, destroy_msg_map);
 	return ht;
 }
 
@@ -90,10 +84,11 @@ static bool is_msg_gossip_broadcast(const u8 *cursor)
 	case WIRE_TX_REMOVE_OUTPUT:
 	case WIRE_TX_COMPLETE:
 	case WIRE_TX_SIGNATURES:
+	case WIRE_TX_INIT_RBF:
+	case WIRE_TX_ACK_RBF:
+	case WIRE_TX_ABORT:
 	case WIRE_OPEN_CHANNEL2:
 	case WIRE_ACCEPT_CHANNEL2:
-	case WIRE_INIT_RBF:
-	case WIRE_ACK_RBF:
 #if EXPERIMENTAL_FEATURES
 	case WIRE_STFU:
 #endif

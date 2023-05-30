@@ -10,6 +10,15 @@ use a subset of the full [JSON Schema Specification](https://json-schema.org/),
 but if you find that limiting it's probably a sign that you should simplify
 your JSON output.
 
+## Updating a Schema
+
+If you add a field, you should add it to the schema, and you must add
+"added": "VERSION" (where VERSION is the next release version!).
+
+Similarly, if you deprecate a field, add "deprecated": "VERSION" (where
+VERSION is the next release version).  They will be removed two versions
+later.
+
 ## How to Write a Schema
 
 Name the schema doc/schemas/`command`.schema.json: the testsuite should
@@ -37,7 +46,7 @@ You should always list all fields which are *always* present in
 `"required"`.
 
 We extend the basic types; see
-[contrib/pyln-testing/pyln/testing/fixtures.py](fixtures.py).
+[fixtures.py][contrib/pyln-testing/pyln/testing/fixtures.py].
 
 In addition, before committing a new schema or a new version of it, make sure that it
 is well formatted. If you don't want do it by hand, use `make fmt-schema` that uses
@@ -78,3 +87,5 @@ To add conditional fields:
 
 Good luck!
 Rusty.
+
+[contrib/pyln-testing/pyln/testing/fixtures.py]: https://github.com/ElementsProject/lightning/tree/master/contrib/pyln-testing/pyln/testing/fixtures.py

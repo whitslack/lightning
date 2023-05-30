@@ -425,11 +425,12 @@ static struct command_result *listsendpays_done(struct command *cmd,
 	size_t i;
 	const jsmntok_t *t, *arr;
 	struct json_stream *ret;
-	struct pay_map pay_map;
+	struct pay_map *pay_map;
 	struct pay_mpp *pm;
 	struct pay_sort_key *order = tal_arr(tmpctx, struct pay_sort_key, 0);
 
-	pay_map_init(&pay_map);
+	pay_map = tal(cmd, struct pay_map);
+	pay_map_init(pay_map);
 
 	arr = json_get_member(buf, result, "payments");
 	if (!arr || arr->type != JSMN_ARRAY)
@@ -474,7 +475,7 @@ static struct command_result *listsendpays_done(struct command *cmd,
 		key.payment_hash = &payment_hash;
 		key.groupid = groupid;
 
-		pm = pay_map_get(&pay_map, &key);
+		pm = pay_map_get(pay_map, &key);
 		if (!pm) {
 			pm = tal(cmd, struct pay_mpp);
 			pm->state = 0;
@@ -491,7 +492,7 @@ static struct command_result *listsendpays_done(struct command *cmd,
 			pm->sortkey.payment_hash = pm->payment_hash;
 			pm->sortkey.groupid = groupid;
 			pm->success_at = UINT64_MAX;
-			pay_map_add(&pay_map, pm);
+			pay_map_add(pay_map, pm);
 			// First time we see the groupid we add it to the order
 			// array, so we can retrieve them in the correct order.
 			tal_arr_expand(&order, pm->sortkey);
@@ -528,11 +529,10 @@ static struct command_result *listsendpays_done(struct command *cmd,
 	ret = jsonrpc_stream_success(cmd);
 	json_array_start(ret, "pays");
 	for (i = 0; i < tal_count(order); i++) {
-		pm = pay_map_get(&pay_map, &order[i]);
+		pm = pay_map_get(pay_map, &order[i]);
 		assert(pm != NULL);
 		add_new_entry(ret, buf, pm);
 	}
-	pay_map_clear(&pay_map);
 	json_array_end(ret);
 	return command_finished(cmd, ret);
 }
@@ -928,6 +928,7 @@ payment_listsendpays_previous(struct command *cmd, const char *buf,
 }
 
 struct payment_modifier *paymod_mods[] = {
+	&check_preapproveinvoice_pay_mod,
 	/* NOTE: The order in which these four paymods are executed is
 	 * significant!
 	 * local_channel_hints *must* execute first before route_exclusions
@@ -1066,7 +1067,7 @@ static struct command_result *json_pay(struct command *cmd,
 		 * - MUST check that the SHA2 256-bit hash in the `h` field
 		 *   exactly matches the hashed description.
 		 */
-		if (!b11->description && !deprecated_apis) {
+		if (!b11->description) {
 			if (!b11->description_hash) {
 				return command_fail(cmd,
 						    JSONRPC2_INVALID_PARAMS,
