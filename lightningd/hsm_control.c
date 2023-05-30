@@ -5,6 +5,7 @@
 #include <common/errcode.h>
 #include <common/hsm_encryption.h>
 #include <common/hsm_version.h>
+#include <common/invoice_path_id.h>
 #include <common/json_command.h>
 #include <common/json_param.h>
 #include <common/jsonrpc_errors.h>
@@ -119,16 +120,17 @@ struct ext_key *hsm_init(struct lightningd *ld)
 	msg = wire_sync_read(tmpctx, ld->hsm_fd);
 	if (!fromwire_hsmd_init_reply_v2(msg,
 					 &ld->id, bip32_base,
-					 &ld->bolt12_base,
-					 &ld->onion_reply_secret)) {
+					 &ld->bolt12_base)) {
 		/* v1 had x-only pubkey */
 		u8 pubkey32[33];
+		/* And gave us a secret to use for onion_reply paths */
+		struct secret onion_reply_secret;
 
 		pubkey32[0] = SECP256K1_TAG_PUBKEY_EVEN;
 		if (!fromwire_hsmd_init_reply_v1(msg,
 					 &ld->id, bip32_base,
 					 pubkey32 + 1,
-					 &ld->onion_reply_secret)) {
+					 &onion_reply_secret)) {
 			if (ld->config.keypass)
 				errx(EXITCODE_HSM_BAD_PASSWORD, "Wrong password for encrypted hsm_secret.");
 			errx(EXITCODE_HSM_GENERIC_ERROR, "HSM did not give init reply");
@@ -138,6 +140,17 @@ struct ext_key *hsm_init(struct lightningd *ld)
 			errx(EXITCODE_HSM_GENERIC_ERROR,
 			     "HSM gave invalid v1 bolt12_base");
 	}
+
+	/* This is equivalent to makesecret("bolt12-invoice-base") */
+	msg = towire_hsmd_derive_secret(NULL, tal_dup_arr(tmpctx, u8,
+							  (const u8 *)INVOICE_PATH_BASE_STRING,
+							  strlen(INVOICE_PATH_BASE_STRING), 0));
+	if (!wire_sync_write(ld->hsm_fd, take(msg)))
+		err(EXITCODE_HSM_GENERIC_ERROR, "Writing derive_secret msg to hsm");
+
+	msg = wire_sync_read(tmpctx, ld->hsm_fd);
+	if (!fromwire_hsmd_derive_secret_reply(msg, &ld->invoicesecret_base))
+		err(EXITCODE_HSM_GENERIC_ERROR, "Bad derive_secret_reply");
 
 	return bip32_base;
 }

@@ -124,8 +124,8 @@ struct lightningd {
 	/* The public base for our payer_id keys */
 	struct pubkey bolt12_base;
 
-	/* The secret we put in onion message paths to know it's ours. */
-	struct secret onion_reply_secret;
+	/* Secret base for our invoices */
+	struct secret invoicesecret_base;
 
 	/* Feature set we offer. */
 	struct feature_set *our_features;

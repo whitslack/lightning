@@ -89,9 +89,10 @@ static u8 *enctlv_from_encmsg_raw(const tal_t *ctx,
 		     type_to_string(tmpctx, struct secret, &rho));
 
 	/* BOLT-route-blinding #4:
-	 * - MUST encrypt them with ChaCha20-Poly1305 using the `rho(i)` key
-	 *   and an all-zero nonce
-	*/
+	 * - MUST encrypt each `encrypted_data_tlv(i)` with ChaCha20-Poly1305
+         *   using the corresponding `rho(i)` key and an all-zero nonce to
+         *   produce `encrypted_recipient_data(i)`
+	 */
 	/* Encrypt in place */
 	towire_pad(&ret, crypto_aead_chacha20poly1305_ietf_ABYTES);
 	ok = crypto_aead_chacha20poly1305_ietf_encrypt(ret, NULL,
@@ -106,15 +107,20 @@ static u8 *enctlv_from_encmsg_raw(const tal_t *ctx,
 	return ret;
 }
 
-static u8 *enctlv_from_encmsg(const tal_t *ctx,
-			      const struct privkey *blinding,
-			      const struct pubkey *node,
-			      const struct tlv_encrypted_data_tlv *encmsg,
-			      struct privkey *next_blinding,
-			      struct pubkey *node_alias)
+u8 *encrypt_tlv_encrypted_data(const tal_t *ctx,
+			       const struct privkey *blinding,
+			       const struct pubkey *node,
+			       const struct tlv_encrypted_data_tlv *encmsg,
+			       struct privkey *next_blinding,
+			       struct pubkey *node_alias)
 {
+	struct privkey unused;
 	u8 *encmsg_raw = tal_arr(NULL, u8, 0);
 	towire_tlv_encrypted_data_tlv(&encmsg_raw, encmsg);
+
+	/* last hop doesn't care about next_blinding */
+	if (!next_blinding)
+		next_blinding = &unused;
 	return enctlv_from_encmsg_raw(ctx, blinding, node, take(encmsg_raw),
 				      next_blinding, node_alias);
 }
@@ -127,8 +133,8 @@ bool unblind_onion(const struct pubkey *blinding,
 	struct secret hmac;
 
 	/* BOLT-route-blinding #4:
-	 * An intermediate node in the blinded route:
-	 *
+	 * A reader:
+	 *...
 	 * - MUST compute:
 	 *   - `ss(i) = SHA256(k(i) * E(i))` (standard ECDH)
 	 *   - `b(i) = HMAC256("blinded_node_id", ss(i)) * k(i)`
@@ -160,15 +166,17 @@ static u8 *decrypt_encmsg_raw(const tal_t *ctx,
 	static const unsigned char npub[crypto_aead_chacha20poly1305_ietf_NPUBBYTES];
 
 	/* BOLT-route-blinding #4:
-	 * - If an `encrypted_data` field is provided:
-	 *   - MUST decrypt it using `rho(r)`
+	 * A reader:
+	 *...
+	 *- MUST decrypt the `encrypted_data` field using `rho(i)` and use
+	 *  the decrypted fields to locate the next node
 	 */
 	subkey_from_hmac("rho", ss, &rho);
 
 	/* BOLT-onion-message #4:
-	 *   - if `enctlv` is not present, or does not decrypt with the
-	 *     shared secret from the given `blinding` parameter:
-	 *   - MUST drop the message.
+	 *- If the `encrypted_data` field is missing or cannot
+	 *  be decrypted:
+	 *   - MUST return an error
 	 */
 	/* Too short? */
 	if (tal_bytelen(enctlv) < crypto_aead_chacha20poly1305_ietf_ABYTES)
@@ -249,53 +257,4 @@ void blindedpath_next_blinding(const struct tlv_encrypted_data_tlv *enc,
 		blinding_hash_e_and_ss(blinding, ss, &h);
 		blinding_next_pubkey(blinding, &h, next_blinding);
 	}
-}
-
-u8 *create_enctlv(const tal_t *ctx,
-		  const struct privkey *blinding,
-		  const struct pubkey *node,
-		  const struct pubkey *next_node,
-		  const struct short_channel_id *next_scid,
-		  size_t padlen,
-		  const struct pubkey *next_blinding_override,
-		  const struct tlv_encrypted_data_tlv_payment_relay *payment_relay TAKES,
-		  const struct tlv_encrypted_data_tlv_payment_constraints *payment_constraints TAKES,
-		  const u8 *allowed_features TAKES,
-		  struct privkey *next_blinding,
-		  struct pubkey *node_alias)
-{
-	struct tlv_encrypted_data_tlv *encmsg = tlv_encrypted_data_tlv_new(tmpctx);
-	if (padlen)
-		encmsg->padding = tal_arrz(encmsg, u8, padlen);
-	encmsg->next_node_id = cast_const(struct pubkey *, next_node);
-	encmsg->next_blinding_override = cast_const(struct pubkey *, next_blinding_override);
-	encmsg->payment_relay = tal_dup_or_null(encmsg, struct tlv_encrypted_data_tlv_payment_relay,
-						payment_relay);
-	encmsg->payment_constraints = tal_dup_or_null(encmsg, struct tlv_encrypted_data_tlv_payment_constraints,
-						      payment_constraints);
-	encmsg->allowed_features = tal_dup_talarr(encmsg, u8, allowed_features);
-
-	return enctlv_from_encmsg(ctx, blinding, node, encmsg,
-				  next_blinding, node_alias);
-}
-
-u8 *create_final_enctlv(const tal_t *ctx,
-			const struct privkey *blinding,
-			const struct pubkey *final_node,
-			size_t padlen,
-			const struct secret *path_id,
-			const u8 *allowed_features TAKES,
-			struct pubkey *node_alias)
-{
-	struct tlv_encrypted_data_tlv *encmsg = tlv_encrypted_data_tlv_new(tmpctx);
-	struct privkey unused_next_blinding;
-
-	if (padlen)
-		encmsg->padding = tal_arrz(encmsg, u8, padlen);
-	if (path_id)
-		encmsg->path_id = (u8 *)tal_dup(encmsg, struct secret, path_id);
-	encmsg->allowed_features = tal_dup_talarr(encmsg, u8, allowed_features);
-
-	return enctlv_from_encmsg(ctx, blinding, final_node, encmsg,
-				  &unused_next_blinding, node_alias);
 }

@@ -7,7 +7,7 @@
 #include <common/ecdh.h>
 #include <common/json_command.h>
 #include <common/json_param.h>
-#include <common/onion.h>
+#include <common/onion_decode.h>
 #include <common/onionreply.h>
 #include <common/timeout.h>
 #include <common/type_to_string.h>
@@ -98,6 +98,16 @@ static struct failed_htlc *mk_failed_htlc_badonion(const tal_t *ctx,
 {
 	struct failed_htlc *f = tal(ctx, struct failed_htlc);
 
+	/* BOLT-route-blinding #4:
+	 * - If `blinding_point` is set in the incoming `update_add_htlc`:
+	 *    - MUST return `invalid_onion_blinding` for any local error or
+	 *      other downstream errors.
+	 */
+	/* FIXME: That's not enough!  Don't leak information about forward
+	 * failures either! */
+	if (hin->blinding || (hin->payload && hin->payload->blinding))
+		badonion = WIRE_INVALID_ONION_BLINDING;
+
 	f->id = hin->key.id;
 	f->onion = NULL;
 	f->badonion = badonion;
@@ -112,6 +122,26 @@ static struct failed_htlc *mk_failed_htlc(const tal_t *ctx,
 					  const struct onionreply *failonion)
 {
 	struct failed_htlc *f = tal(ctx, struct failed_htlc);
+
+	/* BOLT-route-blinding #4:
+	 * - If `blinding_point` is set in the incoming `update_add_htlc`:
+	 *    - MUST return `invalid_onion_blinding` for any local error or
+	 *      other downstream errors.
+	 */
+	if (hin->blinding) {
+		return mk_failed_htlc_badonion(ctx, hin,
+					       WIRE_INVALID_ONION_BLINDING);
+	}
+
+	/* Also, at head of the blinded path, return "normal" invalid
+	 * onion blinding. */
+	if (hin->payload && hin->payload->blinding) {
+		struct sha256 sha;
+		sha256(&sha, hin->onion_routing_packet,
+		       sizeof(hin->onion_routing_packet));
+		failonion = create_onionreply(tmpctx, hin->shared_secret,
+					      towire_invalid_onion_blinding(tmpctx, &sha));
+	}
 
 	f->id = hin->key.id;
 	f->sha256_of_onion = NULL;
@@ -149,16 +179,7 @@ static void fail_in_htlc(struct htlc_in *hin,
 	htlc_in_update_state(hin->key.channel, hin, SENT_REMOVE_HTLC);
 	htlc_in_check(hin, __func__);
 
-	/* BOLT-route-blinding #4:
-	 * - If `blinding_point` is set in the incoming `update_add_htlc`:
-	 *    - MUST return `invalid_onion_blinding` on any error, including
-	 *      downstream  errors received from forwarding HTLCs.
-	 */
-	if (hin->blinding) {
-		failed_htlc = mk_failed_htlc_badonion(tmpctx, hin,
-						      WIRE_INVALID_ONION_BLINDING);
-	} else
-		failed_htlc = mk_failed_htlc(tmpctx, hin, hin->failonion);
+	failed_htlc = mk_failed_htlc(tmpctx, hin, hin->failonion);
 
 	bool we_filled = false;
 	wallet_htlc_update(hin->key.channel->peer->ld->wallet,
@@ -693,7 +714,7 @@ static void forward_htlc(struct htlc_in *hin,
 		/* Update this to where we're actually trying to send. */
 		if (next)
 			forward_scid = channel_scid_or_local_alias(next);
-	}else
+	} else
 		next = NULL;
 
 	/* Unknown peer, or peer not ready. */
@@ -1056,6 +1077,9 @@ static void htlc_accepted_hook_serialize(struct htlc_accepted_hook_payload *p,
 		if (p->payload->forward_channel)
 			json_add_short_channel_id(s, "short_channel_id",
 						  p->payload->forward_channel);
+		if (p->payload->forward_node_id)
+			json_add_pubkey(s, "next_node_id",
+					p->payload->forward_node_id);
 		if (deprecated_apis)
 			json_add_string(s, "forward_amount",
 					fmt_amount_msat(tmpctx,
@@ -1181,20 +1205,42 @@ static struct channel_id *calc_forwarding_channel(struct lightningd *ld,
 						  const struct route_step *rs)
 {
 	const struct onion_payload *p = hp->payload;
+	struct peer *peer;
 	struct channel *c, *best;
 
 	if (rs->nextcase != ONION_FORWARD)
 		return NULL;
 
-	if (!p || !p->forward_channel)
+	if (!p)
 		return NULL;
 
-	c = any_channel_by_scid(ld, p->forward_channel, false);
-	if (!c)
-		return NULL;
+	if (p->forward_channel) {
+		c = any_channel_by_scid(ld, p->forward_channel, false);
+		if (!c)
+			return NULL;
+		peer = c->peer;
+	} else {
+		struct node_id id;
+		if (!p->forward_node_id)
+			return NULL;
+		node_id_from_pubkey(&id, p->forward_node_id);
+		peer = peer_by_id(ld, &id);
+		if (!peer)
+			return NULL;
+		c = NULL;
+	}
 
-	best = best_channel(ld, c->peer, p->amt_to_forward, c);
-	if (best != c) {
+	best = best_channel(ld, peer, p->amt_to_forward, c);
+	if (!c) {
+		if (!best)
+			return NULL;
+		log_debug(hp->channel->log,
+			  "Chose channel %s for peer %s",
+			  type_to_string(tmpctx, struct short_channel_id,
+					 channel_scid_or_local_alias(best)),
+			  type_to_string(tmpctx, struct node_id,
+					 &peer->id));
+	} else if (best != c) {
 		log_debug(hp->channel->log,
 			  "Chose a better channel than %s: %s",
 			  type_to_string(tmpctx, struct short_channel_id,

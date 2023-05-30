@@ -47,6 +47,7 @@ COMMON_SRC_NOGEN :=				\
 	common/interactivetx.c			\
 	common/initial_channel.c		\
 	common/initial_commit_tx.c		\
+	common/invoice_path_id.c		\
 	common/iso4217.c			\
 	common/json_filter.c			\
 	common/json_param.c			\
@@ -59,7 +60,8 @@ COMMON_SRC_NOGEN :=				\
 	common/memleak.c			\
 	common/msg_queue.c			\
 	common/node_id.c			\
-	common/onion.c				\
+	common/onion_decode.c			\
+	common/onion_encode.c			\
 	common/onionreply.c			\
 	common/onion_message_parse.c		\
 	common/peer_billboard.c			\

@@ -5,7 +5,6 @@
 #include <common/configdir.h>
 #include <common/json_command.h>
 #include <common/json_param.h>
-#include <common/onion.h>
 #include <common/onionreply.h>
 #include <common/route.h>
 #include <common/timeout.h>
@@ -1589,8 +1588,8 @@ static struct command_result *json_listsendpays(struct command *cmd,
 			b12 = invoice_decode(cmd, invstring, strlen(invstring),
 					     cmd->ld->our_features,
 					     chainparams, &fail);
-			if (b12 && b12->payment_hash)
-				rhash = b12->payment_hash;
+			if (b12 && b12->invoice_payment_hash)
+				rhash = b12->invoice_payment_hash;
 			else
 				return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
 						    "Invalid invstring: %s", fail);
