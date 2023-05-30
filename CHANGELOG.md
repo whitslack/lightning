@@ -3,10 +3,68 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
-<!--
-TODO: Insert version codename, and username of the contributor that named the release.
--->
-## [23.02rc3] - 2023-02-15
+
+## [23.02.2] - 2023-03-14: "CBDC Backing Layer III"
+
+
+### Added
+
+ - JSON-RPC: Restore `pay` for a bolt11 which uses a `description_hash`, without setting `description` (still deprecated, but the world is not ready) [
+
+[#6092]: https://github.com/ElementsProject/lightning/pull/6092
+
+
+## [23.02.1] - 2023-03-10: "CBDC Backing Layer II"
+
+This release named by @whitslack
+
+### Added
+
+
+### Changed
+
+ - gossipd: Revert zombification change, keep all gossip for now. ([#6069])
+
+
+### Deprecated
+
+Note: You should always set `allow-deprecated-apis=false` to test for changes.
+
+
+### Removed
+
+
+### Fixed
+
+ - Plugins: `sql` nodes table now gets refreshed when gossip changes. ([#6068])
+ - connectd: Fixed a crash on new connections. ([#6070])
+ - wallet: Don't crash on broken database migrations. ([#6071])
+
+
+### EXPERIMENTAL
+
+ - `experimental-peer-storage`: only send to peers which support it. ([#6072])
+
+
+[#6068]: https://github.com/ElementsProject/lightning/pull/6068
+[#6069]: https://github.com/ElementsProject/lightning/pull/6069
+[#6070]: https://github.com/ElementsProject/lightning/pull/6070
+[#6071]: https://github.com/ElementsProject/lightning/pull/6071
+[#6072]: https://github.com/ElementsProject/lightning/pull/6072
+
+
+## [23.02] - 2023-03-01: "CBDC Backing Layer"
+
+This release named by @whitslack
+
+NOTE 1: This release contains breaking protocol changes to dual-funding and
+        offers, making them incompatible with previous releases.
+NOTE 2: Periodic pruning of channels now keeps track of them as 'zombies.' This
+        behavior is in line with the lightning specification but results in
+        fewer nodes and channels listed by `listnodes`/`listpeers`. These
+        channels will resume as soon as the missing side broadcasts a recent
+        channel update.
+
 
 ### Added
 
@@ -59,10 +117,12 @@ Note: You should always set `allow-deprecated-apis=false` to test for changes.
  - gossip: We removed a warning for malformed `channel_update` that was causing LND peers to disconnect  ([#5897])
  - cli: accepts long paths as options ([#5883])
  - JSON-RPC: `getinfo` `blockheight` no longer sits on 0 while we sync with bitcoind the first time. ([#5963])
+ - keysend: Keysend would strip even allowed extra TLV types before resolving, this is no longer the case. ([#6031])
  - lightningd: we no longer stack multiple reconnection attempts if connections fail. ([#5946])
  - Plugins: `pay` uses the correct local channel for payments when there are multiple available (not just always the first!) ([#5947])
  - Pruned channels are more reliably restored. ([#5839])
- - pay: don't assert() on malformed BOLT11 strings. ([#5891])
+ - `delpay`: Actually delete the specified payment (mainly found by `autoclean`). ([#6043])
+ - pay: Don't assert() on malformed BOLT11 strings. ([#5891])
  - gossmap: Fixed `FATAL SIGNAL 11` on gossmap node announcement parsing. ([#6005])
  - channeld no longer retains dead HTLCs in memory. ([#5882])
  - database: Correctly identity official release versions for database upgrade. ([#5880])
@@ -2225,7 +2285,8 @@ There predate the BOLT specifications, and are only of vague historic interest:
 6. [0.5.1] - 2016-10-21
 7. [0.5.2] - 2016-11-21: "Bitcoin Savings & Trust Daily Interest II"
 
-[23.02rc1]: https://github.com/ElementsProject/lightning/releases/tag/v23.02rc1
+[23.02.1]: https://github.com/ElementsProject/lightning/releases/tag/v23.02.1
+[23.02]: https://github.com/ElementsProject/lightning/releases/tag/v23.02
 [0.12.0]: https://github.com/ElementsProject/lightning/releases/tag/v0.12.0
 [0.11.2]: https://github.com/ElementsProject/lightning/releases/tag/v0.11.2
 [0.11.1]: https://github.com/ElementsProject/lightning/releases/tag/v0.11.1
