@@ -171,9 +171,10 @@ struct state {
 	/* Information we need between funding_start and funding_complete */
 	struct basepoints their_points;
 
-	/* hsmd gives us our first per-commitment point, and peer tells us
+	/* hsmd gives us our first+second per-commitment points, and peer tells us
 	 * theirs */
 	struct pubkey first_per_commitment_point[NUM_SIDES];
+	struct pubkey second_per_commitment_point[NUM_SIDES];
 
 	struct channel_id channel_id;
 	u8 channel_flags;
@@ -570,11 +571,6 @@ static size_t psbt_input_weight(struct wally_psbt *psbt,
 		(psbt->inputs[in].redeem_script_len +
 			(varint_t) varint_size(psbt->inputs[in].redeem_script_len)) * 4;
 
-	/* BOLT-f53ca2301232db780843e894f55d95d512f297f9 #3:
-	 *
-	 * The minimum witness weight for an input is 110.
-	 */
-	weight += 110;
 	return weight;
 }
 
@@ -1069,7 +1065,7 @@ static void handle_tx_sigs(struct state *state, const u8 *msg)
 				      tal_hex(msg, msg));
 
 		elem = cast_const2(const struct witness_element **,
-				   ws[j++]->witness_element);
+				   ws[j++]->witness_elements);
 		psbt_finalize_input(tx_state->psbt, in, elem);
 	}
 
@@ -1410,6 +1406,8 @@ static u8 *opening_negotiate_msg(const tal_t *ctx, struct state *state)
 		case WIRE_WARNING:
 		case WIRE_PING:
 		case WIRE_PONG:
+		case WIRE_PEER_STORAGE:
+		case WIRE_YOUR_PEER_STORAGE:
 #if EXPERIMENTAL_FEATURES
 		case WIRE_STFU:
 #endif
@@ -1784,6 +1782,8 @@ static bool run_tx_interactive(struct state *state,
 		case WIRE_REPLY_SHORT_CHANNEL_IDS_END:
 		case WIRE_PING:
 		case WIRE_PONG:
+		case WIRE_PEER_STORAGE:
+		case WIRE_YOUR_PEER_STORAGE:
 #if EXPERIMENTAL_FEATURES
 		case WIRE_STFU:
 #endif
@@ -2195,6 +2195,9 @@ static void accepter_start(struct state *state, const u8 *oc2_msg)
 				    &state->their_points.delayed_payment,
 				    &state->their_points.htlc,
 				    &state->first_per_commitment_point[REMOTE],
+				    /* We don't actually do anything with this currently,
+				     * as they send it to us again in `channel_ready` */
+				    &state->second_per_commitment_point[REMOTE],
 				    &state->channel_flags,
 				    &open_tlv))
 		open_err_fatal(state, "Parsing open_channel2 %s",
@@ -2499,6 +2502,7 @@ static void accepter_start(struct state *state, const u8 *oc2_msg)
 				     &state->our_points.delayed_payment,
 				     &state->our_points.htlc,
 				     &state->first_per_commitment_point[LOCAL],
+				     &state->second_per_commitment_point[LOCAL],
 				     a_tlv);
 
 	/* Everything's ok. Let's figure out the actual channel_id now */
@@ -2932,6 +2936,7 @@ static void opener_start(struct state *state, u8 *msg)
 				   &state->our_points.delayed_payment,
 				   &state->our_points.htlc,
 				   &state->first_per_commitment_point[LOCAL],
+				   &state->second_per_commitment_point[LOCAL],
 				   state->channel_flags,
 				   open_tlv);
 
@@ -2960,6 +2965,9 @@ static void opener_start(struct state *state, u8 *msg)
 				      &state->their_points.delayed_payment,
 				      &state->their_points.htlc,
 				      &state->first_per_commitment_point[REMOTE],
+				      /* We don't actually do anything with this currently,
+				       * as they send it to us again in `channel_ready` */
+				      &state->second_per_commitment_point[REMOTE],
 				      &a_tlv))
 		open_err_fatal(state,  "Parsing accept_channel2 %s",
 			       tal_hex(msg, msg));
@@ -4058,6 +4066,8 @@ static u8 *handle_peer_in(struct state *state)
 	case WIRE_WARNING:
 	case WIRE_PING:
 	case WIRE_PONG:
+	case WIRE_PEER_STORAGE:
+	case WIRE_YOUR_PEER_STORAGE:
 #if EXPERIMENTAL_FEATURES
 	case WIRE_STFU:
 #endif
@@ -4084,13 +4094,33 @@ static u8 *handle_peer_in(struct state *state)
 	peer_failed_connection_lost();
 }
 
+static void fetch_per_commitment_point(u32 point_count,
+				       struct pubkey *commit_point)
+{
+	u8 *msg;
+	struct secret *none;
+
+	wire_sync_write(HSM_FD,
+			take(towire_hsmd_get_per_commitment_point(NULL, point_count)));
+	msg = wire_sync_read(tmpctx, HSM_FD);
+	if (!fromwire_hsmd_get_per_commitment_point_reply(tmpctx, msg,
+							  commit_point,
+							  &none))
+		status_failed(STATUS_FAIL_HSM_IO,
+			      "Bad get_per_commitment_point_reply %s",
+			      tal_hex(tmpctx, msg));
+
+	/*~ The HSM gives us the N-2'th per-commitment secret when we get the
+	 * N'th per-commitment point.  But since N=0, it won't give us one. */
+	assert(none == NULL);
+}
+
 int main(int argc, char *argv[])
 {
 	common_setup(argv[0]);
 
 	struct pollfd pollfd[2];
 	struct state *state = tal(NULL, struct state);
-	struct secret *none;
 	struct fee_states *fee_states;
 	enum side opener;
 	u8 *msg;
@@ -4246,18 +4276,8 @@ int main(int argc, char *argv[])
 	/*~ We need an initial per-commitment point whether we're funding or
 	 * they are, and lightningd has reserved a unique dbid for us already,
 	 * so we might as well get the hsm daemon to generate it now. */
-	wire_sync_write(HSM_FD,
-			take(towire_hsmd_get_per_commitment_point(NULL, 0)));
-	msg = wire_sync_read(tmpctx, HSM_FD);
-	if (!fromwire_hsmd_get_per_commitment_point_reply(tmpctx, msg,
-							  &state->first_per_commitment_point[LOCAL],
-							  &none))
-		status_failed(STATUS_FAIL_HSM_IO,
-			      "Bad get_per_commitment_point_reply %s",
-			      tal_hex(tmpctx, msg));
-	/*~ The HSM gives us the N-2'th per-commitment secret when we get the
-	 * N'th per-commitment point.  But since N=0, it won't give us one. */
-	assert(none == NULL);
+	fetch_per_commitment_point(0, &state->first_per_commitment_point[LOCAL]);
+	fetch_per_commitment_point(1, &state->second_per_commitment_point[LOCAL]);
 
 	/*~ We manually run a little poll() loop here.  With only two fds */
 	pollfd[0].fd = REQ_FD;

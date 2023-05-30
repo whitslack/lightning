@@ -2505,6 +2505,48 @@ def test_emergencyrecover(node_factory, bitcoind):
     assert l2.rpc.listfunds()["channels"][0]["state"] == "ONCHAIN"
 
 
+@unittest.skipIf(os.getenv('TEST_DB_PROVIDER', 'sqlite3') != 'sqlite3', "deletes database, which is assumed sqlite3")
+def test_restorefrompeer(node_factory, bitcoind):
+    """
+    Test restorefrompeer
+    """
+    l1, l2 = node_factory.get_nodes(2, [{'allow_broken_log': True,
+                                         'experimental-peer-storage': None,
+                                         'may_reconnect': True},
+                                        {'experimental-peer-storage': None,
+                                         'may_reconnect': True}])
+
+    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
+
+    c12, _ = l1.fundchannel(l2, 10**5)
+    assert l1.daemon.is_in_log('Peer storage sent!')
+    assert l2.daemon.is_in_log('Peer storage sent!')
+
+    l1.stop()
+    os.unlink(os.path.join(l1.daemon.lightning_dir, TEST_NETWORK, "lightningd.sqlite3"))
+
+    l1.start()
+    assert l1.daemon.is_in_log('Server started with public key')
+
+    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
+    l1.daemon.wait_for_log('peer_in WIRE_YOUR_PEER_STORAGE')
+
+    assert l1.rpc.restorefrompeer()['stubs'][0] == _['channel_id']
+
+    l1.daemon.wait_for_log('peer_out WIRE_ERROR')
+    l2.daemon.wait_for_log('State changed from CHANNELD_NORMAL to AWAITING_UNILATERAL')
+
+    bitcoind.generate_block(5, wait_for_mempool=1)
+    sync_blockheight(bitcoind, [l1, l2])
+
+    l1.daemon.wait_for_log(r'All outputs resolved.*')
+    wait_for(lambda: l1.rpc.listfunds()["channels"][0]["state"] == "ONCHAIN")
+
+    # Check if funds are recovered.
+    assert l1.rpc.listfunds()["channels"][0]["state"] == "ONCHAIN"
+    assert l2.rpc.listfunds()["channels"][0]["state"] == "ONCHAIN"
+
+
 def test_commitfee_option(node_factory):
     """Sanity check for the --commit-fee startup option."""
     l1, l2 = node_factory.get_nodes(2, opts=[{"commit-fee": "200"}, {}])
@@ -2787,6 +2829,18 @@ def test_force_feerates(node_factory):
         "penalty": 6666,
         "min_acceptable": 1875,
         "max_acceptable": 150000}
+
+
+def test_datastore_escapeing(node_factory):
+    """ This test demonstrates that there is some character escaping issue
+        issue in the datastore API and error messages during startup that
+        affect plugins init method. """
+    setdata = '{"foo": "bar"}'
+    l1 = node_factory.get_node()
+    l1.rpc.datastore(key='foo_bar', string=setdata)
+    getdata = l1.rpc.listdatastore('foo_bar')['datastore'][0]['string']
+    assert not l1.daemon.is_in_log(r".*listdatastore error.*token has no index 0.*")
+    assert getdata == setdata
 
 
 def test_datastore(node_factory):

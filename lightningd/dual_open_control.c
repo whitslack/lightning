@@ -2596,7 +2596,7 @@ static void validate_input_unspent(struct bitcoind *bitcoind,
 
 		if (!psbt_get_serial_id(&pv->psbt->inputs[i].unknowns, &serial)) {
 			was_pending(command_fail(pv->cmd, FUNDING_PSBT_INVALID,
-					    "PSBT input at index %"PRIu64
+					    "PSBT input at index %zu"
 					    " missing serial id", i));
 			return;
 		}
