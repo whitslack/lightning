@@ -170,7 +170,7 @@ class Config():
                             conf_write.write(f'\n{l.strip()}')
                         else:
                             conf_write.write(l.strip())
-                        if addline == l:
+                        if addline.strip() == l.strip():
                             # addline is idempotent
                             line_exists = True
                 if not line_exists:
@@ -338,7 +338,7 @@ def _install_plugin(src: InstInfo) -> bool:
     # clone git repository to /tmp/reckless-...
     if ('http' in src.repo[:4]) or ('github.com' in src.repo):
         # Ugly, but interactively handling stderr gets hairy.
-        if IS_VERBOSE:
+        if logging.root.level < logging.WARNING:
             git = Popen(['git', 'clone',  src.repo, str(clone_path)],
                         stdout=PIPE)
         else:
@@ -376,7 +376,11 @@ def _install_plugin(src: InstInfo) -> bool:
     if src.deps is not None:
         logging.debug(f'installing dependencies using {src.deps}')
         procedure = install_methods[src.deps]
-        pip = Popen(procedure, cwd=plugin_path, stdout=PIPE)
+        # Verbose output requested.
+        if logging.root.level < logging.WARNING:
+            pip = Popen(procedure, cwd=plugin_path)
+        else:
+            pip = Popen(procedure, cwd=plugin_path, stdout=PIPE, stderr=PIPE)
         pip.wait()
         if pip.returncode == 0:
             print('dependencies installed successfully')
@@ -660,7 +664,9 @@ if __name__ == '__main__':
                         type=str,
                         default=None)
     parser.add_argument('-r', '--regtest', action='store_true')
-    parser.add_argument('-v', '--verbose', action='store_true')
+    # parser.add_argument('-v', '--verbose', action='store_true')
+    parser.add_argument('-v', '--verbose', action="store_const",
+                        dest="loglevel", const=logging.DEBUG, default=logging.WARNING)
     cmd1 = parser.add_subparsers(dest='cmd1', help='command',
                                  required=True)
 
@@ -724,7 +730,7 @@ if __name__ == '__main__':
     RECKLESS_CONFIG = load_config(reckless_dir=RECKLESS_DIR,
                                   network=NETWORK)
     RECKLESS_SOURCES = loadSources()
-    IS_VERBOSE = bool(args.verbose)
+    logging.root.setLevel(args.loglevel)
 
     if 'targets' in args:
         # FIXME: Catch missing argument
