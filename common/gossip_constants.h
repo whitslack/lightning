@@ -22,13 +22,15 @@
 
 /* BOLT #7:
  *
- * The `message_flags` bitfield is used to indicate the presence of optional
- * fields in the `channel_update` message:
- * | Bit Position  | Name                      | Field                |
- * | ------------- | ------------------------- | ----------------...- |
- * | 0             | `option_channel_htlc_max` | `htlc_maximum_msat`  |
+ * The `message_flags` bitfield is used to provide additional details about the message:
+ * | Bit Position  | Name           |
+ * | ------------- | ---------------|
+ * | 0             | `must_be_one`  |
+ * | 1             | `dont_forward` |
  */
+/* FIXME: This is the old name */
 #define ROUTING_OPT_HTLC_MAX_MSAT (1 << 0)
+#define ROUTING_OPT_DONT_FORWARD (1 << 1)
 
 /* BOLT #7:
  *
@@ -62,8 +64,8 @@
 /* BOLT #7:
  *
  * A node:
- *   - if a channel's latest `channel_update`s `timestamp` is older than two weeks
- *   (1209600 seconds):
+ * - if the `timestamp` of the latest `channel_update` in
+ *   either direction is older than two weeks (1209600 seconds):
  *     - MAY prune the channel.
  *     - MAY ignore the channel.
  */

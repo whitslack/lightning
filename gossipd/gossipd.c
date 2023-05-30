@@ -603,8 +603,8 @@ handled:
 /* BOLT #7:
  *
  * A node:
- *  - if a channel's latest `channel_update`s `timestamp` is older than two weeks
- *    (1209600 seconds):
+ * - if the `timestamp` of the latest `channel_update` in
+ *   either direction is older than two weeks (1209600 seconds):
  *     - MAY prune the channel.
  *     - MAY ignore the channel.
  */
@@ -797,6 +797,8 @@ static void new_blockheight(struct daemon *daemon, const u8 *msg)
 		i--;
 	}
 
+	routing_expire_channels(daemon->rstate, daemon->current_blockheight);
+
 	daemon_conn_send(daemon->master,
 			 take(towire_gossipd_new_blockheight_reply(NULL)));
 }
@@ -927,27 +929,23 @@ static void handle_new_lease_rates(struct daemon *daemon, const u8 *msg)
 
 /*~ This is where lightningd tells us that a channel's funding transaction has
  * been spent. */
-static void handle_outpoint_spent(struct daemon *daemon, const u8 *msg)
+static void handle_outpoints_spent(struct daemon *daemon, const u8 *msg)
 {
-	struct short_channel_id scid;
-	struct chan *chan;
-	struct routing_state *rstate = daemon->rstate;
-	if (!fromwire_gossipd_outpoint_spent(msg, &scid))
-		master_badmsg(WIRE_GOSSIPD_OUTPOINT_SPENT, msg);
+	struct short_channel_id *scids;
+	u32 blockheight;
 
-	chan = get_channel(rstate, &scid);
-	if (chan) {
-		status_debug(
-		    "Deleting channel %s due to the funding outpoint being "
-		    "spent",
-		    type_to_string(msg, struct short_channel_id, &scid));
-		/* Suppress any now-obsolete updates/announcements */
-		add_to_txout_failures(rstate, &scid);
-		remove_channel_from_store(rstate, chan);
-		/* Freeing is sufficient since everything else is allocated off
-		 * of the channel and this takes care of unregistering
-		 * the channel */
-		free_chan(rstate, chan);
+	if (!fromwire_gossipd_outpoints_spent(msg, msg, &blockheight, &scids))
+		master_badmsg(WIRE_GOSSIPD_OUTPOINTS_SPENT, msg);
+
+	for (size_t i = 0; i < tal_count(scids); i++) {
+		struct chan *chan = get_channel(daemon->rstate, &scids[i]);
+
+		if (!chan)
+			continue;
+
+		/* We have a current_blockheight, but it's not necessarily
+		 * updated first. */
+		routing_channel_spent(daemon->rstate, blockheight, chan);
 	}
 }
 
@@ -999,8 +997,8 @@ static struct io_plan *recv_req(struct io_conn *conn,
 		handle_txout_reply(daemon, msg);
 		goto done;
 
-	case WIRE_GOSSIPD_OUTPOINT_SPENT:
-		handle_outpoint_spent(daemon, msg);
+	case WIRE_GOSSIPD_OUTPOINTS_SPENT:
+		handle_outpoints_spent(daemon, msg);
 		goto done;
 
 	case WIRE_GOSSIPD_LOCAL_CHANNEL_CLOSE:

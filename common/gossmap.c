@@ -482,7 +482,7 @@ static struct gossmap_chan *add_channel(struct gossmap *map,
  *     * [`u64`:`htlc_minimum_msat`]
  *     * [`u32`:`fee_base_msat`]
  *     * [`u32`:`fee_proportional_millionths`]
- *     * [`u64`:`htlc_maximum_msat`] (option_channel_htlc_max)
+ *     * [`u64`:`htlc_maximum_msat`]
  */
 static bool update_channel(struct gossmap *map, size_t cupdate_off)
 {
@@ -509,15 +509,7 @@ static bool update_channel(struct gossmap *map, size_t cupdate_off)
 
 	/* We round this *down*, since too-low min is more conservative */
 	hc.htlc_min = u64_to_fp16(map_be64(map, htlc_minimum_off), false);
-	/* I checked my node: 60189 of 62358 channel_update have
-	 * htlc_maximum_msat, so we don't bother setting the rest to the
-	 * channel size (which we don't even read from the gossip_store, let
-	 * alone give up precious bytes to remember) */
-	if (map_u8(map, message_flags_off) & 1)
-		hc.htlc_max
-			= u64_to_fp16(map_be64(map, htlc_maximum_off), true);
-	else
-		hc.htlc_max = 0xFFFF;
+	hc.htlc_max = u64_to_fp16(map_be64(map, htlc_maximum_off), true);
 
 	chanflags = map_u8(map, channel_flags_off);
 	hc.enabled = !(chanflags & 2);
@@ -672,7 +664,8 @@ static bool load_gossip_store(struct gossmap *map, size_t *num_rejected)
 	if (map->mmap == MAP_FAILED)
 		map->mmap = NULL;
 
-	if (map_u8(map, 0) != GOSSIP_STORE_VERSION) {
+	/* We only support major version 0 */
+	if (GOSSIP_STORE_MAJOR_VERSION(map_u8(map, 0)) != 0) {
 		close(map->fd);
 		if (map->mmap)
 			munmap(map->mmap, map->map_size);
@@ -1224,7 +1217,7 @@ u8 *gossmap_chan_get_features(const tal_t *ctx,
  *     * [`u64`:`htlc_minimum_msat`]
  *     * [`u32`:`fee_base_msat`]
  *     * [`u32`:`fee_proportional_millionths`]
- *     * [`u64`:`htlc_maximum_msat`] (option_channel_htlc_max)
+ *     * [`u64`:`htlc_maximum_msat`]
  */
 void gossmap_chan_get_update_details(const struct gossmap *map,
 				     const struct gossmap_chan *chan,
@@ -1235,7 +1228,6 @@ void gossmap_chan_get_update_details(const struct gossmap *map,
 				     u32 *fee_base_msat,
 				     u32 *fee_proportional_millionths,
 				     struct amount_msat *htlc_minimum_msat,
-				     /* iff message_flags & 1 */
 				     struct amount_msat *htlc_maximum_msat)
 {
 	/* Note that first two bytes are message type */
@@ -1248,18 +1240,15 @@ void gossmap_chan_get_update_details(const struct gossmap *map,
 	const size_t fee_base_off = htlc_minimum_off + 8;
 	const size_t fee_prop_off = fee_base_off + 4;
 	const size_t htlc_maximum_off = fee_prop_off + 4;
-	u8 mflags;
 
 	assert(gossmap_chan_set(chan, dir));
 
 	if (timestamp)
 		*timestamp = map_be32(map, timestamp_off);
-	/* We need this (below), even if they don't want it */
-	mflags = map_u8(map, message_flags_off);
-	if (message_flags)
-		*message_flags = mflags;
 	if (channel_flags)
 		*channel_flags = map_u8(map, channel_flags_off);
+	if (message_flags)
+		*message_flags = map_u8(map, message_flags_off);
 	if (fee_base_msat)
 		*fee_base_msat = map_be32(map, fee_base_off);
 	if (fee_proportional_millionths)
@@ -1267,7 +1256,7 @@ void gossmap_chan_get_update_details(const struct gossmap *map,
 	if (htlc_minimum_msat)
 		*htlc_minimum_msat
 			= amount_msat(map_be64(map, htlc_minimum_off));
-	if (htlc_maximum_msat && (mflags & 1))
+	if (htlc_maximum_msat)
 		*htlc_maximum_msat
 			= amount_msat(map_be64(map, htlc_maximum_off));
 }

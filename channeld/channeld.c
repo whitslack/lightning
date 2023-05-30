@@ -369,14 +369,16 @@ static void send_channel_update(struct peer *peer, int disable_flag)
 	assert(peer->short_channel_ids[LOCAL].u64);
 
 	msg = towire_channeld_local_channel_update(NULL,
-						  &peer->short_channel_ids[LOCAL],
-						  disable_flag
-						  == ROUTING_FLAGS_DISABLED,
-						  peer->cltv_delta,
-						  peer->htlc_minimum_msat,
-						  peer->fee_base,
-						  peer->fee_per_satoshi,
-						  peer->htlc_maximum_msat);
+						   &peer->short_channel_ids[LOCAL],
+						   disable_flag
+						   == ROUTING_FLAGS_DISABLED,
+						   peer->cltv_delta,
+						   peer->htlc_minimum_msat,
+						   peer->fee_base,
+						   peer->fee_per_satoshi,
+						   peer->htlc_maximum_msat,
+						   peer->channel_flags
+						   & CHANNEL_FLAGS_ANNOUNCE_CHANNEL);
 	wire_sync_write(MASTER_FD, take(msg));
 }
 
@@ -3000,12 +3002,14 @@ skip_tlvs:
 		}
 		retransmit_revoke_and_ack = true;
 	} else if (next_revocation_number < peer->next_index[LOCAL] - 1) {
-		peer_failed_err(peer->pps,
-				&peer->channel_id,
-				"bad reestablish revocation_number: %"PRIu64
-				" vs %"PRIu64,
-				next_revocation_number,
-				peer->next_index[LOCAL]);
+		/* Send a warning here!  Because this is what it looks like if peer is
+		 * in the past, and they might still recover. */
+		peer_failed_warn(peer->pps,
+				 &peer->channel_id,
+				 "bad reestablish revocation_number: %"PRIu64
+				 " vs %"PRIu64,
+				 next_revocation_number,
+				 peer->next_index[LOCAL]);
 	} else if (next_revocation_number > peer->next_index[LOCAL] - 1) {
 		if (!check_extra_fields)
 			/* They don't support option_data_loss_protect or
