@@ -5,12 +5,20 @@ import sys
 import json
 import os
 import argparse
-from pathlib import Path
+from pathlib import Path, PosixPath
 import shutil
 import tempfile
-import requests
 from typing import Union
 from urllib.parse import urlparse
+from urllib.request import urlopen
+import logging
+
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='[%(asctime)s] %(levelname)s: %(message)s',
+    handlers=[logging.StreamHandler(stream=sys.stdout)],
+)
 
 
 repos = ['https://github.com/lightningd/plugins']
@@ -43,13 +51,13 @@ class InstInfo:
         Populate installation details from a github repo url.
         Return True if all data is found.
         """
-        r = requests.get(self.git_url)
-        if r.status_code != 200:
+        r = urlopen(self.git_url, timeout=5)
+        if r.status != 200:
             return False
         if 'git/tree' in self.git_url:
-            tree = r.json()['tree']
+            tree = json.loads(r.read().decode())['tree']
         else:
-            tree = r.json()
+            tree = json.loads(r.read().decode())
         entry_guesses = py_entry_guesses(self.name)
         for g in entry_guesses:
             for f in tree:
@@ -80,16 +88,16 @@ class InstInfo:
         return True
 
 
-def create_dir(r: int, directory: str) -> bool:
+def create_dir(r: int, directory: PosixPath) -> bool:
     """Creation of a directory at path `d` with a maximum new dir depth `r`"""
-    if Path(directory).exists():
+    if directory.exists():
         return True
-    elif r <= 0:
+    if r <= 0:
         return False
-    elif create_dir(r-1, Path(directory).parent):
+    if create_dir(r-1, directory.parent):
         os.mkdir(directory, 0o777)
         print(f'created directory {directory}')
-        assert Path(directory).exists()
+        assert directory.exists()
         return True
 
 
@@ -135,7 +143,7 @@ class Config():
                 # FIXME: Handle write failure
                 return default_text
         else:
-            verbose(f'could not create the parent directory {parent_path}')
+            logging.debug(f'could not create the parent directory {parent_path}')
             raise FileNotFoundError('invalid parent directory')
 
     def editConfigFile(self, addline: str, removeline: str):
@@ -196,8 +204,7 @@ class RecklessConfig(Config):
     def __init__(self, path: Union[str, None] = None,
                  default_text: Union[str, None] = None):
         if path is None:
-            path = Path(LIGHTNING_DIR).joinpath('reckless',
-                                                'bitcoin-reckless.conf')
+            path = Path(LIGHTNING_DIR) / 'reckless' / 'bitcoin-reckless.conf'
         if default_text is None:
             default_text = (
                 '# This configuration file is managed by reckless to activate '
@@ -250,12 +257,6 @@ def help_alias(targets: list):
         sys.exit(1)
 
 
-def verbose(*args):
-    if not IS_VERBOSE:
-        return
-    print(*args)
-
-
 def _search_repo(name: str, url: str) -> InstInfo:
     """look in given repo and, if found, populate InstInfo"""
     # Remove api subdomain, subdirectories, etc.
@@ -279,8 +280,8 @@ def _search_repo(name: str, url: str) -> InstInfo:
     # Get details from the github API.
     api_url = f'https://api.github.com/repos/{repo_user}/{repo_name}/contents/'
     plugins_cont = api_url
-    r = requests.get(plugins_cont, timeout=5)
-    if r.status_code != 200:
+    r = urlopen(plugins_cont, timeout=5)
+    if r.status != 200:
         print("Plugin repository unavailable")
         return False
     # Repo is for this plugin
@@ -292,7 +293,7 @@ def _search_repo(name: str, url: str) -> InstInfo:
             return False
         return MyPlugin
     # Repo contains multiple plugins?
-    for x in r.json():
+    for x in json.loads(r.read().decode()):
         if x["name"] == name:
             # Look for the rest of the install details
             # These are in lightningd/plugins directly
@@ -308,7 +309,7 @@ def _search_repo(name: str, url: str) -> InstInfo:
                 if MyPlugin.repo.split('/')[-2] == 'tree':
                     MyPlugin.commit = MyPlugin.repo.split('/')[-1]
                     MyPlugin.repo = MyPlugin.repo.split('/tree/')[0]
-                    verbose(f'repo using commit: {MyPlugin.commit}')
+                    logging.debug(f'repo using commit: {MyPlugin.commit}')
             if not MyPlugin.get_inst_details():
                 return False
             return MyPlugin
@@ -317,20 +318,22 @@ def _search_repo(name: str, url: str) -> InstInfo:
 
 def _install_plugin(src: InstInfo) -> bool:
     """make sure the repo exists and clone it."""
-    verbose(f'Install requested from {src}.')
+    logging.debug(f'Install requested from {src}.')
     if RECKLESS_CONFIG is None:
         print('error: reckless install directory unavailable')
         sys.exit(2)
-    req = requests.get(src.repo, timeout=20)
-    if not req.status_code == 200:
+
+    # FIXME: This request seems rather pointless
+    req = urlopen(src.repo, timeout=10)
+    if not req.status == 200:
         print('plugin source repository unavailable')
         sys.exit(1)
     # Use a unique directory for each cloned repo.
     clone_path = 'reckless-{}'.format(str(hash(os.times()))[-9:])
-    clone_path = Path(tempfile.gettempdir()).joinpath(clone_path)
-    inst_path = Path(RECKLESS_CONFIG.reckless_dir).joinpath(src.name)
+    clone_path = Path(tempfile.gettempdir()) / clone_path
+    inst_path = Path(RECKLESS_CONFIG.reckless_dir) / src.name
     if Path(clone_path).exists():
-        verbose(f'{clone_path} already exists - deleting')
+        logging.debug(f'{clone_path} already exists - deleting')
         shutil.rmtree(clone_path)
     # clone git repository to /tmp/reckless-...
     if ('http' in src.repo[:4]) or ('github.com' in src.repo):
@@ -351,13 +354,11 @@ def _install_plugin(src: InstInfo) -> bool:
             return False
     plugin_path = clone_path
     if src.subdir is not None:
-        plugin_path = Path(clone_path).joinpath(src.subdir)
-    os.chdir(plugin_path)
-    assert os.getcwd() == str(plugin_path)
+        plugin_path = Path(clone_path) / src.subdir
     if src.commit:
-        verbose(f"Checking out commit {src.commit}")
+        logging.debug(f"Checking out commit {src.commit}")
         checkout = Popen(['git', 'checkout', src.commit],
-                         stdout=PIPE, stderr=PIPE)
+                         cwd=plugin_path, stdout=PIPE, stderr=PIPE)
         checkout.wait()
         if checkout.returncode != 0:
             print(f'failed to checkout referenced commit {src.commit}')
@@ -373,17 +374,17 @@ def _install_plugin(src: InstInfo) -> bool:
     }
 
     if src.deps is not None:
-        verbose(f'installing dependencies using {src.deps}')
+        logging.debug(f'installing dependencies using {src.deps}')
         procedure = install_methods[src.deps]
-        pip = Popen(procedure, stdout=PIPE)
+        pip = Popen(procedure, cwd=plugin_path, stdout=PIPE)
         pip.wait()
         if pip.returncode == 0:
             print('dependencies installed successfully')
         else:
             print('error encountered installing dependencies')
-            verbose(pip.stdout.read())
+            logging.debug(pip.stdout.read())
             return False
-    test = Popen([Path(plugin_path).joinpath(src.entry)],
+    test = Popen([Path(plugin_path).joinpath(src.entry)], cwd=plugin_path,
                  stdout=PIPE, stderr=PIPE, universal_newlines=True)
     test_log = []
     with test.stderr:
@@ -392,16 +393,15 @@ def _install_plugin(src: InstInfo) -> bool:
     test.wait()
     # FIXME: add noexec test/warning. Maybe try chmod entrypoint.
     if test.returncode != 0:
-        verbose("plugin testing error:")
+        logging.debug("plugin testing error:")
         for line in test_log:
-            verbose(f'  {line}')
+            logging.debug(f'  {line}')
         print('plugin testing failed')
         return False
 
     # Find this cute little plugin a forever home
     shutil.copytree(plugin_path, inst_path)
     print(f'plugin installed: {inst_path}')
-    os.chdir(RECKLESS_CONFIG.reckless_dir)
     remove_dir(clone_path)
     return True
 
@@ -411,12 +411,11 @@ def install(plugin_name: str):
     assert isinstance(plugin_name, str)
     src = search(plugin_name)
     if src:
-        verbose(f'Retrieving {plugin_name} from {src.repo}')
+        logging.debug(f'Retrieving {plugin_name} from {src.repo}')
         if not _install_plugin(src):
             print('installation aborted')
             sys.exit(1)
-        inst_path = Path(RECKLESS_CONFIG.reckless_dir).joinpath(src.name,
-                                                                src.entry)
+        inst_path = Path(RECKLESS_CONFIG.reckless_dir) / src.name / src.entry
         RECKLESS_CONFIG.enable_plugin(inst_path)
         enable(plugin_name)
 
@@ -424,10 +423,10 @@ def install(plugin_name: str):
 def uninstall(plugin_name: str):
     """disables plugin and deletes the plugin's reckless dir"""
     assert isinstance(plugin_name, str)
-    verbose(f'Uninstalling plugin {plugin_name}')
+    logging.debug(f'Uninstalling plugin {plugin_name}')
     disable(plugin_name)
-    plugin_dir = Path(RECKLESS_CONFIG.reckless_dir).joinpath(plugin_name)
-    verbose(f'looking for {plugin_dir}')
+    plugin_dir = Path(RECKLESS_CONFIG.reckless_dir) / plugin_name
+    logging.debug(f'looking for {plugin_dir}')
     if remove_dir(plugin_dir):
         print(f"{plugin_name} uninstalled successfully.")
 
@@ -444,9 +443,9 @@ def search(plugin_name: str) -> InstInfo:
         p = _search_repo(plugin_name, r)
         if p:
             print(f"found {p.name} in repo: {p.repo}")
-            verbose(f"entry: {p.entry}")
+            logging.debug(f"entry: {p.entry}")
             if p.subdir:
-                verbose(f'sub-directory: {p.subdir}')
+                logging.debug(f'sub-directory: {p.subdir}')
             return p
     print(f'Unable to locate source for plugin {plugin_name}')
 
@@ -503,17 +502,17 @@ def enable(plugin_name: str):
     if not Path(path).exists():
         print(f'cannot find installed plugin at expected path {path}')
         sys.exit(1)
-    verbose(f'activating {plugin_name}')
+    logging.debug(f'activating {plugin_name}')
     try:
         lightning_cli('plugin', 'start', path)
     except CLIError as err:
         if 'already registered' in err.message:
-            verbose(f'{inst.name} is already running')
+            logging.debug(f'{inst.name} is already running')
         else:
             print(f'reckless: {inst.name} failed to start!')
             raise err
     except RPCError:
-        verbose('lightningd rpc unavailable. Skipping dynamic activation.')
+        logging.debug('lightningd rpc unavailable. Skipping dynamic activation.')
     RECKLESS_CONFIG.enable_plugin(path)
     print(f'{plugin_name} enabled')
 
@@ -527,17 +526,17 @@ def disable(plugin_name: str):
     if not Path(path).exists():
         sys.stderr.write(f'Could not find plugin at {path}\n')
         sys.exit(1)
-    verbose(f'deactivating {plugin_name}')
+    logging.debug(f'deactivating {plugin_name}')
     try:
         lightning_cli('plugin', 'stop', path)
     except CLIError as err:
         if err.code == -32602:
-            verbose('plugin not currently running')
+            logging.debug('plugin not currently running')
         else:
             print('lightning-cli plugin stop failed')
             raise err
     except RPCError:
-        verbose('lightningd rpc unavailable. Skipping dynamic deactivation.')
+        logging.debug('lightningd rpc unavailable. Skipping dynamic deactivation.')
     RECKLESS_CONFIG.disable_plugin(path)
     print(f'{plugin_name} disabled')
 
@@ -554,15 +553,15 @@ def load_config(reckless_dir: Union[str, None] = None,
     except RPCError:
         pass
     if reckless_dir is None:
-        reckless_dir = Path(LIGHTNING_DIR).joinpath('reckless')
+        reckless_dir = Path(LIGHTNING_DIR) / 'reckless'
     else:
         if not os.path.isabs(reckless_dir):
-            reckless_dir = Path.cwd().joinpath(reckless_dir)
+            reckless_dir = Path.cwd() / reckless_dir
     if LIGHTNING_CONFIG:
         network_path = LIGHTNING_CONFIG
     else:
-        network_path = Path(LIGHTNING_DIR).joinpath(network, 'config')
-    reck_conf_path = Path(reckless_dir).joinpath(f'{network}-reckless.conf')
+        network_path = Path(LIGHTNING_DIR) / network / 'config'
+    reck_conf_path = Path(reckless_dir) / f'{network}-reckless.conf'
     if net_conf:
         if str(network_path) != net_conf.conf_fp:
             print('error: reckless configuration does not match lightningd:\n'
@@ -588,7 +587,7 @@ def load_config(reckless_dir: Union[str, None] = None,
 
 
 def get_sources_file() -> str:
-    return Path(RECKLESS_DIR).joinpath('.sources')
+    return Path(RECKLESS_DIR) / '.sources'
 
 
 def sources_from_file() -> list:
@@ -606,7 +605,7 @@ def loadSources() -> list:
     sources_file = get_sources_file()
     # This would have been created if possible
     if not Path(sources_file).exists():
-        verbose('Warning: Reckless requires write access')
+        logging.debug('Warning: Reckless requires write access')
         Config(path=str(sources_file),
                default_text='https://github.com/lightningd/plugins')
         return ['https://github.com/lightningd/plugins']
@@ -720,7 +719,7 @@ if __name__ == '__main__':
     if args.reckless_dir:
         RECKLESS_DIR = args.reckless_dir
     else:
-        RECKLESS_DIR = Path(LIGHTNING_DIR).joinpath('reckless')
+        RECKLESS_DIR = Path(LIGHTNING_DIR) / 'reckless'
     LIGHTNING_CONFIG = args.conf
     RECKLESS_CONFIG = load_config(reckless_dir=RECKLESS_DIR,
                                   network=NETWORK)
