@@ -244,7 +244,7 @@ static struct lightningd *new_lightningd(const tal_t *ctx)
 
 	/*~ This is detailed in chaintopology.c */
 	ld->topology = new_topology(ld, ld->log);
-	ld->blockheight = 0;
+	ld->gossip_blockheight = 0;
 	ld->daemon_parent_fd = -1;
 	ld->proxyaddr = NULL;
 	ld->always_use_proxy = false;
@@ -1234,6 +1234,9 @@ int main(int argc, char *argv[])
 stop:
 	/* Stop *new* JSON RPC requests. */
 	jsonrpc_stop_listening(ld->jsonrpc);
+
+	/* Stop new connectd requests */
+	connectd_start_shutdown(ld->connectd);
 
 	/* Give permission for things to get destroyed without getting upset. */
 	ld->state = LD_STATE_SHUTDOWN;

@@ -152,7 +152,8 @@ def test_closing_disconnected_notify(node_factory, bitcoind, executor):
 
     l1.pay(l2, 200000000)
     l2.stop()
-    wait_for(lambda: not only_one(l1.rpc.listpeers(l2.info['id'])['peers'])['connected'])
+    # Wait until channeld is definitely gone.
+    wait_for(lambda: 'owner' not in only_one(l1.rpc.listpeerchannels()['channels']))
 
     out = subprocess.check_output(['cli/lightning-cli',
                                    '--network={}'.format(TEST_NETWORK),
@@ -762,8 +763,6 @@ def test_channel_lease_falls_behind(node_factory, bitcoind):
 
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     rates = l1.rpc.dev_queryrates(l2.info['id'], amount, amount)
-    wait_for(lambda: len(l1.rpc.listpeers(l2.info['id'])['peers']) == 0)
-    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     # l1 leases a channel from l2
     l1.rpc.fundchannel(l2.info['id'], amount, request_amt=amount,
                        feerate='{}perkw'.format(feerate),
@@ -807,8 +806,6 @@ def test_channel_lease_post_expiry(node_factory, bitcoind, chainparams):
     # l1 leases a channel from l2
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     rates = l1.rpc.dev_queryrates(l2.info['id'], amount, amount)
-    wait_for(lambda: len(l1.rpc.listpeers(l2.info['id'])['peers']) == 0)
-    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     l1.rpc.fundchannel(l2.info['id'], amount, request_amt=amount,
                        feerate='{}perkw'.format(feerate),
                        compact_lease=rates['compact_lease'])
@@ -928,8 +925,6 @@ def test_channel_lease_unilat_closes(node_factory, bitcoind):
 
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     rates = l1.rpc.dev_queryrates(l2.info['id'], amount, amount)
-    wait_for(lambda: len(l1.rpc.listpeers(l2.info['id'])['peers']) == 0)
-    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     # l1 leases a channel from l2
     l1.rpc.fundchannel(l2.info['id'], amount, request_amt=amount,
                        feerate='{}perkw'.format(feerate),
@@ -938,8 +933,6 @@ def test_channel_lease_unilat_closes(node_factory, bitcoind):
     # l2 leases a channel from l3
     l2.rpc.connect(l3.info['id'], 'localhost', l3.port)
     rates = l2.rpc.dev_queryrates(l3.info['id'], amount, amount)
-    wait_for(lambda: len(l2.rpc.listpeers(l3.info['id'])['peers']) == 0)
-    l2.rpc.connect(l3.info['id'], 'localhost', l3.port)
     l2.rpc.fundchannel(l3.info['id'], amount, request_amt=amount,
                        feerate='{}perkw'.format(feerate), minconf=0,
                        compact_lease=rates['compact_lease'])
@@ -965,7 +958,7 @@ def test_channel_lease_unilat_closes(node_factory, bitcoind):
     inv = l2.rpc.invoice(10**4, '3', 'no_3')
     l3.rpc.pay(inv['bolt11'])
 
-    bitcoind.generate_block(6)
+    bitcoind.generate_block(2)
     sync_blockheight(bitcoind, [l1, l2, l3])
     # make sure we're at the right place for the csv lock
     l2.daemon.wait_for_log('Blockheight: SENT_ADD_ACK_COMMIT->RCVD_ADD_ACK_REVOCATION LOCAL now 110')
@@ -1043,8 +1036,6 @@ def test_channel_lease_lessor_cheat(node_factory, bitcoind, chainparams):
 
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     rates = l1.rpc.dev_queryrates(l2.info['id'], amount, amount)
-    wait_for(lambda: len(l1.rpc.listpeers(l2.info['id'])['peers']) == 0)
-    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     # l1 leases a channel from l2
     l1.rpc.fundchannel(l2.info['id'], amount, request_amt=amount,
                        feerate='{}perkw'.format(feerate),
@@ -1122,8 +1113,6 @@ def test_channel_lease_lessee_cheat(node_factory, bitcoind, chainparams):
 
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     rates = l1.rpc.dev_queryrates(l2.info['id'], amount, amount)
-    wait_for(lambda: len(l1.rpc.listpeers(l2.info['id'])['peers']) == 0)
-    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     # l1 leases a channel from l2
     l1.rpc.fundchannel(l2.info['id'], amount, request_amt=amount,
                        feerate='{}perkw'.format(feerate),
@@ -3424,7 +3413,7 @@ def test_closing_higherfee(node_factory, bitcoind, executor):
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
 
     # This causes us to *exceed* previous requirements!
-    l1.daemon.wait_for_log(r'deriving max fee from rate 30000 -> 16560sat \(not 1000000sat\)')
+    l1.daemon.wait_for_log(r'deriving max fee from rate 30000 -> .*sat \(not 1000000sat\)')
 
     # This will fail because l1 restarted!
     with pytest.raises(RpcError, match=r'Connection to RPC server lost.'):

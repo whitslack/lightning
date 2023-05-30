@@ -2373,9 +2373,33 @@ json_openchannel_bump(struct command *cmd,
 				    type_to_string(tmpctx, struct amount_sat,
 						   &chainparams->max_funding));
 
-	if (!channel->owner)
-		return command_fail(cmd, FUNDING_PEER_NOT_CONNECTED,
-				      "Peer not connected.");
+	/* It's possible that the last open failed/was aborted.
+	 * So now we restart the attempt! */
+	if (!channel->owner) {
+		int fds[2];
+		if (socketpair(AF_LOCAL, SOCK_STREAM, 0, fds) != 0) {
+			log_broken(channel->log,
+				   "Failed to create socketpair: %s",
+				   strerror(errno));
+			return command_fail(cmd, FUNDING_PEER_NOT_CONNECTED,
+					    "Unable to create socket: %s",
+					    strerror(errno));
+		}
+
+		if (!peer_restart_dualopend(channel->peer,
+					    new_peer_fd(tmpctx, fds[0]),
+					    channel)) {
+			close(fds[1]);
+			return command_fail(cmd, FUNDING_PEER_NOT_CONNECTED,
+					      "Peer not connected.");
+		}
+		subd_send_msg(cmd->ld->connectd,
+			      take(towire_connectd_peer_connect_subd(NULL,
+								     &channel->peer->id,
+								     channel->peer->connectd_counter,
+								     &channel->cid)));
+		subd_send_fd(cmd->ld->connectd, fds[1]);
+	}
 
 	if (channel->open_attempt)
 		return command_fail(cmd, FUNDING_STATE_INVALID,
@@ -2534,6 +2558,72 @@ json_openchannel_signed(struct command *cmd,
 	return command_still_pending(cmd);
 }
 
+struct psbt_validator {
+	struct command *cmd;
+	struct channel *channel;
+	struct wally_psbt *psbt;
+	size_t next_index;
+};
+
+static void validate_input_unspent(struct bitcoind *bitcoind,
+				   const struct bitcoin_tx_output *txout,
+				   void *arg)
+{
+	struct psbt_validator *pv = arg;
+	u8 *msg;
+
+	/* First time thru bitcoind will be NULL, otherwise is response */
+	if (bitcoind && !txout) {
+		struct bitcoin_outpoint outpoint;
+
+		assert(pv->next_index > 0);
+		wally_tx_input_get_outpoint(&pv->psbt->tx->inputs[pv->next_index - 1],
+					    &outpoint);
+		/* Check cmd is still around? */
+		was_pending(command_fail(pv->cmd,
+					 FUNDING_PSBT_INVALID,
+					 "Peer has requested only confirmed"
+					 " inputs for this open."
+					 " Input %s is not confirmed.",
+					 type_to_string(tmpctx,
+							struct bitcoin_outpoint,
+							&outpoint)));
+	}
+
+	for (size_t i = pv->next_index; i < pv->psbt->num_inputs; i++) {
+		struct bitcoin_outpoint outpoint;
+		u64 serial;
+
+		if (!psbt_get_serial_id(&pv->psbt->inputs[i].unknowns, &serial)) {
+			was_pending(command_fail(pv->cmd, FUNDING_PSBT_INVALID,
+					    "PSBT input at index %"PRIu64
+					    " missing serial id", i));
+			return;
+		}
+		/* Ignore any input that's peer's */
+		if (serial % 2 == TX_ACCEPTER)
+			continue;
+
+		wally_tx_input_get_outpoint(&pv->psbt->tx->inputs[i],
+					    &outpoint);
+		pv->next_index = i + 1;
+
+		/* Confirm input is in a block */
+		bitcoind_getutxout(pv->channel->owner->ld->topology->bitcoind,
+				   &outpoint,
+				   validate_input_unspent,
+				   pv);
+
+		/* Command is still pending */
+		return;
+	}
+
+	pv->channel->open_attempt->cmd = pv->cmd;
+
+	msg = towire_dualopend_psbt_updated(NULL, pv->psbt);
+	subd_send_msg(pv->channel->owner, take(msg));
+	/* Command is still pending */
+}
 
 static struct command_result *json_openchannel_update(struct command *cmd,
 						       const char *buffer,
@@ -2585,6 +2675,24 @@ static struct command_result *json_openchannel_update(struct command *cmd,
 				    "PSBT is missing required fields %s",
 				    type_to_string(tmpctx, struct wally_psbt,
 						   psbt));
+
+	if (channel->open_attempt->req_confirmed_ins) {
+		struct psbt_validator *pv;
+		struct command_result *ret;
+
+		/* Save the info for the next round! */
+		pv = tal(cmd, struct psbt_validator);
+		pv->cmd = cmd;
+		pv->channel = channel;
+		pv->next_index = 0;
+		pv->psbt = psbt;
+
+		/* We might fail/terminate in validate's first call,
+		 * which expects us to be at "command still pending" */
+		ret = command_still_pending(cmd);
+		validate_input_unspent(NULL, NULL, pv);
+		return ret;
+	}
 
 	channel->open_attempt->cmd = cmd;
 

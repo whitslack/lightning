@@ -522,6 +522,32 @@ static void handle_custommsg_in(struct lightningd *ld, const u8 *msg)
 	plugin_hook_call_custommsg(ld, NULL, p);
 }
 
+static void connectd_start_shutdown_reply(struct subd *connectd,
+					  const u8 *reply,
+					  const int *fds UNUSED,
+					  void *unused UNUSED)
+{
+	if (!fromwire_connectd_start_shutdown_reply(reply))
+		fatal("Bad connectd_start_shutdown_reply: %s",
+		      tal_hex(reply, reply));
+
+	/* Break out of loop now, so we can continue shutdown. */
+	log_debug(connectd->ld->log, "io_break: %s", __func__);
+	io_break(connectd);
+}
+
+void connectd_start_shutdown(struct subd *connectd)
+{
+	const u8 *msg = towire_connectd_start_shutdown(NULL);
+
+	subd_req(connectd, connectd, take(msg), -1, 0,
+		 connectd_start_shutdown_reply, NULL);
+
+	/* Wait for shutdown_reply.  Note that since we're shutting down,
+	 * start_json_stream can io_break too! */
+	while (io_loop(NULL, NULL) != connectd);
+}
+
 static unsigned connectd_msg(struct subd *connectd, const u8 *msg, const int *fds)
 {
 	enum connectd_wire t = fromwire_peektype(msg);
@@ -539,11 +565,13 @@ static unsigned connectd_msg(struct subd *connectd, const u8 *msg, const int *fd
 	case WIRE_CONNECTD_PING:
 	case WIRE_CONNECTD_SEND_ONIONMSG:
 	case WIRE_CONNECTD_CUSTOMMSG_OUT:
+	case WIRE_CONNECTD_START_SHUTDOWN:
 	/* This is a reply, so never gets through to here. */
 	case WIRE_CONNECTD_INIT_REPLY:
 	case WIRE_CONNECTD_ACTIVATE_REPLY:
 	case WIRE_CONNECTD_DEV_MEMLEAK_REPLY:
 	case WIRE_CONNECTD_PING_REPLY:
+	case WIRE_CONNECTD_START_SHUTDOWN_REPLY:
 		break;
 
 	case WIRE_CONNECTD_PEER_CONNECTED:

@@ -48,8 +48,6 @@ def test_queryrates(node_factory, bitcoind):
                                  'channel_fee_max_base_msat': '3sat',
                                  'channel_fee_max_proportional_thousandths': 101})
 
-    wait_for(lambda: l1.rpc.listpeers()['peers'] == [])
-    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     result = l1.rpc.dev_queryrates(l2.info['id'], amount, amount)
     assert result['our_funding_msat'] == Millisatoshi(amount * 1000)
     assert result['their_funding_msat'] == Millisatoshi(amount * 1000)
@@ -187,6 +185,40 @@ def test_v2_open_sigs_restart(node_factory, bitcoind):
     # Make sure we're ok.
     l1.daemon.wait_for_log(r'to CHANNELD_NORMAL')
     l2.daemon.wait_for_log(r'to CHANNELD_NORMAL')
+
+
+@pytest.mark.openchannel('v2')
+def test_v2_fail_second(node_factory, bitcoind):
+    """ Open a channel succeeds; opening a second channel
+    failure should not drop the connection """
+    l1, l2 = node_factory.line_graph(2, wait_for_announce=True)
+
+    # Should have one channel between them.
+    only_one(only_one(l1.rpc.listpeers(l2.info['id'])['peers'])['channels'])
+
+    amount = 2**24 - 1
+    l1.fundwallet(amount + 10000000)
+
+    # make sure we can generate PSBTs.
+    addr = l1.rpc.newaddr()['bech32']
+    bitcoind.rpc.sendtoaddress(addr, (amount + 1000000) / 10**8)
+    bitcoind.generate_block(1)
+    wait_for(lambda: len(l1.rpc.listfunds()["outputs"]) != 0)
+
+    # Some random (valid) psbt
+    psbt = l1.rpc.fundpsbt(amount, '253perkw', 250, reserve=0)['psbt']
+    start = l1.rpc.openchannel_init(l2.info['id'], amount, psbt)
+
+    # We can abort a channel
+    l1.rpc.openchannel_abort(start['channel_id'])
+
+    peer_info = only_one(l1.rpc.listpeers(l2.info['id'])['peers'])
+    # We should have deleted the 'in-progress' channel info
+    only_one(peer_info['channels'])
+
+    # FIXME: check that tx-abort was sent
+    # Should be able to reattempt without reconnecting
+    start = l1.rpc.openchannel_init(l2.info['id'], amount, psbt)
 
 
 @unittest.skipIf(TEST_NETWORK != 'regtest', 'elementsd doesnt yet support PSBT features we need')
@@ -368,8 +400,6 @@ def test_v2_rbf_liquidity_ad(node_factory, bitcoind, chainparams):
     # l1 leases a channel from l2
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     rates = l1.rpc.dev_queryrates(l2.info['id'], amount, amount)
-    wait_for(lambda: l1.rpc.listpeers()['peers'] == [])
-    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     chan_id = l1.rpc.fundchannel(l2.info['id'], amount, request_amt=amount,
                                  feerate='{}perkw'.format(feerate),
                                  compact_lease=rates['compact_lease'])['channel_id']
@@ -496,10 +526,10 @@ def test_v2_rbf_multi(node_factory, bitcoind, chainparams):
     # Abort this open attempt! We will re-try
     aborted = l1.rpc.openchannel_abort(chan_id)
     assert not aborted['channel_canceled']
-    wait_for(lambda: only_one(l1.rpc.listpeers()['peers'])['connected'] is False)
+    # We no longer disconnect on aborts, because magic!
+    assert only_one(l1.rpc.listpeers()['peers'])['connected']
 
     # Do the bump, again, same feerate
-    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     bump = l1.rpc.openchannel_bump(chan_id, chan_amount,
                                    initpsbt['psbt'],
                                    funding_feerate=next_feerate)
@@ -1259,8 +1289,6 @@ def test_inflight_dbload(node_factory, bitcoind):
     # l1 leases a channel from l2
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     rates = l1.rpc.dev_queryrates(l2.info['id'], amount, amount)
-    wait_for(lambda: len(l1.rpc.listpeers(l2.info['id'])['peers']) == 0)
-    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     l1.rpc.fundchannel(l2.info['id'], amount, request_amt=amount,
                        feerate='{}perkw'.format(feerate),
                        compact_lease=rates['compact_lease'])
@@ -1573,8 +1601,6 @@ def test_v2_replay_bookkeeping(node_factory, bitcoind):
 
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     rates = l1.rpc.dev_queryrates(l2.info['id'], amount, amount)
-    wait_for(lambda: len(l1.rpc.listpeers(l2.info['id'])['peers']) == 0)
-    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
 
     # l1 leases a channel from l2
     l1.rpc.fundchannel(l2.info['id'], amount, request_amt=amount,
@@ -1641,8 +1667,6 @@ def test_buy_liquidity_ad_check_bookkeeping(node_factory, bitcoind):
 
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     rates = l1.rpc.dev_queryrates(l2.info['id'], amount, amount)
-    wait_for(lambda: len(l1.rpc.listpeers(l2.info['id'])['peers']) == 0)
-    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
 
     # l1 leases a channel from l2
     l1.rpc.fundchannel(l2.info['id'], amount, request_amt=amount,

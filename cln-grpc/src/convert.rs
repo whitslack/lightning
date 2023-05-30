@@ -63,6 +63,7 @@ impl From<responses::GetinfoResponse> for pb::GetinfoResponse {
             our_features: c.our_features.map(|v| v.into()),
             blockheight: c.blockheight, // Rule #2 for type u32
             network: c.network, // Rule #2 for type string
+            #[allow(deprecated)]
             msatoshi_fees_collected: c.msatoshi_fees_collected, // Rule #2 for type u64?
             fees_collected_msat: Some(c.fees_collected_msat.into()), // Rule #2 for type msat
             address: c.address.into_iter().map(|i| i.into()).collect(), // Rule #3 for type GetinfoAddress 
@@ -116,7 +117,9 @@ impl From<responses::ListpeersPeersChannelsInflight> for pb::ListpeersPeersChann
 impl From<responses::ListpeersPeersChannelsFunding> for pb::ListpeersPeersChannelsFunding {
     fn from(c: responses::ListpeersPeersChannelsFunding) -> Self {
         Self {
+            #[allow(deprecated)]
             local_msat: c.local_msat.map(|f| f.into()), // Rule #2 for type msat?
+            #[allow(deprecated)]
             remote_msat: c.remote_msat.map(|f| f.into()), // Rule #2 for type msat?
             pushed_msat: c.pushed_msat.map(|f| f.into()), // Rule #2 for type msat?
             local_funds_msat: Some(c.local_funds_msat.into()), // Rule #2 for type msat
@@ -215,6 +218,7 @@ impl From<responses::ListpeersPeers> for pb::ListpeersPeers {
         Self {
             id: c.id.serialize().to_vec(), // Rule #2 for type pubkey
             connected: c.connected, // Rule #2 for type boolean
+            num_channels: c.num_channels, // Rule #2 for type u32
             log: c.log.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
             channels: c.channels.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
             netaddr: c.netaddr.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
@@ -769,6 +773,7 @@ impl From<responses::NewaddrResponse> for pb::NewaddrResponse {
     fn from(c: responses::NewaddrResponse) -> Self {
         Self {
             bech32: c.bech32, // Rule #2 for type string?
+            #[allow(deprecated)]
             p2sh_segwit: c.p2sh_segwit, // Rule #2 for type string?
         }
     }
@@ -993,6 +998,7 @@ impl From<responses::GetrouteRoute> for pb::GetrouteRoute {
             id: c.id.serialize().to_vec(), // Rule #2 for type pubkey
             channel: c.channel.to_string(), // Rule #2 for type short_channel_id
             direction: c.direction, // Rule #2 for type u32
+            #[allow(deprecated)]
             msatoshi: c.msatoshi, // Rule #2 for type u64?
             amount_msat: Some(c.amount_msat.into()), // Rule #2 for type msat
             delay: c.delay, // Rule #2 for type u32
@@ -1097,6 +1103,15 @@ impl From<responses::SetchannelResponse> for pb::SetchannelResponse {
     fn from(c: responses::SetchannelResponse) -> Self {
         Self {
             channels: c.channels.into_iter().map(|i| i.into()).collect(), // Rule #3 for type SetchannelChannels 
+        }
+    }
+}
+
+#[allow(unused_variables)]
+impl From<responses::SigninvoiceResponse> for pb::SigninvoiceResponse {
+    fn from(c: responses::SigninvoiceResponse) -> Self {
+        Self {
+            bolt11: c.bolt11, // Rule #2 for type string
         }
     }
 }
@@ -1686,6 +1701,15 @@ impl From<pb::SetchannelRequest> for requests::SetchannelRequest {
             htlcmin: c.htlcmin.map(|a| a.into()), // Rule #1 for type msat?
             htlcmax: c.htlcmax.map(|a| a.into()), // Rule #1 for type msat?
             enforcedelay: c.enforcedelay, // Rule #1 for type u32?
+        }
+    }
+}
+
+#[allow(unused_variables)]
+impl From<pb::SigninvoiceRequest> for requests::SigninvoiceRequest {
+    fn from(c: pb::SigninvoiceRequest) -> Self {
+        Self {
+            invstring: c.invstring, // Rule #1 for type string
         }
     }
 }

@@ -359,7 +359,7 @@ void channel_errmsg(struct channel *channel,
 
 	if (channel_unsaved(channel)) {
 		log_info(channel->log, "%s", "Unsaved peer failed."
-			 " Disconnecting and deleting channel.");
+			 " Deleting channel.");
 		delete_channel(channel);
 		return;
 	}
@@ -381,8 +381,8 @@ void channel_errmsg(struct channel *channel,
 	 * and we would close the channel on them.  We now support warnings
 	 * for this case. */
 	if (warning) {
-		channel_fail_transient_delayreconnect(channel, "%s WARNING: %s",
-						      channel->owner->name, desc);
+		channel_fail_transient(channel, "%s WARNING: %s",
+				       channel->owner->name, desc);
 		return;
 	}
 
@@ -1482,8 +1482,26 @@ void peer_spoke(struct lightningd *ld, const u8 *msg)
 
 		/* If channel is active, we raced, so ignore this:
 		 * subd will get it soon. */
-		if (channel_active(channel))
+		if (channel_active(channel)) {
+			log_debug(channel->log,
+				  "channel already active");
+			if (!channel->owner &&
+			    channel->state == DUALOPEND_AWAITING_LOCKIN) {
+				if (socketpair(AF_LOCAL, SOCK_STREAM, 0, fds) != 0) {
+					log_broken(ld->log,
+						   "Failed to create socketpair: %s",
+						   strerror(errno));
+					error = towire_warningfmt(tmpctx, &channel_id,
+								  "Trouble in paradise?");
+					goto send_error;
+				}
+				if (peer_restart_dualopend(peer, new_peer_fd(tmpctx, fds[0]), channel))
+					goto tell_connectd;
+				/* FIXME: Send informative error? */
+				close(fds[1]);
+			}
 			return;
+		}
 
 		if (msgtype == WIRE_CHANNEL_REESTABLISH) {
 			log_debug(channel->log,
@@ -1836,7 +1854,7 @@ static enum watch_result funding_depth_cb(struct lightningd *ld,
 										  warning)));
 			/* When we restart channeld, it will be initialized with updated scid
 			 * and also adds it (at least our halve_chan) to rtable. */
-			channel_fail_transient_delayreconnect(channel,
+			channel_fail_transient(channel,
 					       "short_channel_id changed to %s (was %s)",
 					       short_channel_id_to_str(tmpctx, &scid),
 					       short_channel_id_to_str(tmpctx, channel->scid));
@@ -1914,11 +1932,16 @@ static void json_add_peer(struct lightningd *ld,
 			  const enum log_level *ll)
 {
 	struct channel *channel;
+	u32 num_channels;
 
 	json_object_start(response, NULL);
 	json_add_node_id(response, "id", &p->id);
 
 	json_add_bool(response, "connected", p->connected == PEER_CONNECTED);
+	num_channels = 0;
+	list_for_each(&p->channels, channel, list)
+		num_channels++;
+	json_add_num(response, "num_channels", num_channels);
 
 	/* If it's not connected, features are unreliable: we don't
 	 * store them in the database, and they would only reflect
@@ -1936,7 +1959,6 @@ static void json_add_peer(struct lightningd *ld,
 					fmt_wireaddr(response, p->remote_addr));
 		json_add_hex_talarr(response, "features", p->their_features);
 	}
-
 	if (deprecated_apis) {
 		json_array_start(response, "channels");
 		json_add_uncommitted_channel(response, p->uncommitted_channel, NULL);
@@ -2400,7 +2422,16 @@ static struct command_result *json_getinfo(struct command *cmd,
 	json_array_end(response);
 
 	json_add_string(response, "version", version());
-	json_add_num(response, "blockheight", cmd->ld->blockheight);
+	/* If we're still syncing, put the height we're up to here, so
+	 * they can see progress!  Otherwise use the height gossipd knows
+	 * about, so tests work properly. */
+	if (!topology_synced(cmd->ld->topology)) {
+		json_add_num(response, "blockheight",
+			     get_block_height(cmd->ld->topology));
+	} else {
+		json_add_num(response, "blockheight",
+			     cmd->ld->gossip_blockheight);
+	}
 	json_add_string(response, "network", chainparams->network_name);
 	json_add_amount_msat_compat(response,
 			wallet_total_forward_fees(cmd->ld->wallet),

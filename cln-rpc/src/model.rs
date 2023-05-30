@@ -61,6 +61,7 @@ pub enum Request {
 	ListPays(requests::ListpaysRequest),
 	Ping(requests::PingRequest),
 	SetChannel(requests::SetchannelRequest),
+	SignInvoice(requests::SigninvoiceRequest),
 	SignMessage(requests::SignmessageRequest),
 	Stop(requests::StopRequest),
 }
@@ -114,6 +115,7 @@ pub enum Response {
 	ListPays(responses::ListpaysResponse),
 	Ping(responses::PingResponse),
 	SetChannel(responses::SetchannelResponse),
+	SignInvoice(responses::SigninvoiceResponse),
 	SignMessage(responses::SignmessageResponse),
 	Stop(responses::StopResponse),
 }
@@ -1242,6 +1244,21 @@ pub mod requests {
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct SigninvoiceRequest {
+	    pub invstring: String,
+	}
+
+	impl From<SigninvoiceRequest> for Request {
+	    fn from(r: SigninvoiceRequest) -> Self {
+	        Request::SignInvoice(r)
+	    }
+	}
+
+	impl IntoRequest for SigninvoiceRequest {
+	    type Response = super::responses::SigninvoiceResponse;
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct SignmessageRequest {
 	    pub message: String,
 	}
@@ -1702,6 +1719,7 @@ pub mod responses {
 	pub struct ListpeersPeers {
 	    pub id: PublicKey,
 	    pub connected: bool,
+	    pub num_channels: u32,
 	    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
 	    pub log: Option<Vec<ListpeersPeersLog>>,
 	    #[deprecated]
@@ -3512,6 +3530,22 @@ pub mod responses {
 	    fn try_from(response: Response) -> Result<Self, Self::Error> {
 	        match response {
 	            Response::SetChannel(response) => Ok(response),
+	            _ => Err(TryFromResponseError)
+	        }
+	    }
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct SigninvoiceResponse {
+	    pub bolt11: String,
+	}
+
+	impl TryFrom<Response> for SigninvoiceResponse {
+	    type Error = super::TryFromResponseError;
+
+	    fn try_from(response: Response) -> Result<Self, Self::Error> {
+	        match response {
+	            Response::SignInvoice(response) => Ok(response),
 	            _ => Err(TryFromResponseError)
 	        }
 	    }

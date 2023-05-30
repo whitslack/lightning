@@ -116,6 +116,7 @@ Core Lightning Documentation
    lightning-sendpay <lightning-sendpay.7.md>
    lightning-sendpsbt <lightning-sendpsbt.7.md>
    lightning-setchannel <lightning-setchannel.7.md>
+   lightning-signinvoice <lightning-signinvoice.7.md>
    lightning-signmessage <lightning-signmessage.7.md>
    lightning-signpsbt <lightning-signpsbt.7.md>
    lightning-sql <lightning-sql.7.md>
@@ -125,6 +126,7 @@ Core Lightning Documentation
    lightning-txprepare <lightning-txprepare.7.md>
    lightning-txsend <lightning-txsend.7.md>
    lightning-unreserveinputs <lightning-unreserveinputs.7.md>
+   lightning-upgradewallet <lightning-upgradewallet.7.md>
    lightning-utxopsbt <lightning-utxopsbt.7.md>
    lightning-waitanyinvoice <lightning-waitanyinvoice.7.md>
    lightning-waitblockheight <lightning-waitblockheight.7.md>
