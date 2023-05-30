@@ -83,6 +83,9 @@ struct json_connection {
 	/* Are notifications enabled? */
 	bool notifications_enabled;
 
+	/* Are we allowed to batch database commitments? */
+	bool db_batching;
+
 	/* Our json_streams (owned by the commands themselves while running).
 	 * Since multiple streams could start returning data at once, we
 	 * always service these in order, freeing once empty. */
@@ -948,9 +951,7 @@ parse_request(struct json_connection *jcon, const jsmntok_t tok[])
 	rpc_hook->custom_replace = NULL;
 	rpc_hook->custom_buffer = NULL;
 
-	db_begin_transaction(jcon->ld->wallet->db);
 	completed = plugin_hook_call_rpc_command(jcon->ld, c->id, rpc_hook);
-	db_commit_transaction(jcon->ld->wallet->db);
 
 	/* If it's deferred, mark it (otherwise, it's completed) */
 	if (!completed)
@@ -1007,6 +1008,8 @@ static struct io_plan *read_json(struct io_conn *conn,
 				 struct json_connection *jcon)
 {
 	bool complete;
+	bool in_transaction = false;
+	struct timemono start_time = time_mono();
 
 	if (jcon->len_read)
 		log_io(jcon->log, LOG_IO_IN, NULL, "",
@@ -1023,6 +1026,7 @@ static struct io_plan *read_json(struct io_conn *conn,
 		return io_wait(conn, conn, read_json, jcon);
 	}
 
+again:
 	if (!json_parse_input(&jcon->input_parser, &jcon->input_toks,
 			      jcon->buffer, jcon->used,
 			      &complete)) {
@@ -1030,6 +1034,8 @@ static struct io_plan *read_json(struct io_conn *conn,
 		    jcon, "null",
 		    tal_fmt(tmpctx, "Invalid token in json input: '%s'",
 			    tal_strndup(tmpctx, jcon->buffer, jcon->used)));
+		if (in_transaction)
+			db_commit_transaction(jcon->ld->wallet->db);
 		return io_halfclose(conn);
 	}
 
@@ -1046,6 +1052,10 @@ static struct io_plan *read_json(struct io_conn *conn,
 		goto read_more;
 	}
 
+	if (!in_transaction) {
+		db_begin_transaction(jcon->ld->wallet->db);
+		in_transaction = true;
+	}
 	parse_request(jcon, jcon->input_toks);
 
 	/* Remove first {}. */
@@ -1057,16 +1067,28 @@ static struct io_plan *read_json(struct io_conn *conn,
 	jsmn_init(&jcon->input_parser);
 	toks_reset(jcon->input_toks);
 
-	/* If we have more to process, try again.  FIXME: this still gets
-	 * first priority in io_loop, so can starve others.  Hack would be
-	 * a (non-zero) timer, but better would be to have io_loop avoid
-	 * such livelock */
+	/* Do we have more already read? */
 	if (jcon->used) {
-		jcon->len_read = 0;
-		return io_always(conn, read_json, jcon);
+		if (!jcon->db_batching) {
+			db_commit_transaction(jcon->ld->wallet->db);
+			in_transaction = false;
+		} else {
+			/* FIXME: io_always() should interleave with
+			 * real IO, and then we should rotate order we
+			 * service fds in, to avoid starvation. */
+			if (time_greater(timemono_between(time_mono(),
+							  start_time),
+					 time_from_msec(250))) {
+				db_commit_transaction(jcon->ld->wallet->db);
+				return io_always(conn, read_json, jcon);
+			}
+		}
+		goto again;
 	}
 
 read_more:
+	if (in_transaction)
+		db_commit_transaction(jcon->ld->wallet->db);
 	return io_read_partial(conn, jcon->buffer + jcon->used,
 			       tal_count(jcon->buffer) - jcon->used,
 			       &jcon->len_read, read_json, jcon);
@@ -1088,6 +1110,7 @@ static struct io_plan *jcon_connected(struct io_conn *conn,
 	jsmn_init(&jcon->input_parser);
 	jcon->input_toks = toks_alloc(jcon);
 	jcon->notifications_enabled = false;
+	jcon->db_batching = false;
 	list_head_init(&jcon->commands);
 
 	/* We want to log on destruction, so we free this in destructor. */
@@ -1434,7 +1457,6 @@ static const struct json_command check_command = {
 	"Don't run {command_to_check}, just verify parameters.",
 	.verbose = "check command_to_check [parameters...]\n"
 };
-
 AUTODATA(json_command, &check_command);
 
 static struct command_result *json_notifications(struct command *cmd,
@@ -1459,7 +1481,32 @@ static const struct json_command notifications_command = {
 	"notifications",
 	"utility",
 	json_notifications,
-	"Enable notifications for {level} (or 'false' to disable)",
+	"{enable} notifications",
 };
-
 AUTODATA(json_command, &notifications_command);
+
+static struct command_result *json_batching(struct command *cmd,
+					    const char *buffer,
+					    const jsmntok_t *obj UNNEEDED,
+					    const jsmntok_t *params)
+{
+	bool *enable;
+
+	if (!param(cmd, buffer, params,
+		   p_req("enable", param_bool, &enable),
+		   NULL))
+		return command_param_failed();
+
+	/* Catch the case where they sent this command then hung up. */
+	if (cmd->jcon)
+		cmd->jcon->db_batching = *enable;
+	return command_success(cmd, json_stream_success(cmd));
+}
+
+static const struct json_command batching_command = {
+	"batching",
+	"utility",
+	json_batching,
+	"Database transaction batching {enable}",
+};
+AUTODATA(json_command, &batching_command);
