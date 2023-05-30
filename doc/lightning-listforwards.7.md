@@ -25,10 +25,12 @@ RETURN VALUE
 On success, an object containing **forwards** is returned.  It is an array of objects, where each object contains:
 
 - **in\_channel** (short\_channel\_id): the channel that received the HTLC
+- **in\_htlc\_id** (u64): the unique HTLC id the sender gave this
 - **in\_msat** (msat): the value of the incoming HTLC
 - **status** (string): still ongoing, completed, failed locally, or failed after forwarding (one of "offered", "settled", "local_failed", "failed")
 - **received\_time** (number): the UNIX timestamp when this was received
 - **out\_channel** (short\_channel\_id, optional): the channel that the HTLC (trying to) forward to
+- **out\_htlc\_id** (u64, optional): the unique HTLC id we gave this when sending
 - **payment\_hash** (hex, optional): payment hash sought by HTLC (always 64 characters)
 - **style** (string, optional): Either a legacy onion format or a modern tlv format (one of "legacy", "tlv")
 
@@ -63,4 +65,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:39c71b957590f6a9b321120e7f337216833efd94f0144560da5cd55c91fee35c)
+[comment]: # ( SHA256STAMP:e47c6ea912156d07bc628e86fe271c4e8395d73dae670fde69e6621275f24c79)

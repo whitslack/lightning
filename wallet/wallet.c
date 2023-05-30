@@ -4536,6 +4536,8 @@ const struct forwarding *wallet_forwarded_payments_get(struct wallet *w,
 		", hin.payment_hash as payment_hash"
 		", in_channel_scid"
 		", out_channel_scid"
+		", in_htlc_id"
+		", out_htlc_id"
 		", f.received_time"
 		", f.resolved_time"
 		", f.failcode "
@@ -4611,6 +4613,7 @@ const struct forwarding *wallet_forwarded_payments_get(struct wallet *w,
 		}
 
 		db_col_scid(stmt, "in_channel_scid", &cur->channel_in);
+		cur->htlc_id_in = db_col_u64(stmt, "in_htlc_id");
 
 		if (!db_col_is_null(stmt, "out_channel_scid")) {
 			db_col_scid(stmt, "out_channel_scid", &cur->channel_out);
@@ -4618,6 +4621,11 @@ const struct forwarding *wallet_forwarded_payments_get(struct wallet *w,
 			assert(cur->status == FORWARD_LOCAL_FAILED);
 			cur->channel_out.u64 = 0;
 		}
+		if (!db_col_is_null(stmt, "out_htlc_id")) {
+			cur->htlc_id_out = tal(results, u64);
+			*cur->htlc_id_out = db_col_u64(stmt, "out_htlc_id");
+		} else
+			cur->htlc_id_out = NULL;
 
 		cur->received_time = db_col_timeabs(stmt, "f.received_time");
 
