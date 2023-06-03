@@ -59,6 +59,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <header_versions_gen.h>
+#include <hsmd/hsmd_wiregen.h>
 #include <lightningd/chaintopology.h>
 #include <lightningd/channel.h>
 #include <lightningd/channel_control.h>
@@ -610,7 +611,9 @@ static void shutdown_global_subdaemons(struct lightningd *ld)
  * use BIP32 (a.k.a. "HD wallet") to generate keys from a single seed, so we
  * keep the maximum-ever-used key index in the db, and add them all to the
  * filter here. */
-static void init_txfilter(struct wallet *w, struct txfilter *filter)
+static void init_txfilter(struct wallet *w,
+			  const struct ext_key *bip32_base,
+			  struct txfilter *filter)
 {
 	/*~ This is defined in libwally, so we didn't have to reimplement */
 	struct ext_key ext;
@@ -621,7 +624,7 @@ static void init_txfilter(struct wallet *w, struct txfilter *filter)
 	bip32_max_index = db_get_intvar(w->db, "bip32_max_index", 0);
 	/*~ One of the C99 things I unequivocally approve: for-loop scope. */
 	for (u64 i = 0; i <= bip32_max_index + w->keyscan_gap; i++) {
-		if (bip32_key_from_parent(w->bip32_base, i, BIP32_FLAG_KEY_PUBLIC, &ext) != WALLY_OK) {
+		if (bip32_key_from_parent(bip32_base, i, BIP32_FLAG_KEY_PUBLIC, &ext) != WALLY_OK) {
 			abort();
 		}
 		txfilter_add_derkey(filter, ext.pub_key);
@@ -824,7 +827,7 @@ static struct io_plan *sigchld_rfd_in(struct io_conn *conn,
 	int wstatus;
 
 	/* Reap the plugins, since we otherwise ignore them. */
-	while ((childpid = waitpid(-1, &wstatus, WNOHANG)) != 0) {
+	while ((childpid = waitpid(-1, &wstatus, WNOHANG)) > 0) {
 		maybe_subd_child(ld, childpid, wstatus);
 	}
 
@@ -855,6 +858,7 @@ static struct feature_set *default_features(const tal_t *ctx)
 		OPTIONAL_FEATURE(OPT_SCID_ALIAS),
 		OPTIONAL_FEATURE(OPT_ZEROCONF),
 		OPTIONAL_FEATURE(OPT_CHANNEL_TYPE),
+		OPTIONAL_FEATURE(OPT_ROUTE_BLINDING),
 #if EXPERIMENTAL_FEATURES
 		OPTIONAL_FEATURE(OPT_ANCHOR_OUTPUTS),
 		OPTIONAL_FEATURE(OPT_QUIESCE),
@@ -900,7 +904,6 @@ int main(int argc, char *argv[])
 	struct timers *timers;
 	const char *stop_response;
 	struct htlc_in_map *unconnected_htlcs_in;
-	struct ext_key *bip32_base;
 	int sigchld_rfd;
 	struct io_conn *sigchld_conn = NULL;
 	int exit_code = 0;
@@ -972,7 +975,7 @@ int main(int argc, char *argv[])
 	 * valgrind will warn us if we make decisions based on uninitialized
 	 * variables. */
 	ld = new_lightningd(NULL);
-	ld->state = LD_STATE_RUNNING;
+	ld->state = LD_STATE_INITIALIZING;
 
 	/*~ We store an copy of our arguments before parsing mangles them, so
 	 * we can re-exec if versions of subdaemons change.  Note the use of
@@ -1040,12 +1043,12 @@ int main(int argc, char *argv[])
 	 * standard of key storage; ours is in software for now, so the name
 	 * doesn't really make sense, but we can't call it the Badly-named
 	 * Daemon Software Module. */
-	bip32_base = hsm_init(ld);
+	ld->bip32_base = hsm_init(ld);
 
 	/*~ Our "wallet" code really wraps the db, which is more than a simple
 	 * bitcoin wallet (though it's that too).  It also stores channel
 	 * states, invoices, payments, blocks and bitcoin transactions. */
-	ld->wallet = wallet_new(ld, ld->timers, bip32_base);
+	ld->wallet = wallet_new(ld, ld->timers);
 
 	/*~ We keep a filter of scriptpubkeys we're interested in. */
 	ld->owned_txfilter = txfilter_new(ld);
@@ -1085,7 +1088,7 @@ int main(int argc, char *argv[])
 		errx(EXITCODE_WALLET_DB_MISMATCH, "Wallet sanity check failed.");
 
 	/*~ Initialize the transaction filter with our pubkeys. */
-	init_txfilter(ld->wallet, ld->owned_txfilter);
+	init_txfilter(ld->wallet, ld->bip32_base, ld->owned_txfilter);
 
 	/*~ Get the blockheight we are currently at, UINT32_MAX is used to signal
 	 * an uninitialized wallet and that we should start off of bitcoind's
@@ -1172,6 +1175,7 @@ int main(int argc, char *argv[])
 		 type_to_string(tmpctx, struct node_id, &ld->id),
 		 json_escape(tmpctx, (const char *)ld->alias)->s,
 		 tal_hex(tmpctx, ld->rgb), version());
+	ld->state = LD_STATE_RUNNING;
 
 	/*~ If `closefrom_may_be_slow`, we limit ourselves to 4096 file
 	 * descriptors; tell the user about it as that limits the number
@@ -1222,14 +1226,16 @@ int main(int argc, char *argv[])
 	ecdh_hsmd_setup(ld->hsm_fd, hsm_ecdh_failed);
 
 	/*~ The root of every backtrace (almost).  This is our main event
-	 *  loop. */
-	void *io_loop_ret = io_loop_with_timers(ld);
-	/*~ io_loop_with_timers will only exit if we call io_break.
-	 *  At this point in code, we should use io_break(ld) to
-	 *  shut down.
-	 */
-	assert(io_loop_ret == ld);
-	log_debug(ld->log, "io_loop_with_timers: %s", __func__);
+	 *  loop.  We don't even call it if they've already called `stop` */
+	if (!ld->stop_conn) {
+		void *io_loop_ret = io_loop_with_timers(ld);
+		/*~ io_loop_with_timers will only exit if we call io_break.
+		 *  At this point in code, we should use io_break(ld) to
+		 *  shut down.
+		 */
+		assert(io_loop_ret == ld);
+		log_debug(ld->log, "io_loop_with_timers: %s", __func__);
+	}
 
 stop:
 	/* Stop *new* JSON RPC requests. */

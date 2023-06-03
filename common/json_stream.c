@@ -589,37 +589,12 @@ void json_add_psbt(struct json_stream *stream,
 		tal_free(psbt);
 }
 
-void json_add_amount_msat_compat(struct json_stream *result,
-				 struct amount_msat msat,
-				 const char *rawfieldname,
-				 const char *msatfieldname)
-{
-	if (deprecated_apis)
-		json_add_u64(result, rawfieldname, msat.millisatoshis); /* Raw: low-level helper */
-	json_add_amount_msat_only(result, msatfieldname, msat);
-}
-
-void json_add_amount_msat_only(struct json_stream *result,
+void json_add_amount_msat(struct json_stream *result,
 			  const char *msatfieldname,
 			  struct amount_msat msat)
 {
-	if (!deprecated_apis)
-		assert(strends(msatfieldname, "_msat"));
-	if (deprecated_apis)
-		json_add_string(result, msatfieldname,
-				type_to_string(tmpctx, struct amount_msat, &msat));
-	else
-		json_add_u64(result, msatfieldname, msat.millisatoshis); /* Raw: low-level helper */
-}
-
-void json_add_amount_sat_compat(struct json_stream *result,
-				struct amount_sat sat,
-				const char *rawfieldname,
-				const char *msatfieldname)
-{
-	if (deprecated_apis)
-		json_add_u64(result, rawfieldname, sat.satoshis); /* Raw: low-level helper */
-	json_add_amount_sat_msat(result, msatfieldname, sat);
+	assert(strends(msatfieldname, "_msat"));
+	json_add_u64(result, msatfieldname, msat.millisatoshis); /* Raw: low-level helper */
 }
 
 void json_add_amount_sat_msat(struct json_stream *result,
@@ -629,23 +604,7 @@ void json_add_amount_sat_msat(struct json_stream *result,
 	struct amount_msat msat;
 	assert(strends(msatfieldname, "_msat"));
 	if (amount_sat_to_msat(&msat, sat))
-		json_add_amount_msat_only(result, msatfieldname, msat);
-}
-
-/* When I noticed that we were adding "XXXmsat" fields *not* ending in _msat */
-void json_add_amount_sats_deprecated(struct json_stream *result,
-				     const char *fieldname,
-				     const char *msatfieldname,
-				     struct amount_sat sat)
-{
-	if (deprecated_apis) {
-		struct amount_msat msat;
-		assert(!strends(fieldname, "_msat"));
-		if (amount_sat_to_msat(&msat, sat))
-			json_add_string(result, fieldname,
-					take(fmt_amount_msat(NULL, msat)));
-	}
-	json_add_amount_sat_msat(result, msatfieldname, sat);
+		json_add_amount_msat(result, msatfieldname, msat);
 }
 
 void json_add_sats(struct json_stream *result,
@@ -680,9 +639,9 @@ void json_add_lease_rates(struct json_stream *result,
 				 amount_sat(rates->lease_fee_base_sat));
 	json_add_num(result, "lease_fee_basis", rates->lease_fee_basis);
 	json_add_num(result, "funding_weight", rates->funding_weight);
-	json_add_amount_msat_only(result,
-				  "channel_fee_max_base_msat",
-				  amount_msat(rates->channel_fee_max_base_msat));
+	json_add_amount_msat(result,
+			     "channel_fee_max_base_msat",
+			     amount_msat(rates->channel_fee_max_base_msat));
 	json_add_num(result, "channel_fee_max_proportional_thousandths",
 		     rates->channel_fee_max_proportional_thousandths);
 }

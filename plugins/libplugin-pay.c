@@ -729,13 +729,14 @@ static u64 capacity_bias(const struct gossmap *map,
 			 struct amount_msat amount)
 {
 	struct amount_sat capacity;
-	u64 capmsat, amtmsat = amount.millisatoshis; /* Raw: lengthy math */
+	u64 amtmsat = amount.millisatoshis; /* Raw: lengthy math */
+	double capmsat;
 
 	/* Can fail in theory if gossmap changed underneath. */
 	if (!gossmap_chan_get_capacity(map, c, &capacity))
 		return 0;
 
-	capmsat = capacity.satoshis * 1000; /* Raw: lengthy math */
+	capmsat = (double)capacity.satoshis * 1000; /* Raw: lengthy math */
 	return -log((capmsat + 1 - amtmsat) / (capmsat + 1));
 }
 
@@ -1575,14 +1576,14 @@ static struct command_result *payment_createonion_success(struct command *cmd,
 	json_add_hex_talarr(req->js, "onion", p->createonion_response->onion);
 
 	json_object_start(req->js, "first_hop");
-	json_add_amount_msat_only(req->js, "amount_msat", first->amount);
+	json_add_amount_msat(req->js, "amount_msat", first->amount);
 	json_add_num(req->js, "delay", first->delay);
 	json_add_node_id(req->js, "id", &first->node_id);
 	json_add_short_channel_id(req->js, "channel", &first->scid);
 	json_object_end(req->js);
 
 	json_add_sha256(req->js, "payment_hash", p->payment_hash);
-	json_add_amount_msat_only(req->js, "amount_msat", p->amount);
+	json_add_amount_msat(req->js, "amount_msat", p->amount);
 
 	json_array_start(req->js, "shared_secrets");
 	secrets = p->createonion_response->shared_secrets;
@@ -1625,7 +1626,7 @@ static void tlvstream_set_tlv_payload_data(struct tlv_field **stream,
 	u8 *ser = tal_arr(NULL, u8, 0);
 	towire_secret(&ser, payment_secret);
 	towire_tu64(&ser, total_msat);
-	tlvstream_set_raw(stream, TLV_TLV_PAYLOAD_PAYMENT_DATA, ser, tal_bytelen(ser));
+	tlvstream_set_raw(stream, TLV_PAYLOAD_PAYMENT_DATA, ser, tal_bytelen(ser));
 	tal_free(ser);
 }
 
@@ -1648,16 +1649,16 @@ static void payment_add_hop_onion_payload(struct payment *p,
 	 * basically the channel going to the next node. */
 	dst->pubkey = node->node_id;
 
-	dst->tlv_payload = tlv_tlv_payload_new(cr->hops);
+	dst->tlv_payload = tlv_payload_new(cr->hops);
 	fields = &dst->tlv_payload->fields;
-	tlvstream_set_tu64(fields, TLV_TLV_PAYLOAD_AMT_TO_FORWARD,
+	tlvstream_set_tu64(fields, TLV_PAYLOAD_AMT_TO_FORWARD,
 			   msat);
-	tlvstream_set_tu32(fields, TLV_TLV_PAYLOAD_OUTGOING_CLTV_VALUE,
+	tlvstream_set_tu32(fields, TLV_PAYLOAD_OUTGOING_CLTV_VALUE,
 			   cltv);
 
 	if (!final)
 		tlvstream_set_short_channel_id(fields,
-					       TLV_TLV_PAYLOAD_SHORT_CHANNEL_ID,
+					       TLV_PAYLOAD_SHORT_CHANNEL_ID,
 					       &next->scid);
 
 	if (payment_secret != NULL) {
@@ -1668,7 +1669,7 @@ static void payment_add_hop_onion_payload(struct payment *p,
 	}
 	if (payment_metadata != NULL) {
 		assert(final);
-		tlvstream_set_raw(fields, TLV_TLV_PAYLOAD_PAYMENT_METADATA,
+		tlvstream_set_raw(fields, TLV_PAYLOAD_PAYMENT_METADATA,
 				  payment_metadata, tal_bytelen(payment_metadata));
 	}
 }
@@ -1680,7 +1681,7 @@ static void payment_add_blindedpath(const tal_t *ctx,
 				    u32 final_cltv)
 {
 	/* It's a bit of a weird API for us, so we convert it back to
-	 * the struct tlv_tlv_payload */
+	 * the struct tlv_payload */
 	u8 **tlvs = blinded_onion_hops(tmpctx, final_amt, final_cltv,
 				       final_amt, bpath);
 
@@ -1697,7 +1698,7 @@ static void payment_add_blindedpath(const tal_t *ctx,
 
 		/* Length is prepended, discard that first! */
 		fromwire_bigsize(&cursor, &max);
-		hops[i].tlv_payload = fromwire_tlv_tlv_payload(ctx, &cursor, &max);
+		hops[i].tlv_payload = fromwire_tlv_payload(ctx, &cursor, &max);
 	}
 }
 
@@ -1896,9 +1897,7 @@ static void payment_add_attempt(struct json_stream *s, const char *fieldname, st
 		json_add_string(s, "failreason", p->failreason);
 
 	json_add_u64(s, "partid", p->partid);
-	if (deprecated_apis)
-		json_add_amount_msat_only(s, "amount", p->amount);
-	json_add_amount_msat_only(s, "amount_msat", p->amount);
+	json_add_amount_msat(s, "amount_msat", p->amount);
 	if (p->parent != NULL)
 		json_add_u64(s, "parent_partid", p->parent->partid);
 
@@ -1975,11 +1974,9 @@ static void payment_finished(struct payment *p)
 			json_add_timeabs(ret, "created_at", p->start_time);
 			json_add_num(ret, "parts", result.attempts);
 
-			json_add_amount_msat_compat(ret, p->amount, "msatoshi",
-						    "amount_msat");
-			json_add_amount_msat_compat(ret, result.sent,
-						    "msatoshi_sent",
-						    "amount_sent_msat");
+			json_add_amount_msat(ret, "amount_msat", p->amount);
+			json_add_amount_msat(ret, "amount_sent_msat",
+					     result.sent);
 
 			if (result.leafstates != PAYMENT_STEP_SUCCESS)
 				json_add_string(
@@ -2069,12 +2066,9 @@ static void payment_finished(struct payment *p)
 				json_add_string(ret, "status", "failed");
 			}
 
-			json_add_amount_msat_compat(ret, p->amount, "msatoshi",
-						    "amount_msat");
-
-			json_add_amount_msat_compat(ret, result.sent,
-						    "msatoshi_sent",
-						    "amount_sent_msat");
+			json_add_amount_msat(ret, "amount_msat", p->amount);
+			json_add_amount_msat(ret, "amount_sent_msat",
+					     result.sent);
 
 			if (failure != NULL) {
 				if (failure->erring_index)

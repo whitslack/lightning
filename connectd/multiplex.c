@@ -315,9 +315,13 @@ static void set_urgent_flag(struct peer *peer, bool urgent)
 	int val;
 	int opt;
 	const char *optname;
-	static bool complained = false;
 
 	if (urgent == peer->urgent)
+		return;
+
+	/* FIXME: We can't do this on websockets, but we could signal our
+	 * websocket proxy via some magic message to do so! */
+	if (peer->is_websocket != NORMAL_SOCKET)
 		return;
 
 #ifdef TCP_CORK
@@ -332,14 +336,12 @@ static void set_urgent_flag(struct peer *peer, bool urgent)
 
 	val = urgent;
 	if (setsockopt(io_conn_fd(peer->to_peer),
-		       IPPROTO_TCP, opt, &val, sizeof(val)) != 0) {
-		/* This actually happens in testing, where we blackhole the fd */
-		if (!complained) {
-			status_unusual("setsockopt %s=1: %s",
-				       optname,
-				       strerror(errno));
-			complained = true;
-		}
+		       IPPROTO_TCP, opt, &val, sizeof(val)) != 0
+	    /* This actually happens in testing, where we blackhole the fd */
+	    && IFDEV(peer->daemon->dev_disconnect_fd == -1, true)) {
+		status_broken("setsockopt %s=1 fd=%u: %s",
+			      optname, io_conn_fd(peer->to_peer),
+			      strerror(errno));
 	}
 	peer->urgent = urgent;
 }
@@ -503,23 +505,6 @@ static u8 *maybe_from_gossip_store(const tal_t *ctx, struct peer *peer)
 	if (IFDEV(peer->daemon->dev_suppress_gossip, false))
 		return NULL;
 
-	/* BOLT #7:
-	 *   - if the `gossip_queries` feature is negotiated:
-	 *     - MUST NOT relay any gossip messages it did not generate itself,
-	 *       unless explicitly requested.
-	 */
-
-	/* So, even if they didn't send us a timestamp_filter message,
-	 * we *still* send our own gossip. */
-	if (!peer->gs.gossip_timer) {
-		return gossip_store_next(ctx, &peer->daemon->gossip_store_fd,
-					 0, 0xFFFFFFFF,
-					 true,
-					 false,
-					 &peer->gs.off,
-					 &peer->daemon->gossip_store_end);
-	}
-
 	/* Not streaming right now? */
 	if (!peer->gs.active)
 		return NULL;
@@ -531,7 +516,6 @@ again:
 	msg = gossip_store_next(ctx, &peer->daemon->gossip_store_fd,
 				peer->gs.timestamp_min,
 				peer->gs.timestamp_max,
-				false,
 				false,
 				&peer->gs.off,
 				&peer->daemon->gossip_store_end);
@@ -696,18 +680,27 @@ static void handle_gossip_timestamp_filter_in(struct peer *peer, const u8 *msg)
 	if (peer->gs.timestamp_max < peer->gs.timestamp_min)
 		peer->gs.timestamp_max = UINT32_MAX;
 
-	/* Optimization: they don't want anything.  LND and us (at least),
-	 * both set first_timestamp to 0xFFFFFFFF to indicate that. */
-	if (peer->gs.timestamp_min == UINT32_MAX)
+	/* BOLT-gossip-filter-simplify #7:
+	 * The receiver:
+	 *...
+	 *   - if `first_timestamp` is 0:
+	 *     - SHOULD send all known gossip messages.
+	 *   - otherwise, if `first_timestamp` is 0xFFFFFFFF:
+	 *     - SHOULD NOT send any gossip messages (except its own).
+	 *   - otherwise:
+	 *     - SHOULD send gossip messages it receives from now own.
+	 */
+	/* For us, this means we only sweep the gossip store for messages
+	 * if the first_timestamp is 0 */
+	if (first_timestamp == 0)
+		peer->gs.off = 1;
+	else if (first_timestamp == 0xFFFFFFFF)
 		peer->gs.off = peer->daemon->gossip_store_end;
 	else {
-		/* Second optimation: it's common to ask for "recent" gossip,
-		 * so we don't have to start at beginning of store. */
+		/* We are actually a bit nicer than the spec, and we include
+		 * "recent" gossip here. */
 		update_recent_timestamp(peer->daemon);
-		if (peer->gs.timestamp_min >= peer->daemon->gossip_recent_time)
-			peer->gs.off = peer->daemon->gossip_store_recent_off;
-		else
-			peer->gs.off = 1;
+		peer->gs.off = peer->daemon->gossip_store_recent_off;
 	}
 
 	/* BOLT #7:

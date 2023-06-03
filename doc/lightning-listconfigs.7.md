@@ -105,6 +105,7 @@ On success, an object is returned, containing:
 - **tor-service-password** (string, optional): `tor-service-password` field from config or cmdline, if any
 - **dev-allowdustreserve** (boolean, optional): Whether we allow setting dust reserves
 - **announce-addr-dns** (boolean, optional): Whether we put DNS entries into node\_announcement *(added v22.11.1)*
+- **commit-fee** (u64, optional): The percentage of the 6-block fee estimate to use for commitment transactions *(added v23.05)*
 
 [comment]: # (GENERATE-FROM-SCHEMA-END)
 
@@ -223,4 +224,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:e8edbeddad08f6928c7dd15ca9c4928f0888cc485157ef93a3b973dc824a5460)
+[comment]: # ( SHA256STAMP:3e56f9e26c9453be8f5ec85e73b64d855c09b28a215b746edd124606816940b3)

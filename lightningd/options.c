@@ -799,6 +799,15 @@ static void dev_register_opts(struct lightningd *ld)
 			 opt_show_uintval,
 			 &dev_onion_reply_length,
 			 "Send onion errors of custom length");
+	opt_register_arg("--dev-max-fee-multiplier",
+			 opt_set_uintval,
+			 opt_show_uintval,
+			 &ld->config.max_fee_multiplier,
+			 "Allow the fee proposed by the remote end to"
+			 " be up to multiplier times higher than our "
+			 "own. Small values will cause channels to be"
+			 " closed more often due to fee fluctuations,"
+			 " large values may result in large fees.");
 }
 #endif /* DEVELOPER */
 
@@ -858,6 +867,9 @@ static const struct config testnet_config = {
 	.exp_offers = IFEXPERIMENTAL(true, false),
 
 	.allowdustreserve = false,
+
+	.max_fee_multiplier = 10,
+	.commit_fee_percent = 100,
 };
 
 /* aka. "Dude, where's my coins?" */
@@ -927,6 +939,9 @@ static const struct config mainnet_config = {
 	.exp_offers = IFEXPERIMENTAL(true, false),
 
 	.allowdustreserve = false,
+
+	.max_fee_multiplier = 10,
+	.commit_fee_percent = 100,
 };
 
 static void check_config(struct lightningd *ld)
@@ -1060,9 +1075,6 @@ static char *opt_set_onion_messages(struct lightningd *ld)
 	feature_set_or(ld->our_features,
 		       take(feature_set_for_feature(NULL,
 						    OPTIONAL_FEATURE(OPT_ONION_MESSAGES))));
-	feature_set_or(ld->our_features,
-		       take(feature_set_for_feature(NULL,
-						    OPTIONAL_FEATURE(OPT_ROUTE_BLINDING))));
 	return NULL;
 }
 
@@ -1283,6 +1295,9 @@ static void register_opts(struct lightningd *ld)
 			 opt_force_feerates, NULL, ld,
 			 "Set testnet/regtest feerates in sats perkw, opening/mutual_close/unlateral_close/delayed_to_us/htlc_resolution/penalty: if fewer specified, last number applies to remainder");
 
+	opt_register_arg("--commit-fee",
+			 opt_set_u64, opt_show_u64, &ld->config.commit_fee_percent,
+			 "Percentage of fee to request for their commitment");
 	opt_register_arg("--subdaemon", opt_subdaemon, NULL,
 			 ld, "Arg specified as SUBDAEMON:PATH. "
 			 "Specifies an alternate subdaemon binary. "
@@ -1745,7 +1760,7 @@ static void add_config(struct lightningd *ld,
 			 * --plugin for each one, so ignore these */
 		} else if (opt->cb_arg == (void *)opt_set_msat) {
 			/* We allow -msat not _msat here, unlike
-			 * json_add_amount_msat_only */
+			 * json_add_amount_msat */
 			assert(strends(name0, "-msat"));
 			json_add_string(response, name0,
 					fmt_amount_msat(tmpctx,

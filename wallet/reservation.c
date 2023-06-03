@@ -10,6 +10,7 @@
 #include <common/key_derive.h>
 #include <common/type_to_string.h>
 #include <lightningd/chaintopology.h>
+#include <lightningd/hsm_control.h>
 #include <lightningd/jsonrpc.h>
 #include <lightningd/lightningd.h>
 #include <wallet/txfilter.h>
@@ -243,25 +244,28 @@ static bool inputs_sufficient(struct amount_sat input,
 	return false;
 }
 
-static struct wally_psbt *psbt_using_utxos(const tal_t *ctx,
-					   struct wallet *wallet,
-					   struct utxo **utxos,
-					   const struct ext_key *bip32_base,
-					   u32 nlocktime,
-					   u32 nsequence)
+struct wally_psbt *psbt_using_utxos(const tal_t *ctx,
+				    struct wallet *wallet,
+				    struct utxo **utxos,
+				    u32 nlocktime,
+				    u32 nsequence,
+				    struct wally_psbt *base)
 {
 	struct pubkey key;
 	u8 *scriptSig, *scriptPubkey, *redeemscript;
 	struct wally_psbt *psbt;
 
-	psbt = create_psbt(ctx, tal_count(utxos), 0, nlocktime);
+	if (base)
+		psbt = base;
+	else
+		psbt = create_psbt(ctx, tal_count(utxos), 0, nlocktime);
 
 	for (size_t i = 0; i < tal_count(utxos); i++) {
 		u32 this_nsequence;
 		struct bitcoin_tx *tx;
 
 		if (utxos[i]->is_p2sh) {
-			bip32_pubkey(bip32_base, &key, utxos[i]->keyindex);
+			bip32_pubkey(wallet->ld, &key, utxos[i]->keyindex);
 			scriptSig = bitcoin_scriptsig_p2sh_p2wpkh(tmpctx, &key);
 			redeemscript = bitcoin_redeem_p2sh_p2wpkh(tmpctx, &key);
 			scriptPubkey = scriptpubkey_p2sh(tmpctx, redeemscript);
@@ -338,27 +342,14 @@ static struct command_result *finish_psbt(struct command *cmd,
 	size_t change_outnum COMPILER_WANTS_INIT("gcc 9.4.0 -Og");
 	u32 current_height = get_block_height(cmd->ld->topology);
 
-	/* Setting the locktime to the next block to be mined has multiple
-	 * benefits:
-	 * - anti fee-snipping (even if not yet likely)
-	 * - less distinguishable transactions (with this we create
-	 *   general-purpose transactions which looks like bitcoind:
-	 *   native segwit, nlocktime set to tip, and sequence set to
-	 *   0xFFFFFFFD by default. Other wallets are likely to implement
-	 *   this too).
-	 */
 	if (!locktime) {
 		locktime = tal(cmd, u32);
-		*locktime = current_height;
-
-		/* Eventually fuzz it too. */
-		if (*locktime > 100 && pseudorand(10) == 0)
-			*locktime -= pseudorand(100);
+		*locktime = default_locktime(cmd->ld->topology);
 	}
 
 	psbt = psbt_using_utxos(cmd, cmd->ld->wallet, utxos,
-				cmd->ld->wallet->bip32_base,
-				*locktime, BITCOIN_TX_RBF_SEQUENCE);
+				*locktime, BITCOIN_TX_RBF_SEQUENCE,
+				NULL);
 
 	/* Should we add a change output for the excess? */
 	if (excess_as_change) {
@@ -381,10 +372,7 @@ static struct command_result *finish_psbt(struct command *cmd,
 					    "Failed to generate change address."
 					    " Keys exhausted.");
 
-		if (!bip32_pubkey(cmd->ld->wallet->bip32_base, &pubkey, keyidx))
-			return command_fail(cmd, LIGHTNINGD,
-					    "Failed to generate change address."
-					    " Keys generation failure");
+		bip32_pubkey(cmd->ld, &pubkey, keyidx);
 		b32script = scriptpubkey_p2wpkh(tmpctx, &pubkey);
 		txfilter_add_scriptpubkey(cmd->ld->owned_txfilter, b32script);
 

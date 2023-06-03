@@ -1,10 +1,10 @@
 #include "config.h"
 #include <assert.h>
+
+#include <common/bech32.h>
 #include <stdint.h>
 #include <string.h>
 #include <tests/fuzz/libfuzz.h>
-
-#include <common/bech32.h>
 
 void init(int *argc, char ***argv)
 {
@@ -18,6 +18,9 @@ void run(const uint8_t *data, size_t size)
 	size_t data_out_len;
 	int wit_version;
 	bech32_encoding benc;
+
+	if (size < 1)
+		return;
 
 	/* Buffer size is defined in each function's doc comment. */
 	bech32_str = malloc(size + strlen(hrp_inv) + 8);

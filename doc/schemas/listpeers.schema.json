@@ -334,6 +334,7 @@
                     "enum": [
                       "option_static_remotekey",
                       "option_anchor_outputs",
+                      "option_scid_alias",
                       "option_zeroconf"
                     ],
                     "description": "BOLT #9 features which apply to this channel"
@@ -347,16 +348,6 @@
                     "remote_funds_msat"
                   ],
                   "properties": {
-                    "local_msat": {
-                      "type": "msat",
-                      "deprecated": "v0.12.0",
-                      "description": "Amount of channel we funded"
-                    },
-                    "remote_msat": {
-                      "type": "msat",
-                      "deprecated": "v0.12.0",
-                      "description": "Amount of channel they funded"
-                    },
                     "pushed_msat": {
                       "type": "msat",
                       "description": "Amount pushed from opener to peer"

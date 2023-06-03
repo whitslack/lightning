@@ -41,7 +41,7 @@ void db_begin_transaction_(struct db *db UNNEEDED, const char *location UNNEEDED
 void db_commit_transaction(struct db *db UNNEEDED)
 { fprintf(stderr, "db_commit_transaction called!\n"); abort(); }
 /* Generated stub for db_get_intvar */
-s64 db_get_intvar(struct db *db UNNEEDED, char *varname UNNEEDED, s64 defval UNNEEDED)
+s64 db_get_intvar(struct db *db UNNEEDED, const char *varname UNNEEDED, s64 defval UNNEEDED)
 { fprintf(stderr, "db_get_intvar called!\n"); abort(); }
 /* Generated stub for db_in_transaction */
 bool db_in_transaction(struct db *db UNNEEDED)
@@ -233,8 +233,7 @@ void waitblockheight_notify_new_block(struct lightningd *ld UNNEEDED,
 void wallet_blocks_heights(struct wallet *w UNNEEDED, u32 def UNNEEDED, u32 *min UNNEEDED, u32 *max UNNEEDED)
 { fprintf(stderr, "wallet_blocks_heights called!\n"); abort(); }
 /* Generated stub for wallet_new */
-struct wallet *wallet_new(struct lightningd *ld UNNEEDED, struct timers *timers UNNEEDED,
-			  struct ext_key *bip32_base UNNEEDED)
+struct wallet *wallet_new(struct lightningd *ld UNNEEDED, struct timers *timers UNNEEDED)
 { fprintf(stderr, "wallet_new called!\n"); abort(); }
 /* Generated stub for wallet_sanity_check */
 bool wallet_sanity_check(struct wallet *w UNNEEDED)

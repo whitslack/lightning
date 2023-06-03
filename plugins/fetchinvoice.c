@@ -272,8 +272,8 @@ static struct command_result *handle_invreq_response(struct command *cmd,
 	/* We always tell them this unless it's trivial to calc and
 	 * exactly as expected. */
 	if (!expected_amount || *inv->invoice_amount != *expected_amount) {
-		json_add_amount_msat_only(out, "amount_msat",
-					  amount_msat(*inv->invoice_amount));
+		json_add_amount_msat(out, "amount_msat",
+				     amount_msat(*inv->invoice_amount));
 	}
 	json_object_end(out);
 
@@ -1029,6 +1029,7 @@ static struct command_result *json_fetchinvoice(struct command *cmd,
 	invreq = invoice_request_for_offer(sent, sent->offer);
 	invreq->invreq_recurrence_counter = tal_steal(invreq, recurrence_counter);
 	invreq->invreq_recurrence_start = tal_steal(invreq, recurrence_start);
+	invreq->invreq_quantity = tal_steal(invreq, quantity);
 
 	/* BOLT-offers-recurrence #12:
 	 * - if `offer_amount` is not present:

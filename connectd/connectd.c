@@ -8,11 +8,13 @@
  * it.
  */
 #include "config.h"
+#include <arpa/inet.h>
 #include <bitcoin/chainparams.h>
 #include <ccan/array_size/array_size.h>
 #include <ccan/asort/asort.h>
 #include <ccan/closefrom/closefrom.h>
 #include <ccan/fdpass/fdpass.h>
+#include <ccan/io/backend.h>
 #include <ccan/noerr/noerr.h>
 #include <ccan/tal/str/str.h>
 #include <common/bech32.h>
@@ -31,7 +33,6 @@
 #include <connectd/connectd.h>
 #include <connectd/connectd_gossipd_wiregen.h>
 #include <connectd/connectd_wiregen.h>
-#include <connectd/handshake.h>
 #include <connectd/multiplex.h>
 #include <connectd/netaddress.h>
 #include <connectd/onion_message.h>
@@ -232,6 +233,7 @@ static struct peer *new_peer(struct daemon *daemon,
 			     const struct node_id *id,
 			     const struct crypto_state *cs,
 			     const u8 *their_features,
+			     enum is_websocket is_websocket,
 			     struct io_conn *conn STEALS,
 			     int *fd_for_subd)
 {
@@ -248,6 +250,7 @@ static struct peer *new_peer(struct daemon *daemon,
 	peer->draining = false;
 	peer->peer_outq = msg_queue_new(peer, false);
 	peer->last_recv_time = time_now();
+	peer->is_websocket = is_websocket;
 
 #if DEVELOPER
 	peer->dev_writes_enabled = NULL;
@@ -273,6 +276,7 @@ struct io_plan *peer_connected(struct io_conn *conn,
 			       const struct wireaddr *remote_addr,
 			       struct crypto_state *cs,
 			       const u8 *their_features TAKES,
+			       enum is_websocket is_websocket,
 			       bool incoming)
 {
 	u8 *msg;
@@ -333,7 +337,7 @@ struct io_plan *peer_connected(struct io_conn *conn,
 			      conn, find_connecting(daemon, id)->conn);
 
 	/* This contains the per-peer state info; gossipd fills in pps->gs */
-	peer = new_peer(daemon, id, cs, their_features, conn, &subd_fd);
+	peer = new_peer(daemon, id, cs, their_features, is_websocket, conn, &subd_fd);
 	/* Only takes over conn if it succeeds. */
 	if (!peer)
 		return io_close(conn);
@@ -371,13 +375,14 @@ static struct io_plan *handshake_in_success(struct io_conn *conn,
 					    const struct wireaddr_internal *addr,
 					    struct crypto_state *cs,
 					    struct oneshot *timeout,
+					    enum is_websocket is_websocket,
 					    struct daemon *daemon)
 {
 	struct node_id id;
 	node_id_from_pubkey(&id, id_key);
 	status_peer_debug(&id, "Connect IN");
 	return peer_exchange_initmsg(conn, daemon, daemon->our_features,
-				     cs, &id, addr, timeout, true);
+				     cs, &id, addr, timeout, is_websocket, true);
 }
 
 /*~ If the timer goes off, we simply free everything, which hangs up. */
@@ -429,6 +434,7 @@ static bool get_remote_address(struct io_conn *conn,
 struct conn_in {
 	struct wireaddr_internal addr;
 	struct daemon *daemon;
+	enum is_websocket is_websocket;
 };
 
 /*~ Once we've got a connection in, we set it up here (whether it's via the
@@ -451,6 +457,7 @@ static struct io_plan *conn_in(struct io_conn *conn,
 	 * leaked */
 	return responder_handshake(notleak(conn), &daemon->mykey,
 				   &conn_in_arg->addr, timeout,
+				   conn_in_arg->is_websocket,
 				   handshake_in_success, daemon);
 }
 
@@ -465,6 +472,7 @@ static struct io_plan *connection_in(struct io_conn *conn,
 		return io_close(conn);
 
 	conn_in_arg.daemon = daemon;
+	conn_in_arg.is_websocket = false;
 	return conn_in(conn, &conn_in_arg);
 }
 
@@ -545,6 +553,7 @@ static struct io_plan *websocket_connection_in(struct io_conn *conn,
 
 	/* New connection actually talks to proxy process. */
 	conn_in_arg.daemon = daemon;
+	conn_in_arg.is_websocket = true;
 	io_new_conn(tal_parent(conn), childmsg[0], conn_in, &conn_in_arg);
 
 	/* Abandon original (doesn't close since child has dup'd fd) */
@@ -568,6 +577,7 @@ static struct io_plan *handshake_out_success(struct io_conn *conn,
 					     const struct wireaddr_internal *addr,
 					     struct crypto_state *cs,
 					     struct oneshot *timeout,
+					     enum is_websocket is_websocket,
 					     struct connecting *connect)
 {
 	struct node_id id;
@@ -577,7 +587,7 @@ static struct io_plan *handshake_out_success(struct io_conn *conn,
 	status_peer_debug(&id, "Connect OUT");
 	return peer_exchange_initmsg(conn, connect->daemon,
 				     connect->daemon->our_features,
-				     cs, &id, addr, timeout, false);
+				     cs, &id, addr, timeout, is_websocket, false);
 }
 
 struct io_plan *connection_out(struct io_conn *conn, struct connecting *connect)
@@ -602,7 +612,7 @@ struct io_plan *connection_out(struct io_conn *conn, struct connecting *connect)
 	connect->connstate = "Cryptographic handshake";
 	return initiator_handshake(conn, &connect->daemon->mykey, &outkey,
 				   &connect->addrs[connect->addrnum],
-				   timeout, handshake_out_success, connect);
+				   timeout, NORMAL_SOCKET, handshake_out_success, connect);
 }
 
 /*~ When we've exhausted all addresses without success, we come here.
@@ -930,15 +940,6 @@ next:
 	connect->addrnum++;
 	try_connect_one_addr(connect);
 }
-
-/*~ Sometimes it's nice to have an explicit enum instead of a bool to make
- * arguments clearer: it kind of hacks around C's lack of naming formal
- * arguments in callers (e.g. in Python we'd simply call func(websocket=False)).
- */
-enum is_websocket {
-	NORMAL_SOCKET,
-	WEBSOCKET,
-};
 
 /*~ connectd is responsible for incoming connections, but it's the process of
  * setting up the listening ports which gives us information we need for startup
@@ -1524,8 +1525,12 @@ static void connect_init(struct daemon *daemon, const u8 *msg)
 	tal_free(announceable);
 
 #if DEVELOPER
-	if (dev_disconnect)
+	if (dev_disconnect) {
+		daemon->dev_disconnect_fd = 5;
 		dev_disconnect_init(5);
+	} else {
+		daemon->dev_disconnect_fd = -1;
+	}
 #endif
 }
 
@@ -1558,8 +1563,10 @@ static void connect_activate(struct daemon *daemon, const u8 *msg)
 	if (do_listen) {
 		for (size_t i = 0; i < tal_count(daemon->listen_fds); i++) {
 			if (listen(daemon->listen_fds[i]->fd, 64) != 0) {
-				if (daemon->listen_fds[i]->mayfail)
+				if (daemon->listen_fds[i]->mayfail) {
+					close(daemon->listen_fds[i]->fd);
 					continue;
+				}
 				errmsg = tal_fmt(tmpctx,
 						 "Failed to listen on socket %s: %s",
 						 type_to_string(tmpctx,
@@ -1897,6 +1904,141 @@ static void dev_suppress_gossip(struct daemon *daemon, const u8 *msg)
 {
 	daemon->dev_suppress_gossip = true;
 }
+
+static const char *addr2name(const tal_t *ctx,
+			     const struct sockaddr_storage *sa,
+			     socklen_t addrlen)
+{
+	const struct sockaddr_in *in = (struct sockaddr_in *)sa;
+	const struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)sa;
+	const struct sockaddr_un *un = (struct sockaddr_un *)sa;
+	char addr[1000];
+
+	switch (sa->ss_family) {
+	case AF_UNIX:
+		if (addrlen == sizeof(un->sun_family))
+			return tal_fmt(ctx, "unix socket <unnamed>");
+		else
+			return tal_fmt(ctx, "unix socket %s", un->sun_path);
+	case AF_INET:
+		if (!inet_ntop(sa->ss_family, &in->sin_addr, addr, sizeof(addr)))
+			return tal_fmt(ctx, "IPv4 socket <badaddr>");
+		else
+			return tal_fmt(ctx, "IPv4 socket %s:%u",
+				       addr, ntohs(in->sin_port));
+	case AF_INET6:
+		if (!inet_ntop(sa->ss_family, &in6->sin6_addr, addr, sizeof(addr)))
+			return tal_fmt(ctx, "IPv6 socket <badaddr>");
+		else
+			return tal_fmt(ctx, "IPv6 socket %s:%u",
+				       addr, ntohs(in6->sin6_port));
+	default:
+		return tal_fmt(ctx, "unknown family %u (**BROKEN**)",
+			       (unsigned)sa->ss_family);
+	}
+}
+
+static void describe_fd(int fd)
+{
+	struct sockaddr_storage sa;
+	socklen_t addrlen = sizeof(sa);
+
+	if (getsockname(fd, (void *)&sa, &addrlen) != 0) {
+		status_broken("dev_report_fds: %i cannot get sockname (%s)",
+			      fd, strerror(errno));
+		return;
+	}
+	status_info("dev_report_fds: %i name %s", fd, addr2name(tmpctx, &sa, addrlen));
+
+	if (getpeername(fd, (void *)&sa, &addrlen) != 0)
+		return;
+	status_info("dev_report_fds: %i peer %s", fd, addr2name(tmpctx, &sa, addrlen));
+}
+
+static const char *io_plan_status_str(enum io_plan_status status)
+{
+	switch (status) {
+	case IO_UNSET: return "IO_UNSET";
+	case IO_POLLING_NOTSTARTED: return "IO_POLLING_NOTSTARTED";
+	case IO_POLLING_STARTED: return "IO_POLLING_STARTED";
+	case IO_WAITING: return "IO_WAITING";
+	case IO_ALWAYS: return "IO_ALWAYS";
+	}
+	return "INVALID-STATUS";
+}
+
+/* Stupid and slow, but machines are fast! */
+static const tal_t *find_tal_ptr(const tal_t *root, const tal_t *p)
+{
+	if (root == p)
+		return root;
+
+	for (tal_t *t = tal_first(root); t; t = tal_next(t)) {
+		const tal_t *ret = find_tal_ptr(t, p);
+		if (ret)
+			return ret;
+	}
+	return NULL;
+}
+
+/* Looks up ptr in hash tree, to try to find name */
+static const char *try_tal_name(const tal_t *ctx, const void *p)
+{
+	const tal_t *t = find_tal_ptr(NULL, p);
+	if (t)
+		return tal_name(t);
+	return tal_fmt(ctx, "%p", p);
+}
+
+static void dev_report_fds(struct daemon *daemon, const u8 *msg)
+{
+	for (int fd = 3; fd < 4096; fd++) {
+		bool listener;
+		const struct io_conn *c;
+		const struct io_listener *l;
+		if (!isatty(fd) && errno == EBADF)
+			continue;
+		if (fd == HSM_FD) {
+			status_info("dev_report_fds: %i -> hsm fd", fd);
+			continue;
+		}
+		if (fd == GOSSIPCTL_FD) {
+			status_info("dev_report_fds: %i -> gossipd fd", fd);
+			continue;
+		}
+#if DEVELOPER
+		if (fd == daemon->dev_disconnect_fd) {
+			status_info("dev_report_fds: %i -> dev_disconnect_fd", fd);
+			continue;
+		}
+#endif
+		if (fd == daemon->gossip_store_fd) {
+			status_info("dev_report_fds: %i -> gossip_store", fd);
+			continue;
+		}
+		c = io_have_fd(fd, &listener);
+		if (!c) {
+			status_broken("dev_report_fds: %i open but unowned?", fd);
+			continue;
+		} else if (listener) {
+			l = (void *)c;
+			status_info("dev_report_fds: %i -> listener (%s)", fd,
+				    backtrace_symname(tmpctx, l->init));
+		} else {
+			status_info("dev_report_fds: %i -> IN=%s:%s+%s(%s), OUT=%s:%s+%s(%s)",
+				    fd,
+				    io_plan_status_str(c->plan[IO_IN].status),
+				    backtrace_symname(tmpctx, c->plan[IO_IN].io),
+				    backtrace_symname(tmpctx, c->plan[IO_IN].next),
+				    try_tal_name(tmpctx, c->plan[IO_IN].next_arg),
+				    io_plan_status_str(c->plan[IO_OUT].status),
+				    backtrace_symname(tmpctx, c->plan[IO_OUT].io),
+				    backtrace_symname(tmpctx, c->plan[IO_OUT].next),
+				    try_tal_name(tmpctx, c->plan[IO_OUT].next_arg));
+		}
+		describe_fd(fd);
+	}
+}
 #endif /* DEVELOPER */
 
 static struct io_plan *recv_peer_connect_subd(struct io_conn *conn,
@@ -1966,6 +2108,11 @@ static struct io_plan *recv_req(struct io_conn *conn,
 	case WIRE_CONNECTD_DEV_SUPPRESS_GOSSIP:
 #if DEVELOPER
 		dev_suppress_gossip(daemon, msg);
+		goto out;
+#endif
+	case WIRE_CONNECTD_DEV_REPORT_FDS:
+#if DEVELOPER
+		dev_report_fds(daemon, msg);
 		goto out;
 #endif
 	/* We send these, we don't receive them */
