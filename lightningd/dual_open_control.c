@@ -105,7 +105,9 @@ static void channel_err_broken(struct channel *channel,
 }
 
 void json_add_unsaved_channel(struct json_stream *response,
-			      const struct channel *channel)
+			      const struct channel *channel,
+			      /* Only set for listpeerchannels */
+			      const struct peer *peer)
 {
 	struct amount_msat total;
 	struct open_attempt *oa;
@@ -125,6 +127,11 @@ void json_add_unsaved_channel(struct json_stream *response,
 	oa = channel->open_attempt;
 
 	json_object_start(response, NULL);
+	/* listpeerchannels only */
+	if (peer) {
+		json_add_node_id(response, "peer_id", &peer->id);
+		json_add_bool(response, "peer_connected", peer->connected == PEER_CONNECTED);
+	}
 	json_add_string(response, "state", channel_state_name(channel));
 	json_add_string(response, "owner", channel->owner->name);
 	json_add_string(response, "opener", channel->opener == LOCAL ?
@@ -1142,8 +1149,7 @@ wallet_update_channel(struct lightningd *ld,
 
 	channel_set_last_tx(channel,
 			    tal_steal(channel, remote_commit),
-			    remote_commit_sig,
-			    TX_CHANNEL_UNILATERAL);
+			    remote_commit_sig);
 
 	/* Update in database */
 	wallet_channel_save(ld->wallet, channel);
@@ -1231,7 +1237,6 @@ wallet_commit_channel(struct lightningd *ld,
 
 	channel->last_tx = tal_steal(channel, remote_commit);
 	channel->last_sig = *remote_commit_sig;
-	channel->last_tx_type = TX_CHANNEL_UNILATERAL;
 
 	channel->channel_info = *channel_info;
 	channel->fee_states = new_fee_states(channel,

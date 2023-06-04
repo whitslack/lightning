@@ -4,6 +4,7 @@
 #include <ccan/htable/htable_type.h>
 #include <ccan/json_escape/json_escape.h>
 #include <ccan/json_out/json_out.h>
+#include <ccan/mem/mem.h>
 #include <ccan/rune/rune.h>
 #include <ccan/tal/str/str.h>
 #include <ccan/time/time.h>
@@ -36,6 +37,9 @@ struct commando {
 
 	/* This is set to NULL if they seem to be spamming us! */
 	u8 *contents;
+
+	/* Literal JSON token containing JSON id (including "") */
+	const char *json_id;
 };
 
 static struct plugin *plugin;
@@ -65,7 +69,7 @@ static bool usage_eq_id(const struct usage *u, u64 id)
 	return u->id == id;
 }
 HTABLE_DEFINE_TYPE(struct usage, usage_id, id_hash, usage_eq_id, usage_table);
-static struct usage_table usage_table;
+static struct usage_table *usage_table;
 
 /* Every minute we forget entries. */
 static void flush_usage_table(void *unused)
@@ -73,10 +77,10 @@ static void flush_usage_table(void *unused)
 	struct usage *u;
 	struct usage_table_iter it;
 
-	for (u = usage_table_first(&usage_table, &it);
+	for (u = usage_table_first(usage_table, &it);
 	     u;
-	     u = usage_table_next(&usage_table, &it)) {
-		usage_table_delval(&usage_table, &it);
+	     u = usage_table_next(usage_table, &it)) {
+		usage_table_delval(usage_table, &it);
 		tal_free(u);
 	}
 
@@ -148,10 +152,6 @@ static struct command_result *send_response(struct command *command UNUSED,
 	if (msglen > 65000) {
 		msglen = 65000;
 		msgtype = COMMANDO_MSG_REPLY_CONTINUES;
-		/* We need to make a copy first time before we call back, since
-		 * plugin will reuse it! */
-		if (!result)
-			reply->buf = tal_dup_talarr(reply, char, reply->buf);
 	} else {
 		if (msglen == 0) {
 			tal_free(reply);
@@ -184,12 +184,32 @@ static struct command_result *cmd_done(struct command *command,
 {
 	struct reply *reply = tal(plugin, struct reply);
 	reply->incoming = tal_steal(reply, incoming);
-	reply->buf = (char *)buf;
 
-	/* result is contents of "error" or "response": we want top-leve
-	 * object */
-	reply->off = obj->start;
-	reply->len = obj->end;
+	/* We make a copy, but substititing the original id! */
+	if (incoming->json_id) {
+		const char *id_start, *id_end;
+		const jsmntok_t *id = json_get_member(buf, obj, "id");
+		size_t off;
+
+		/* Old id we're going to omit */
+		id_start = json_tok_full(buf, id);
+		id_end = id_start + json_tok_full_len(id);
+
+		reply->len = obj->end - obj->start
+			- (id_end - id_start)
+			+ strlen(incoming->json_id);
+		reply->buf = tal_arr(reply, char, reply->len);
+		memcpy(reply->buf, buf + obj->start,
+		       id_start - (buf + obj->start));
+		off = id_start - (buf + obj->start);
+		memcpy(reply->buf + off, incoming->json_id, strlen(incoming->json_id));
+		off += strlen(incoming->json_id);
+		memcpy(reply->buf + off, id_end, (buf + obj->end) - id_end);
+	} else {
+		reply->len = obj->end - obj->start;
+		reply->buf = tal_strndup(reply, buf + obj->start, reply->len);
+	}
+	reply->off = 0;
 
 	return send_response(command, NULL, NULL, reply);
 }
@@ -243,12 +263,12 @@ static const char *rate_limit_check(const tal_t *ctx,
 
 	/* We cache this: we only add usage counter if whole rune succeeds! */
 	if (!cinfo->usage) {
-		cinfo->usage = usage_table_get(&usage_table, atol(rune->unique_id));
+		cinfo->usage = usage_table_get(usage_table, atol(rune->unique_id));
 		if (!cinfo->usage) {
 			cinfo->usage = tal(plugin, struct usage);
 			cinfo->usage->id = atol(rune->unique_id);
 			cinfo->usage->counter = 0;
-			usage_table_add(&usage_table, cinfo->usage);
+			usage_table_add(usage_table, cinfo->usage);
 		}
 	}
 
@@ -362,9 +382,10 @@ static void try_command(struct node_id *peer,
 			const u8 *msg, size_t msglen)
 {
 	struct commando *incoming = tal(plugin, struct commando);
-	const jsmntok_t *toks, *method, *params, *rune;
+	const jsmntok_t *toks, *method, *params, *rune, *id, *filter;
 	const char *buf = (const char *)msg, *failmsg;
 	struct out_req *req;
+	const char *cmdid_prefix;
 
 	incoming->peer = *peer;
 	incoming->id = idnum;
@@ -394,6 +415,25 @@ static void try_command(struct node_id *peer,
 		return;
 	}
 	rune = json_get_member(buf, toks, "rune");
+	filter = json_get_member(buf, toks, "filter");
+	id = json_get_member(buf, toks, "id");
+	if (!id) {
+		if (!deprecated_apis) {
+			commando_error(incoming, COMMANDO_ERROR_REMOTE,
+				       "missing id field");
+			return;
+		}
+		cmdid_prefix = NULL;
+		incoming->json_id = NULL;
+	} else {
+		cmdid_prefix = tal_fmt(tmpctx, "%.*s/",
+				       id->end - id->start,
+				       buf + id->start);
+		/* Includes quotes, if any! */
+		incoming->json_id = tal_strndup(incoming,
+						json_tok_full(buf, id),
+						json_tok_full_len(id));
+	}
 
 	failmsg = check_rune(tmpctx, incoming, peer, buf, method, params, rune);
 	if (failmsg) {
@@ -406,6 +446,7 @@ static void try_command(struct node_id *peer,
 	req = jsonrpc_request_whole_object_start(plugin, NULL,
 						 json_strdup(tmpctx, buf,
 							     method),
+						 cmdid_prefix,
 						 cmd_done, incoming);
 	if (params) {
 		size_t i;
@@ -435,6 +476,11 @@ static void try_command(struct node_id *peer,
 	} else {
 		json_object_start(req->js, "params");
 		json_object_end(req->js);
+	}
+	if (filter) {
+		json_add_jsonstr(req->js, "filter",
+				 json_tok_full(buf, filter),
+				 json_tok_full_len(filter));
 	}
 	tal_free(toks);
 	send_outreq(plugin, req);
@@ -495,7 +541,7 @@ static struct command_result *handle_reply(struct node_id *peer,
 {
 	struct commando *ocmd;
 	struct json_stream *res;
-	const jsmntok_t *toks, *result, *err;
+	const jsmntok_t *toks, *result, *err, *id;
 	const char *replystr;
 	size_t i;
 	const jsmntok_t *t;
@@ -526,6 +572,17 @@ static struct command_result *handle_reply(struct node_id *peer,
 		return command_fail(ocmd->cmd, COMMANDO_ERROR_LOCAL,
 				    "Reply was unparsable: '%.*s'",
 				    (int)tal_bytelen(ocmd->contents), replystr);
+
+	id = json_get_member(replystr, toks, "id");
+
+	/* Old commando didn't reply with id, but newer should get it right! */
+	if (id && !memeq(json_tok_full(replystr, id), json_tok_full_len(id),
+			 ocmd->json_id, strlen(ocmd->json_id))) {
+		plugin_log(plugin, LOG_BROKEN, "Commando reply with wrong id:"
+			   " I sent %s, they replied with %.*s!",
+			   ocmd->json_id,
+			   json_tok_full_len(id), json_tok_full(replystr, id));
+	}
 
 	err = json_get_member(replystr, toks, "error");
 	if (err) {
@@ -649,7 +706,7 @@ static struct command_result *json_commando(struct command *cmd,
 {
 	struct node_id *peer;
 	const char *method, *cparams;
-	const char *rune;
+	const char *rune, *filter;
 	struct commando	*ocmd;
 	struct outgoing *outgoing;
 	char *json;
@@ -660,6 +717,7 @@ static struct command_result *json_commando(struct command *cmd,
 		   p_req("method", param_string, &method),
 		   p_opt("params", param_string, &cparams),
 		   p_opt("rune", param_string, &rune),
+		   p_opt("filter", param_string, &filter),
 		   NULL))
 		return command_param_failed();
 
@@ -667,17 +725,21 @@ static struct command_result *json_commando(struct command *cmd,
 	ocmd->cmd = cmd;
 	ocmd->peer = *peer;
 	ocmd->contents = tal_arr(ocmd, u8, 0);
+	ocmd->json_id = tal_strdup(ocmd, cmd->id);
 	do {
 		ocmd->id = pseudorand_u64();
 	} while (find_commando(outgoing_commands, NULL, &ocmd->id));
 	tal_arr_expand(&outgoing_commands, ocmd);
 	tal_add_destructor2(ocmd, destroy_commando, &outgoing_commands);
 
+	/* We pass through their JSON id untouched. */
 	json = tal_fmt(tmpctx,
-		       "{\"method\":\"%s\",\"params\":%s", method,
-		       cparams ? cparams : "{}");
+		       "{\"method\":\"%s\",\"id\":%s,\"params\":%s", method,
+		       ocmd->json_id, cparams ? cparams : "{}");
 	if (rune)
 		tal_append_fmt(&json, ",\"rune\":\"%s\"", rune);
+	if (filter)
+		tal_append_fmt(&json, ",\"filter\":%s", filter);
 	tal_append_fmt(&json, "}");
 
 	outgoing = tal(cmd, struct outgoing);
@@ -913,10 +975,11 @@ static struct command_result *json_commando_rune(struct command *cmd,
 #if DEVELOPER
 static void memleak_mark_globals(struct plugin *p, struct htable *memtable)
 {
+	memleak_scan_obj(memtable, usage_table);
 	memleak_scan_obj(memtable, outgoing_commands);
 	memleak_scan_obj(memtable, incoming_commands);
 	memleak_scan_obj(memtable, master_rune);
-	memleak_scan_htable(memtable, &usage_table.raw);
+	memleak_scan_htable(memtable, &usage_table->raw);
 	if (rune_counter)
 		memleak_scan_obj(memtable, rune_counter);
 }
@@ -929,7 +992,8 @@ static const char *init(struct plugin *p,
 
 	outgoing_commands = tal_arr(p, struct commando *, 0);
 	incoming_commands = tal_arr(p, struct commando *, 0);
-	usage_table_init(&usage_table);
+	usage_table = tal(p, struct usage_table);
+	usage_table_init(usage_table);
 	plugin = p;
 #if DEVELOPER
 	plugin_set_memleak_handler(p, memleak_mark_globals);

@@ -34,7 +34,7 @@ struct bolt11 *bolt11_decode_nosig(const tal_t *ctx UNNEEDED, const char *str UN
 				   const char *description UNNEEDED,
 				   const struct chainparams *must_be_chain UNNEEDED,
 				   struct sha256 *hash UNNEEDED,
-				   u5 **sig UNNEEDED,
+				   const u5 **sig UNNEEDED,
 				   bool *have_n UNNEEDED,
 				   char **fail UNNEEDED)
 { fprintf(stderr, "bolt11_decode_nosig called!\n"); abort(); }
@@ -97,8 +97,7 @@ u32 channel_last_funding_feerate(const struct channel *channel UNNEEDED)
 /* Generated stub for channel_set_last_tx */
 void channel_set_last_tx(struct channel *channel UNNEEDED,
 			 struct bitcoin_tx *tx UNNEEDED,
-			 const struct bitcoin_signature *sig UNNEEDED,
-			 enum wallet_tx_type type UNNEEDED)
+			 const struct bitcoin_signature *sig UNNEEDED)
 { fprintf(stderr, "channel_set_last_tx called!\n"); abort(); }
 /* Generated stub for channel_state_name */
 const char *channel_state_name(const struct channel *channel UNNEEDED)
@@ -255,6 +254,12 @@ bool fromwire_dualopend_dev_memleak_reply(const void *p UNNEEDED, bool *leak UNN
 /* Generated stub for fromwire_hsmd_sign_bolt12_reply */
 bool fromwire_hsmd_sign_bolt12_reply(const void *p UNNEEDED, struct bip340sig *sig UNNEEDED)
 { fprintf(stderr, "fromwire_hsmd_sign_bolt12_reply called!\n"); abort(); }
+/* Generated stub for fromwire_hsmd_preapprove_invoice_reply */
+bool fromwire_hsmd_preapprove_invoice_reply(const void *p UNNEEDED, bool *approved UNNEEDED)
+{ fprintf(stderr, "fromwire_hsmd_preapprove_invoice_reply called!\n"); abort(); }
+/* Generated stub for fromwire_hsmd_preapprove_keysend_reply */
+bool fromwire_hsmd_preapprove_keysend_reply(const void *p UNNEEDED, bool *approved UNNEEDED)
+{ fprintf(stderr, "fromwire_hsmd_preapprove_keysend_reply called!\n"); abort(); }
 /* Generated stub for fromwire_hsmd_sign_commitment_tx_reply */
 bool fromwire_hsmd_sign_commitment_tx_reply(const void *p UNNEEDED, struct bitcoin_signature *sig UNNEEDED)
 { fprintf(stderr, "fromwire_hsmd_sign_commitment_tx_reply called!\n"); abort(); }
@@ -445,11 +450,15 @@ void json_add_u64(struct json_stream *result UNNEEDED, const char *fieldname UNN
 { fprintf(stderr, "json_add_u64 called!\n"); abort(); }
 /* Generated stub for json_add_uncommitted_channel */
 void json_add_uncommitted_channel(struct json_stream *response UNNEEDED,
-				  const struct uncommitted_channel *uc UNNEEDED)
+				  const struct uncommitted_channel *uc UNNEEDED,
+				  /* Only set for listpeerchannels */
+				  const struct peer *peer UNNEEDED)
 { fprintf(stderr, "json_add_uncommitted_channel called!\n"); abort(); }
 /* Generated stub for json_add_unsaved_channel */
 void json_add_unsaved_channel(struct json_stream *response UNNEEDED,
-			      const struct channel *channel UNNEEDED)
+			      const struct channel *channel UNNEEDED,
+			      /* Only set for listpeerchannels */
+			      const struct peer *peer UNNEEDED)
 { fprintf(stderr, "json_add_unsaved_channel called!\n"); abort(); }
 /* Generated stub for json_array_end */
 void json_array_end(struct json_stream *js UNNEEDED)
@@ -773,6 +782,12 @@ u8 *towire_gossipd_discovered_ip(const tal_t *ctx UNNEEDED, const struct wireadd
 /* Generated stub for towire_hsmd_sign_bolt12 */
 u8 *towire_hsmd_sign_bolt12(const tal_t *ctx UNNEEDED, const wirestring *messagename UNNEEDED, const wirestring *fieldname UNNEEDED, const struct sha256 *merkleroot UNNEEDED, const u8 *publictweak UNNEEDED)
 { fprintf(stderr, "towire_hsmd_sign_bolt12 called!\n"); abort(); }
+/* Generated stub for towire_hsmd_preapprove_invoice */
+u8 *towire_hsmd_preapprove_invoice(const tal_t *ctx UNNEEDED, const wirestring *invstring UNNEEDED)
+{ fprintf(stderr, "towire_hsmd_preapprove_invoice called!\n"); abort(); }
+/* Generated stub for towire_hsmd_preapprove_keysend */
+u8 *towire_hsmd_preapprove_keysend(const tal_t *ctx UNNEEDED, const struct node_id *destination UNNEEDED, const struct sha256 *payment_hash UNNEEDED, struct amount_msat amount UNNEEDED)
+{ fprintf(stderr, "towire_hsmd_preapprove_keysend called!\n"); abort(); }
 /* Generated stub for towire_hsmd_sign_commitment_tx */
 u8 *towire_hsmd_sign_commitment_tx(const tal_t *ctx UNNEEDED, const struct node_id *peer_id UNNEEDED, u64 channel_dbid UNNEEDED, const struct bitcoin_tx *tx UNNEEDED, const struct pubkey *remote_funding_key UNNEEDED, u64 commit_num UNNEEDED)
 { fprintf(stderr, "towire_hsmd_sign_commitment_tx called!\n"); abort(); }
@@ -930,11 +945,6 @@ struct amount_msat wallet_total_forward_fees(struct wallet *w UNNEEDED)
 void wallet_transaction_add(struct wallet *w UNNEEDED, const struct wally_tx *tx UNNEEDED,
 			    const u32 blockheight UNNEEDED, const u32 txindex UNNEEDED)
 { fprintf(stderr, "wallet_transaction_add called!\n"); abort(); }
-/* Generated stub for wallet_transaction_annotate */
-void wallet_transaction_annotate(struct wallet *w UNNEEDED,
-				 const struct bitcoin_txid *txid UNNEEDED,
-				 enum wallet_tx_type type UNNEEDED, u64 channel_id UNNEEDED)
-{ fprintf(stderr, "wallet_transaction_annotate called!\n"); abort(); }
 /* Generated stub for wallet_transaction_locate */
 struct txlocator *wallet_transaction_locate(const tal_t *ctx UNNEEDED, struct wallet *w UNNEEDED,
 					    const struct bitcoin_txid *txid UNNEEDED)
@@ -995,7 +1005,7 @@ static struct channel *add_peer(struct lightningd *ld, int n,
 
 	memset(&peer->id, n, sizeof(peer->id));
 	list_head_init(&peer->channels);
-	list_add_tail(&ld->peers, &peer->list);
+	peer_node_id_map_add(ld->peers, peer);
 	peer->ld = ld;
 
 	c->state = state;
@@ -1032,8 +1042,10 @@ int main(int argc, char *argv[])
 	common_setup(argv[0]);
 	ld = tal(tmpctx, struct lightningd);
 
-	list_head_init(&ld->peers);
-	htlc_in_map_init(&ld->htlcs_in);
+	ld->peers = tal(ld, struct peer_node_id_map);
+	peer_node_id_map_init(ld->peers);
+	ld->htlcs_in = tal(ld, struct htlc_in_map);
+	htlc_in_map_init(ld->htlcs_in);
 	chainparams = chainparams_for_network("regtest");
 
 	candidates = tal_arr(tmpctx, struct routehint_candidate, 0);

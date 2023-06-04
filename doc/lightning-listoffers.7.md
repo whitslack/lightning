@@ -74,11 +74,11 @@ Rusty Russell <<rusty@rustcorp.com.au>> is mainly responsible.
 SEE ALSO
 --------
 
-lightning-offer(7), lightning-offerout(7), lightning-listoffers(7).
+lightning-offer(7), lightning-listoffers(7).
 
 RESOURCES
 ---------
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:088d6fef8790bc9151b07f9b974568ce612c7fea8f52fdcaaf52b32e4ef8d5f2)
+[comment]: # ( SHA256STAMP:e3e1446c2c1bf74852663c1d417bb386908c47898b05e958f153f806e73a9b4c)

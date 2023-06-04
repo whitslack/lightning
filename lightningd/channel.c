@@ -35,9 +35,9 @@ struct htlc_out *channel_has_htlc_out(struct channel *channel)
 	struct htlc_out *hout;
 	struct lightningd *ld = channel->peer->ld;
 
-	for (hout = htlc_out_map_first(&ld->htlcs_out, &outi);
+	for (hout = htlc_out_map_first(ld->htlcs_out, &outi);
 	     hout;
-	     hout = htlc_out_map_next(&ld->htlcs_out, &outi)) {
+	     hout = htlc_out_map_next(ld->htlcs_out, &outi)) {
 		if (hout->key.channel == channel)
 			return hout;
 	}
@@ -51,9 +51,9 @@ struct htlc_in *channel_has_htlc_in(struct channel *channel)
 	struct htlc_in *hin;
 	struct lightningd *ld = channel->peer->ld;
 
-	for (hin = htlc_in_map_first(&ld->htlcs_in, &ini);
+	for (hin = htlc_in_map_first(ld->htlcs_in, &ini);
 	     hin;
-	     hin = htlc_in_map_next(&ld->htlcs_in, &ini)) {
+	     hin = htlc_in_map_next(ld->htlcs_in, &ini)) {
 		if (hin->key.channel == channel)
 			return hin;
 	}
@@ -239,7 +239,6 @@ struct channel *new_unsaved_channel(struct peer *peer,
 	channel->shutdown_scriptpubkey[REMOTE] = NULL;
 	channel->last_was_revoke = false;
 	channel->last_sent_commit = NULL;
-	channel->last_tx_type = TX_UNKNOWN;
 
 	channel->feerate_base = feerate_base;
 	channel->feerate_ppm = feerate_ppm;
@@ -452,7 +451,6 @@ struct channel *new_channel(struct peer *peer, u64 dbid,
         channel->last_tx = tal_steal(channel, last_tx);
 	if (channel->last_tx) {
 		channel->last_tx->chainparams = chainparams;
-		channel->last_tx_type = TX_UNKNOWN;
 	}
 	channel->last_sig = *last_sig;
 	channel->last_htlc_sigs = tal_steal(channel, last_htlc_sigs);
@@ -607,7 +605,12 @@ struct channel *any_channel_by_scid(struct lightningd *ld,
 {
 	struct peer *p;
 	struct channel *chan;
-	list_for_each(&ld->peers, p, list) {
+	struct peer_node_id_map_iter it;
+
+	/* FIXME: Support lookup by scid directly! */
+	for (p = peer_node_id_map_first(ld->peers, &it);
+	     p;
+	     p = peer_node_id_map_next(ld->peers, &it)) {
 		list_for_each(&p->channels, chan, list) {
 			/* BOLT-channel-type #2:
 			 * - MUST always recognize the `alias` as a
@@ -640,7 +643,12 @@ struct channel *channel_by_dbid(struct lightningd *ld, const u64 dbid)
 {
 	struct peer *p;
 	struct channel *chan;
-	list_for_each(&ld->peers, p, list) {
+	struct peer_node_id_map_iter it;
+
+	/* FIXME: Support lookup by id directly! */
+	for (p = peer_node_id_map_first(ld->peers, &it);
+	     p;
+	     p = peer_node_id_map_next(ld->peers, &it)) {
 		list_for_each(&p->channels, chan, list) {
 			if (chan->dbid == dbid)
 				return chan;
@@ -654,8 +662,12 @@ struct channel *channel_by_cid(struct lightningd *ld,
 {
 	struct peer *p;
 	struct channel *channel;
+	struct peer_node_id_map_iter it;
 
-	list_for_each(&ld->peers, p, list) {
+	/* FIXME: Support lookup by cid directly! */
+	for (p = peer_node_id_map_first(ld->peers, &it);
+	     p;
+	     p = peer_node_id_map_next(ld->peers, &it)) {
 		if (p->uncommitted_channel) {
 			/* We can't use this method for old, uncommitted
 			 * channels; there's no "channel" struct here! */
@@ -709,14 +721,12 @@ struct channel *find_channel_by_alias(const struct peer *peer,
 
 void channel_set_last_tx(struct channel *channel,
 			 struct bitcoin_tx *tx,
-			 const struct bitcoin_signature *sig,
-			 enum wallet_tx_type txtypes)
+			 const struct bitcoin_signature *sig)
 {
 	assert(tx->chainparams);
 	channel->last_sig = *sig;
 	tal_free(channel->last_tx);
 	channel->last_tx = tal_steal(channel, tx);
-	channel->last_tx_type = txtypes;
 }
 
 void channel_set_state(struct channel *channel,

@@ -680,7 +680,7 @@ def test_openchannel_hook(node_factory, bitcoind):
     # Close it.
     txid = l1.rpc.close(l2.info['id'])['txid']
     bitcoind.generate_block(1, txid)
-    wait_for(lambda: [c['state'] for c in only_one(l1.rpc.listpeers(l2.info['id'])['peers'])['channels']] == ['ONCHAIN'])
+    wait_for(lambda: [c['state'] for c in l1.rpc.listpeerchannels(l2.info['id'])['channels']] == ['ONCHAIN'])
 
     # Odd amount: fails
     l1.connect(l2)
@@ -773,11 +773,11 @@ def test_channel_state_changed_bilateral(node_factory, bitcoind):
         return event
 
     # check channel 'opener' and 'closer' within this testcase ...
-    assert(l1.rpc.listpeers()['peers'][0]['channels'][0]['opener'] == 'local')
-    assert(l2.rpc.listpeers()['peers'][0]['channels'][0]['opener'] == 'remote')
+    assert(l1.rpc.listpeerchannels()['channels'][0]['opener'] == 'local')
+    assert(l2.rpc.listpeerchannels()['channels'][0]['opener'] == 'remote')
     # the 'closer' should be missing initially
-    assert 'closer' not in l1.rpc.listpeers()['peers'][0]['channels'][0]
-    assert 'closer' not in l2.rpc.listpeers()['peers'][0]['channels'][0]
+    assert 'closer' not in l1.rpc.listpeerchannels()['channels'][0]
+    assert 'closer' not in l2.rpc.listpeerchannels()['channels'][0]
 
     event1 = wait_for_event(l1)
     event2 = wait_for_event(l2)
@@ -841,8 +841,8 @@ def test_channel_state_changed_bilateral(node_factory, bitcoind):
     assert(event2['message'] == "Peer closes channel")
 
     # 'closer' should now be set accordingly ...
-    assert(l1.rpc.listpeers()['peers'][0]['channels'][0]['closer'] == 'local')
-    assert(l2.rpc.listpeers()['peers'][0]['channels'][0]['closer'] == 'remote')
+    assert(l1.rpc.listpeerchannels()['channels'][0]['closer'] == 'local')
+    assert(l2.rpc.listpeerchannels()['channels'][0]['closer'] == 'remote')
 
     event1 = wait_for_event(l1)
     assert(event1['old_state'] == "CHANNELD_SHUTTING_DOWN")
@@ -959,7 +959,7 @@ def test_channel_state_changed_unilateral(node_factory, bitcoind):
     l1.restart()
     wait_for(lambda: len(l1.rpc.listpeers()['peers']) == 1)
     # check 'closer' on l2 while the peer is not yet forgotten
-    assert(l2.rpc.listpeers()['peers'][0]['channels'][0]['closer'] == 'local')
+    assert(l2.rpc.listpeerchannels()['channels'][0]['closer'] == 'local')
     if EXPERIMENTAL_DUAL_FUND:
         l1.daemon.wait_for_log(r'Peer has reconnected, state')
         l2.daemon.wait_for_log(r'Telling connectd to send error')
@@ -968,7 +968,7 @@ def test_channel_state_changed_unilateral(node_factory, bitcoind):
     # FIXME: l2 should re-xmit shutdown, but it doesn't until it's mined :(
     event1 = wait_for_event(l1)
     # Doesn't have closer, since it blames the "protocol"?
-    assert 'closer' not in l1.rpc.listpeers()['peers'][0]['channels'][0]
+    assert 'closer' not in l1.rpc.listpeerchannels()['channels'][0]
     assert(event1['old_state'] == "CHANNELD_NORMAL")
     assert(event1['new_state'] == "AWAITING_UNILATERAL")
     assert(event1['cause'] == "protocol")
@@ -990,7 +990,7 @@ def test_channel_state_changed_unilateral(node_factory, bitcoind):
 
     # Check 'closer' on l1 while the peer is not yet forgotten
     event1 = wait_for_event(l1)
-    assert(l1.rpc.listpeers()['peers'][0]['channels'][0]['closer'] == 'remote')
+    assert(l1.rpc.listpeerchannels()['channels'][0]['closer'] == 'remote')
 
     assert(event1['old_state'] == "AWAITING_UNILATERAL")
     assert(event1['new_state'] == "FUNDING_SPEND_SEEN")
@@ -1014,7 +1014,7 @@ def test_channel_state_change_history(node_factory, bitcoind):
     scid = l1.get_channel_scid(l2)
     l1.rpc.close(scid)
 
-    history = l1.rpc.listpeers()['peers'][0]['channels'][0]['state_changes']
+    history = l1.rpc.listpeerchannels()['channels'][0]['state_changes']
     if l1.config('experimental-dual-fund'):
         assert(history[0]['cause'] == "user")
         assert(history[0]['old_state'] == "DUALOPEND_OPEN_INIT")
@@ -1121,8 +1121,8 @@ def test_htlc_accepted_hook_direct_restart(node_factory, executor):
 
     # Check that the status mentions the HTLC being held
     l2.rpc.listpeers()
-    peers = l2.rpc.listpeers()['peers']
-    htlc_status = peers[0]['channels'][0]['htlcs'][0].get('status', None)
+    channel = only_one(l2.rpc.listpeerchannels()['channels'])
+    htlc_status = channel['htlcs'][0].get('status', None)
     assert htlc_status == "Waiting for the htlc_accepted hook of plugin hold_htlcs.py"
 
     needle = l2.daemon.logsearch_start
@@ -1535,7 +1535,7 @@ def test_libplugin(node_factory):
     # Test hooks and notifications (add plugin, so we can test hook id)
     l2 = node_factory.get_node(options={"plugin": plugin, 'log-level': 'io'})
     l2.connect(l1)
-    l2.daemon.wait_for_log(r": {}:connect#[0-9]*/cln:peer_connected#[0-9]*\[OUT\]".format(myname))
+    l2.daemon.wait_for_log(r': "{}:connect#[0-9]*/cln:peer_connected#[0-9]*"\[OUT\]'.format(myname))
 
     l1.daemon.wait_for_log("{} peer_connected".format(l2.info["id"]))
     l1.daemon.wait_for_log("{} connected".format(l2.info["id"]))
@@ -1888,7 +1888,7 @@ def test_watchtower(node_factory, bitcoind, directory, chainparams):
         2,
         opts=[{'may_fail': True, 'allow_broken_log': True}, {'plugin': p}]
     )
-    channel_id = l1.rpc.listpeers()['peers'][0]['channels'][0]['channel_id']
+    channel_id = l1.rpc.listpeerchannels()['channels'][0]['channel_id']
 
     # Force a new commitment
     l1.rpc.pay(l2.rpc.invoice(25000000, 'lbl1', 'desc1')['bolt11'])
@@ -2047,7 +2047,7 @@ def test_coin_movement_notices(node_factory, bitcoind, chainparams):
 
     # restart to test index
     l2.restart()
-    wait_for(lambda: all(p['channels'][0]['state'] == 'CHANNELD_NORMAL' for p in l2.rpc.listpeers()['peers']))
+    wait_for(lambda: all(c['state'] == 'CHANNELD_NORMAL' for c in l2.rpc.listpeerchannels()["channels"]))
 
     # close the channels down
     chan1 = l2.get_channel_scid(l1)
@@ -2217,6 +2217,7 @@ def test_htlc_accepted_hook_crash(node_factory, executor):
         f.result(10)
 
 
+@pytest.mark.skip("With newer GCC versions reports a '*** buffer overflow detected ***: terminated'")
 def test_notify(node_factory):
     """Test that notifications from plugins get ignored"""
     plugins = [os.path.join(os.getcwd(), 'tests/plugins/notify.py'),
@@ -2408,15 +2409,15 @@ def test_htlc_accepted_hook_fwdto(node_factory):
 
     # Add some balance
     l1.rpc.pay(l2.rpc.invoice(10**9 // 2, 'balance', '')['bolt11'])
-    wait_for(lambda: only_one(only_one(l1.rpc.listpeers()['peers'])['channels'])['htlcs'] == [])
+    wait_for(lambda: only_one(l1.rpc.listpeerchannels()['channels'])['htlcs'] == [])
 
     # make it forward back down same channel.
-    l2.rpc.setfwdto(only_one(only_one(l1.rpc.listpeers()['peers'])['channels'])['channel_id'])
+    l2.rpc.setfwdto(only_one(l1.rpc.listpeerchannels()['channels'])['channel_id'])
     inv = l3.rpc.invoice(42, 'fwdto', '')['bolt11']
     with pytest.raises(RpcError, match="WIRE_INVALID_ONION_HMAC"):
         l1.rpc.pay(inv)
 
-    assert l2.rpc.listforwards()['forwards'][0]['out_channel'] == only_one(only_one(l1.rpc.listpeers()['peers'])['channels'])['short_channel_id']
+    assert l2.rpc.listforwards()['forwards'][0]['out_channel'] == only_one(l1.rpc.listpeerchannels()['channels'])['short_channel_id']
 
 
 def test_dynamic_args(node_factory):
@@ -2604,7 +2605,8 @@ def test_plugin_shutdown(node_factory):
 
 
 def test_commando(node_factory, executor):
-    l1, l2 = node_factory.line_graph(2, fundchannel=False)
+    l1, l2 = node_factory.line_graph(2, fundchannel=False,
+                                     opts={'log-level': 'io'})
 
     # Nothing works until we've issued a rune.
     fut = executor.submit(l2.rpc.call, method='commando',
@@ -2630,6 +2632,11 @@ def test_commando(node_factory, executor):
     assert len(res['peers']) == 1
     assert res['peers'][0]['id'] == l2.info['id']
 
+    # Check JSON id is as expected (unfortunately pytest does not use a reliable name
+    # for itself: with -k it calls itself `-c` here, instead of `pytest`).
+    l2.daemon.wait_for_log(r'plugin-commando: "[^:/]*:commando#[0-9]*/cln:commando#[0-9]*"\[OUT\]')
+    l1.daemon.wait_for_log(r'jsonrpc#[0-9]*: "[^:/]*:commando#[0-9]*/cln:commando#[0-9]*/commando:listpeers#[0-9]*"\[IN\]')
+
     res = l2.rpc.call(method='commando',
                       payload={'peer_id': l1.info['id'],
                                'rune': rune,
@@ -2637,6 +2644,14 @@ def test_commando(node_factory, executor):
                                'params': {'id': l2.info['id']}})
     assert len(res['peers']) == 1
     assert res['peers'][0]['id'] == l2.info['id']
+
+    # Filter test
+    res = l2.rpc.call(method='commando',
+                      payload={'peer_id': l1.info['id'],
+                               'rune': rune,
+                               'method': 'listpeers',
+                               'filter': {'peers': [{'id': True}]}})
+    assert res == {'peers': [{'id': l2.info['id']}]}
 
     with pytest.raises(RpcError, match='missing required parameter'):
         l2.rpc.call(method='commando',

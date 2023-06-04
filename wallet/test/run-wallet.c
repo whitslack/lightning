@@ -403,11 +403,15 @@ void json_add_u64(struct json_stream *result UNNEEDED, const char *fieldname UNN
 { fprintf(stderr, "json_add_u64 called!\n"); abort(); }
 /* Generated stub for json_add_uncommitted_channel */
 void json_add_uncommitted_channel(struct json_stream *response UNNEEDED,
-				  const struct uncommitted_channel *uc UNNEEDED)
+				  const struct uncommitted_channel *uc UNNEEDED,
+				  /* Only set for listpeerchannels */
+				  const struct peer *peer UNNEEDED)
 { fprintf(stderr, "json_add_uncommitted_channel called!\n"); abort(); }
 /* Generated stub for json_add_unsaved_channel */
 void json_add_unsaved_channel(struct json_stream *response UNNEEDED,
-			      const struct channel *channel UNNEEDED)
+			      const struct channel *channel UNNEEDED,
+			      /* Only set for listpeerchannels */
+			      const struct peer *peer UNNEEDED)
 { fprintf(stderr, "json_add_unsaved_channel called!\n"); abort(); }
 /* Generated stub for json_array_end */
 void json_array_end(struct json_stream *js UNNEEDED)
@@ -1361,11 +1365,12 @@ static struct channel *wallet_channel_load(struct wallet *w, const u64 dbid)
 {
 	struct peer *peer;
 	struct channel *channel;
+	struct peer_node_id_map_iter it;
 
 	/* We expect only one peer, but reuse same code */
 	if (!wallet_init_channels(w))
 		return NULL;
-	peer = list_top(&w->ld->peers, struct peer, list);
+	peer = peer_node_id_map_first(w->ld->peers, &it);
 	CHECK(peer);
 
 	/* We load lots of identical dbid channels: use last one */
@@ -1845,8 +1850,6 @@ static bool test_htlc_crud(struct lightningd *ld, const tal_t *ctx)
 	 * twisted */
 	tal_free(hin);
 	tal_free(hout);
-	htlc_in_map_clear(htlcs_in);
-	htlc_out_map_clear(htlcs_out);
 
 	return true;
 }
@@ -1924,12 +1927,17 @@ int main(int argc, const char *argv[])
 	ld->config = test_config;
 
 	/* Only elements in ld we should access */
-	list_head_init(&ld->peers);
+	ld->peers = tal(ld, struct peer_node_id_map);
+	peer_node_id_map_init(ld->peers);
+	ld->peers_by_dbid = tal(ld, struct peer_dbid_map);
+	peer_dbid_map_init(ld->peers_by_dbid);
 	ld->rr_counter = 0;
 	node_id_from_hexstr("02a1633cafcc01ebfb6d78e39f687a1f0995c62fc95f51ead10a02ee0be551b5dc", 66, &ld->id);
 	/* Accessed in peer destructor sanity check */
-	htlc_in_map_init(&ld->htlcs_in);
-	htlc_out_map_init(&ld->htlcs_out);
+	ld->htlcs_in = tal(ld, struct htlc_in_map);
+	htlc_in_map_init(ld->htlcs_in);
+	ld->htlcs_out = tal(ld, struct htlc_out_map);
+	htlc_out_map_init(ld->htlcs_out);
 
 	/* We do a runtime test here, so we still check compile! */
 	if (HAVE_SQLITE3) {

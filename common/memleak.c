@@ -107,6 +107,10 @@ static void children_into_htable(struct htable *memtable, const tal_t *p)
 			if (streq(name, "tmpctx"))
 				continue;
 		}
+		/* Don't add (resizing!) memtable table! */
+		if (i == memtable->table)
+			continue;
+
 		htable_add(memtable, hash_ptr(i, NULL), i);
 		children_into_htable(memtable, i);
 	}
@@ -315,7 +319,6 @@ struct htable *memleak_start(const tal_t *ctx)
 		call_memleak_helpers(memtable, NULL);
 	}
 
-	tal_add_destructor(memtable, htable_clear);
 	return memtable;
 }
 

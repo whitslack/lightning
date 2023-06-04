@@ -109,14 +109,15 @@ def calc_lease_fee(amt, feerate, rates):
     return fee
 
 
+def _dictify(balances):
+    return {b['account_id']: Millisatoshi(b['balance_msat']) for b in balances['accounts']}
+
+
 def check_balance_snaps(n, expected_bals):
     snaps = n.rpc.listsnapshots()['balance_snapshots']
     for snap, exp in zip(snaps, expected_bals):
         assert snap['blockheight'] == exp['blockheight']
-        for acct, exp_acct in zip(snap['accounts'], exp['accounts']):
-            # FIXME: also check 'account_id's (these change every run)
-            for item in ['balance_msat']:
-                assert Millisatoshi(acct[item]) == Millisatoshi(exp_acct[item])
+        assert _dictify(snap) == _dictify(exp)
 
 
 def check_coin_moves(n, account_id, expected_moves, chainparams):
@@ -409,11 +410,11 @@ def check_utxos_channel(n, chans, expected, exp_tag_list=None, filter_channel=No
 
 
 def first_channel_id(n1, n2):
-    return only_one(only_one(n1.rpc.listpeers(n2.info['id'])['peers'])['channels'])['channel_id']
+    return only_one(n1.rpc.listpeerchannels(n2.info['id'])['channels'])['channel_id']
 
 
 def first_scid(n1, n2):
-    return only_one(only_one(n1.rpc.listpeers(n2.info['id'])['peers'])['channels'])['short_channel_id']
+    return only_one(n1.rpc.listpeerchannels(n2.info['id'])['channels'])['short_channel_id']
 
 
 def basic_fee(feerate):

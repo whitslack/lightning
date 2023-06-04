@@ -27,9 +27,9 @@ static void onchaind_tell_fulfill(struct channel *channel)
 	u8 *msg;
 	struct lightningd *ld = channel->peer->ld;
 
-	for (hin = htlc_in_map_first(&ld->htlcs_in, &ini);
+	for (hin = htlc_in_map_first(ld->htlcs_in, &ini);
 	     hin;
-	     hin = htlc_in_map_next(&ld->htlcs_in, &ini)) {
+	     hin = htlc_in_map_next(ld->htlcs_in, &ini)) {
 		if (hin->key.channel != channel)
 			continue;
 
@@ -76,7 +76,7 @@ static bool tell_if_missing(const struct channel *channel,
 		return false;
 
 	/* Might not be a current HTLC. */
-	hout = find_htlc_out(&channel->peer->ld->htlcs_out, channel, stub->id);
+	hout = find_htlc_out(channel->peer->ld->htlcs_out, channel, stub->id);
 	if (!hout)
 		return false;
 
@@ -329,20 +329,16 @@ static void handle_onchain_broadcast_tx(struct channel *channel,
 {
 	struct bitcoin_tx *tx;
 	struct wallet *w = channel->peer->ld->wallet;
-	struct bitcoin_txid txid;
-	enum wallet_tx_type type;
 	bool is_rbf;
 
-	if (!fromwire_onchaind_broadcast_tx(msg, msg, &tx, &type, &is_rbf)) {
+	if (!fromwire_onchaind_broadcast_tx(msg, msg, &tx, &is_rbf)) {
 		channel_internal_error(channel, "Invalid onchain_broadcast_tx");
 		return;
 	}
 
 	tx->chainparams = chainparams;
 
-	bitcoin_txid(tx, &txid);
 	wallet_transaction_add(w, tx->wtx, 0, 0);
-	wallet_transaction_annotate(w, &txid, type, channel->dbid);
 
 	/* We don't really care if it fails, we'll respond via watch. */
 	/* If the onchaind signals this as RBF-able, then we also

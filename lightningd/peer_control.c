@@ -71,7 +71,9 @@
 
 static void destroy_peer(struct peer *peer)
 {
-	list_del_from(&peer->ld->peers, &peer->list);
+	peer_node_id_map_del(peer->ld->peers, peer);
+	if (peer->dbid)
+		peer_dbid_map_del(peer->ld->peers_by_dbid, peer);
 }
 
 static void peer_update_features(struct peer *peer,
@@ -79,6 +81,14 @@ static void peer_update_features(struct peer *peer,
 {
 	tal_free(peer->their_features);
 	peer->their_features = tal_dup_talarr(peer, u8, their_features);
+}
+
+void peer_set_dbid(struct peer *peer, u64 dbid)
+{
+	assert(!peer->dbid);
+	assert(dbid);
+	peer->dbid = dbid;
+	peer_dbid_map_add(peer->ld->peers_by_dbid, peer);
 }
 
 struct peer *new_peer(struct lightningd *ld, u64 dbid,
@@ -106,7 +116,9 @@ struct peer *new_peer(struct lightningd *ld, u64 dbid,
 	peer->ignore_htlcs = false;
 #endif
 
-	list_add_tail(&ld->peers, &peer->list);
+	peer_node_id_map_add(ld->peers, peer);
+	if (dbid)
+		peer_dbid_map_add(ld->peers_by_dbid, peer);
 	tal_add_destructor(peer, destroy_peer);
 	return peer;
 }
@@ -131,6 +143,7 @@ void maybe_delete_peer(struct peer *peer)
 		/* This isn't sufficient to keep it in db! */
 		if (peer->dbid != 0) {
 			wallet_peer_delete(peer->ld->wallet, peer->dbid);
+			peer_dbid_map_del(peer->ld->peers_by_dbid, peer);
 			peer->dbid = 0;
 		}
 		return;
@@ -177,22 +190,12 @@ static void peer_channels_cleanup(struct lightningd *ld,
 
 struct peer *find_peer_by_dbid(struct lightningd *ld, u64 dbid)
 {
-	struct peer *p;
-
-	list_for_each(&ld->peers, p, list)
-		if (p->dbid == dbid)
-			return p;
-	return NULL;
+	return peer_dbid_map_get(ld->peers_by_dbid, dbid);
 }
 
 struct peer *peer_by_id(struct lightningd *ld, const struct node_id *id)
 {
-	struct peer *p;
-
-	list_for_each(&ld->peers, p, list)
-		if (node_id_eq(&p->id, id))
-			return p;
-	return NULL;
+	return peer_node_id_map_get(ld->peers, id);
 }
 
 struct peer *peer_from_json(struct lightningd *ld,
@@ -280,9 +283,6 @@ static void sign_and_send_last(struct lightningd *ld,
 	sign_last_tx(channel, last_tx, last_sig);
 	bitcoin_txid(last_tx, &txid);
 	wallet_transaction_add(ld->wallet, last_tx->wtx, 0, 0);
-	wallet_transaction_annotate(ld->wallet, &txid,
-				    channel->last_tx_type,
-				    channel->dbid);
 
 	/* Keep broadcasting until we say stop (can fail due to dup,
 	 * if they beat us to the broadcast). */
@@ -333,8 +333,11 @@ void resend_closing_transactions(struct lightningd *ld)
 {
 	struct peer *peer;
 	struct channel *channel;
+	struct peer_node_id_map_iter it;
 
-	list_for_each(&ld->peers, peer, list) {
+	for (peer = peer_node_id_map_first(ld->peers, &it);
+	     peer;
+	     peer = peer_node_id_map_next(ld->peers, &it)) {
 		list_for_each(&peer->channels, channel, list) {
 			if (channel->state == CLOSINGD_COMPLETE)
 				drop_to_chain(ld, channel, true);
@@ -440,9 +443,9 @@ static void json_add_htlcs(struct lightningd *ld,
 
 	/* FIXME: Add more fields. */
 	json_array_start(response, "htlcs");
-	for (hin = htlc_in_map_first(&ld->htlcs_in, &ini);
+	for (hin = htlc_in_map_first(ld->htlcs_in, &ini);
 	     hin;
-	     hin = htlc_in_map_next(&ld->htlcs_in, &ini)) {
+	     hin = htlc_in_map_next(ld->htlcs_in, &ini)) {
 		if (hin->key.channel != channel)
 			continue;
 
@@ -464,9 +467,9 @@ static void json_add_htlcs(struct lightningd *ld,
 		json_object_end(response);
 	}
 
-	for (hout = htlc_out_map_first(&ld->htlcs_out, &outi);
+	for (hout = htlc_out_map_first(ld->htlcs_out, &outi);
 	     hout;
-	     hout = htlc_out_map_next(&ld->htlcs_out, &outi)) {
+	     hout = htlc_out_map_next(ld->htlcs_out, &outi)) {
 		if (hout->key.channel != channel)
 			continue;
 
@@ -528,18 +531,18 @@ static struct amount_sat commit_txfee(const struct channel *channel,
 			     option_anchor_outputs))
 		num_untrimmed_htlcs++;
 
-	for (hin = htlc_in_map_first(&ld->htlcs_in, &ini);
+	for (hin = htlc_in_map_first(ld->htlcs_in, &ini);
 	     hin;
-	     hin = htlc_in_map_next(&ld->htlcs_in, &ini)) {
+	     hin = htlc_in_map_next(ld->htlcs_in, &ini)) {
 		if (hin->key.channel != channel)
 			continue;
 		if (!htlc_is_trimmed(!side, hin->msat, feerate, dust_limit,
 				     side, option_anchor_outputs))
 			num_untrimmed_htlcs++;
 	}
-	for (hout = htlc_out_map_first(&ld->htlcs_out, &outi);
+	for (hout = htlc_out_map_first(ld->htlcs_out, &outi);
 	     hout;
-	     hout = htlc_out_map_next(&ld->htlcs_out, &outi)) {
+	     hout = htlc_out_map_next(ld->htlcs_out, &outi)) {
 		if (hout->key.channel != channel)
 			continue;
 		if (!htlc_is_trimmed(side, hout->msat, feerate, dust_limit,
@@ -583,9 +586,9 @@ static void subtract_offered_htlcs(const struct channel *channel,
 	struct htlc_out_map_iter outi;
 	struct lightningd *ld = channel->peer->ld;
 
-	for (hout = htlc_out_map_first(&ld->htlcs_out, &outi);
+	for (hout = htlc_out_map_first(ld->htlcs_out, &outi);
 	     hout;
-	     hout = htlc_out_map_next(&ld->htlcs_out, &outi)) {
+	     hout = htlc_out_map_next(ld->htlcs_out, &outi)) {
 		if (hout->key.channel != channel)
 			continue;
 		if (!amount_msat_sub(amount, *amount, hout->msat))
@@ -600,9 +603,9 @@ static void subtract_received_htlcs(const struct channel *channel,
 	struct htlc_in_map_iter ini;
 	struct lightningd *ld = channel->peer->ld;
 
-	for (hin = htlc_in_map_first(&ld->htlcs_in, &ini);
+	for (hin = htlc_in_map_first(ld->htlcs_in, &ini);
 	     hin;
-	     hin = htlc_in_map_next(&ld->htlcs_in, &ini)) {
+	     hin = htlc_in_map_next(ld->htlcs_in, &ini)) {
 		if (hin->key.channel != channel)
 			continue;
 		if (!amount_msat_sub(amount, *amount, hin->msat))
@@ -695,7 +698,9 @@ struct amount_msat channel_amount_receivable(const struct channel *channel)
 
 static void json_add_channel(struct lightningd *ld,
 			     struct json_stream *response, const char *key,
-			     const struct channel *channel)
+			     const struct channel *channel,
+			     /* Only set for listpeerchannels */
+			     const struct peer *peer)
 {
 	struct channel_stats channel_stats;
 	struct amount_msat funding_msat;
@@ -704,6 +709,10 @@ static void json_add_channel(struct lightningd *ld,
 	u32 feerate;
 
 	json_object_start(response, key);
+	if (peer) {
+		json_add_node_id(response, "peer_id", &peer->id);
+		json_add_bool(response, "peer_connected", peer->connected == PEER_CONNECTED);
+	}
 	json_add_string(response, "state", channel_state_name(channel));
 	if (channel->last_tx && !invalid_last_tx(channel->last_tx)) {
 		struct bitcoin_txid txid;
@@ -1293,16 +1302,10 @@ static void update_remote_addr(struct lightningd *ld,
 			       const struct wireaddr *remote_addr,
 			       const struct node_id peer_id)
 {
-	u16 public_port;
-
 	/* failsafe to prevent privacy leakage. */
-	if (ld->always_use_proxy || ld->config.disable_ip_discovery)
+	if (ld->always_use_proxy ||
+	    ld->config.ip_discovery == OPT_AUTOBOOL_FALSE)
 		return;
-
-	/* Peers will have likey reported our dynamic outbound TCP port.
-	 * Best guess is that we use default port for the selected network,
-	 * until we add a commandline switch to override this. */
-	public_port = chainparams_get_ln_port(chainparams);
 
 	switch (remote_addr->type) {
 	case ADDR_TYPE_IPV4:
@@ -1321,7 +1324,7 @@ static void update_remote_addr(struct lightningd *ld,
 		if (wireaddr_eq_without_port(ld->remote_addr_v4, remote_addr)) {
 			ld->discovered_ip_v4 = tal_dup(ld, struct wireaddr,
 						       ld->remote_addr_v4);
-			ld->discovered_ip_v4->port = public_port;
+			ld->discovered_ip_v4->port = ld->config.ip_discovery_port;
 			subd_send_msg(ld->gossip, towire_gossipd_discovered_ip(
 							  tmpctx,
 							  ld->discovered_ip_v4));
@@ -1344,7 +1347,7 @@ static void update_remote_addr(struct lightningd *ld,
 		if (wireaddr_eq_without_port(ld->remote_addr_v6, remote_addr)) {
 			ld->discovered_ip_v6 = tal_dup(ld, struct wireaddr,
 						       ld->remote_addr_v6);
-			ld->discovered_ip_v6->port = public_port;
+			ld->discovered_ip_v6->port = ld->config.ip_discovery_port;
 			subd_send_msg(ld->gossip, towire_gossipd_discovered_ip(
 							  tmpctx,
 							  ld->discovered_ip_v6));
@@ -1733,8 +1736,7 @@ static void update_channel_from_inflight(struct lightningd *ld,
 	psbt_copy = clone_psbt(channel, inflight->last_tx->psbt);
 	channel_set_last_tx(channel,
 			    bitcoin_tx_with_psbt(channel, psbt_copy),
-			    &inflight->last_sig,
-			    TX_CHANNEL_UNILATERAL);
+			    &inflight->last_sig);
 
 	/* Update the reserve */
 	channel_update_reserve(channel,
@@ -1935,16 +1937,18 @@ static void json_add_peer(struct lightningd *ld,
 		json_add_hex_talarr(response, "features", p->their_features);
 	}
 
-	json_array_start(response, "channels");
-	json_add_uncommitted_channel(response, p->uncommitted_channel);
+	if (deprecated_apis) {
+		json_array_start(response, "channels");
+		json_add_uncommitted_channel(response, p->uncommitted_channel, NULL);
 
-	list_for_each(&p->channels, channel, list) {
-		if (channel_unsaved(channel))
-			json_add_unsaved_channel(response, channel);
-		else
-			json_add_channel(ld, response, NULL, channel);
+		list_for_each(&p->channels, channel, list) {
+			if (channel_unsaved(channel))
+				json_add_unsaved_channel(response, channel, NULL);
+			else
+				json_add_channel(ld, response, NULL, channel, NULL);
+		}
+		json_array_end(response);
 	}
-	json_array_end(response);
 
 	if (ll)
 		json_add_log(response, ld->log_book, &p->id, *ll);
@@ -1974,8 +1978,13 @@ static struct command_result *json_listpeers(struct command *cmd,
 		if (peer)
 			json_add_peer(cmd->ld, response, peer, ll);
 	} else {
-		list_for_each(&cmd->ld->peers, peer, list)
+		struct peer_node_id_map_iter it;
+
+		for (peer = peer_node_id_map_first(cmd->ld->peers, &it);
+		     peer;
+		     peer = peer_node_id_map_next(cmd->ld->peers, &it)) {
 			json_add_peer(cmd->ld, response, peer, ll);
+		}
 	}
 	json_array_end(response);
 
@@ -2013,20 +2022,23 @@ static struct command_result *json_staticbackup(struct command *cmd,
 	struct json_stream *response;
 	struct peer *peer;
 	struct channel *channel;
+	struct peer_node_id_map_iter it;
 
 	if (!param(cmd, buffer, params, NULL))
-        return command_param_failed();
+		return command_param_failed();
 
 	response = json_stream_success(cmd);
 
 	json_array_start(response, "scb");
-
-	list_for_each(&cmd->ld->peers, peer, list)
+	for (peer = peer_node_id_map_first(cmd->ld->peers, &it);
+	     peer;
+	     peer = peer_node_id_map_next(cmd->ld->peers, &it)) {
 		list_for_each(&peer->channels, channel, list){
 			if (!channel->scb)
 				continue;
 			json_add_scb(cmd, NULL, response, channel);
 		}
+	}
 	json_array_end(response);
 
 	return command_success(cmd, response);
@@ -2041,6 +2053,65 @@ static const struct json_command staticbackup_command = {
 /* Comment added to satisfice AUTODATA */
 AUTODATA(json_command, &staticbackup_command);
 
+static void json_add_peerchannels(struct lightningd *ld,
+				  struct json_stream *response,
+				  const struct peer *peer)
+{
+	struct channel *channel;
+
+	json_add_uncommitted_channel(response, peer->uncommitted_channel, peer);
+	list_for_each(&peer->channels, channel, list) {
+		if (channel_unsaved(channel))
+			json_add_unsaved_channel(response, channel, peer);
+		else
+			json_add_channel(ld, response, NULL, channel, peer);
+	}
+}
+
+static struct command_result *json_listpeerchannels(struct command *cmd,
+						    const char *buffer,
+						    const jsmntok_t *obj UNNEEDED,
+						    const jsmntok_t *params)
+{
+	struct node_id *peer_id;
+	struct peer *peer;
+	struct json_stream *response;
+
+	/* FIME: filter by status */
+	if (!param(cmd, buffer, params,
+		   p_opt("id", param_node_id, &peer_id),
+		   NULL))
+		return command_param_failed();
+
+	response = json_stream_success(cmd);
+	json_array_start(response, "channels");
+
+	if (peer_id) {
+		peer = peer_by_id(cmd->ld, peer_id);
+		if (peer)
+			json_add_peerchannels(cmd->ld, response, peer);
+	} else {
+		struct peer_node_id_map_iter it;
+
+		for (peer = peer_node_id_map_first(cmd->ld->peers, &it);
+		     peer;
+		     peer = peer_node_id_map_next(cmd->ld->peers, &it)) {
+			json_add_peerchannels(cmd->ld, response, peer);
+		}
+	}
+
+	json_array_end(response);
+
+	return command_success(cmd, response);
+}
+
+static const struct json_command listpeerchannels_command = {
+	"listpeerchannels",
+	"network",
+	json_listpeerchannels,
+	"Show channels with direct peers."
+};
+AUTODATA(json_command, &listpeerchannels_command);
 
 struct command_result *
 command_find_channel(struct command *cmd,
@@ -2053,7 +2124,11 @@ command_find_channel(struct command *cmd,
 	struct peer *peer;
 
 	if (json_tok_channel_id(buffer, tok, &cid)) {
-		list_for_each(&ld->peers, peer, list) {
+		struct peer_node_id_map_iter it;
+
+		for (peer = peer_node_id_map_first(ld->peers, &it);
+		     peer;
+		     peer = peer_node_id_map_next(ld->peers, &it)) {
 			list_for_each(&peer->channels, (*channel), list) {
 				if (!channel_active(*channel))
 					continue;
@@ -2127,8 +2202,11 @@ void setup_peers(struct lightningd *ld)
 	struct peer *p;
 	/* Avoid thundering herd: after first five, delay by 1 second. */
 	int delay = -5;
+	struct peer_node_id_map_iter it;
 
-	list_for_each(&ld->peers, p, list) {
+	for (p = peer_node_id_map_first(ld->peers, &it);
+	     p;
+	     p = peer_node_id_map_next(ld->peers, &it)) {
 		setup_peer(p, delay > 0 ? delay : 0);
 		delay++;
 	}
@@ -2139,35 +2217,40 @@ struct htlc_in_map *load_channels_from_wallet(struct lightningd *ld)
 {
 	struct peer *peer;
 	struct htlc_in_map *unconnected_htlcs_in = tal(ld, struct htlc_in_map);
+	struct peer_node_id_map_iter it;
 
 	/* Load channels from database */
 	if (!wallet_init_channels(ld->wallet))
 		fatal("Could not load channels from the database");
 
 	/* First we load the incoming htlcs */
-	list_for_each(&ld->peers, peer, list) {
+	for (peer = peer_node_id_map_first(ld->peers, &it);
+	     peer;
+	     peer = peer_node_id_map_next(ld->peers, &it)) {
 		struct channel *channel;
 
 		list_for_each(&peer->channels, channel, list) {
 			if (!wallet_htlcs_load_in_for_channel(ld->wallet,
 							      channel,
-							      &ld->htlcs_in)) {
+							      ld->htlcs_in)) {
 				fatal("could not load htlcs for channel");
 			}
 		}
 	}
 
 	/* Make a copy of the htlc_map: entries removed as they're matched */
-	htlc_in_map_copy(unconnected_htlcs_in, &ld->htlcs_in);
+	htlc_in_map_copy(unconnected_htlcs_in, ld->htlcs_in);
 
 	/* Now we load the outgoing HTLCs, so we can connect them. */
-	list_for_each(&ld->peers, peer, list) {
+	for (peer = peer_node_id_map_first(ld->peers, &it);
+	     peer;
+	     peer = peer_node_id_map_next(ld->peers, &it)) {
 		struct channel *channel;
 
 		list_for_each(&peer->channels, channel, list) {
 			if (!wallet_htlcs_load_out_for_channel(ld->wallet,
 							       channel,
-							       &ld->htlcs_out,
+							       ld->htlcs_out,
 							       unconnected_htlcs_in)) {
 				fatal("could not load outgoing htlcs for channel");
 			}
@@ -2248,6 +2331,7 @@ static struct command_result *json_getinfo(struct command *cmd,
 	unsigned int pending_channels = 0, active_channels = 0,
 		     inactive_channels = 0, num_peers = 0;
 	size_t count_announceable;
+	struct peer_node_id_map_iter it;
 
 	if (!param(cmd, buffer, params, NULL))
 		return command_param_failed();
@@ -2258,7 +2342,9 @@ static struct command_result *json_getinfo(struct command *cmd,
 	json_add_hex_talarr(response, "color", cmd->ld->rgb);
 
 	/* Add some peer and channel stats */
-	list_for_each(&cmd->ld->peers, peer, list) {
+	for (peer = peer_node_id_map_first(cmd->ld->peers, &it);
+	     peer;
+	     peer = peer_node_id_map_next(cmd->ld->peers, &it)) {
 		num_peers++;
 
 		list_for_each(&peer->channels, channel, list) {
@@ -2286,10 +2372,10 @@ static struct command_result *json_getinfo(struct command *cmd,
 		for (size_t i = 0; i < count_announceable; i++)
 			json_add_address(response, NULL, cmd->ld->announceable+i);
 
-		/* Currently, IP discovery will only be announced by gossipd,
-		 * if we don't already have usable addresses.
-		 * See `create_node_announcement` in `gossip_generation.c`. */
-		if (count_announceable == 0) {
+		/* Add discovered IPs if we announce them.
+		 * Also see `create_node_announcement` in `gossip_generation.c`. */
+		if ((cmd->ld->config.ip_discovery == OPT_AUTOBOOL_AUTO && count_announceable == 0) ||
+		     cmd->ld->config.ip_discovery == OPT_AUTOBOOL_TRUE) {
 			if (cmd->ld->discovered_ip_v4 != NULL &&
 					!wireaddr_arr_contains(
 						cmd->ld->announceable,
@@ -2658,7 +2744,11 @@ static struct command_result *json_setchannel(struct command *cmd,
 
 	/* If the users requested 'all' channels we need to iterate */
 	if (channels == NULL) {
-		list_for_each(&cmd->ld->peers, peer, list) {
+		struct peer_node_id_map_iter it;
+
+		for (peer = peer_node_id_map_first(cmd->ld->peers, &it);
+		     peer;
+		     peer = peer_node_id_map_next(cmd->ld->peers, &it)) {
 			struct channel *channel;
 			list_for_each(&peer->channels, channel, list) {
 				if (channel->state != CHANNELD_NORMAL &&
@@ -3033,8 +3123,11 @@ static void dualopend_memleak_req_done(struct subd *dualopend,
 void peer_dev_memleak(struct lightningd *ld, struct leak_detect *leaks)
 {
 	struct peer *p;
+	struct peer_node_id_map_iter it;
 
-	list_for_each(&ld->peers, p, list) {
+	for (p = peer_node_id_map_first(ld->peers, &it);
+	     p;
+	     p = peer_node_id_map_next(ld->peers, &it)) {
 		struct channel *c;
 		if (p->uncommitted_channel && p->uncommitted_channel->open_daemon) {
 			struct subd *openingd = p->uncommitted_channel->open_daemon;

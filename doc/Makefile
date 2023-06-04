@@ -55,6 +55,7 @@ MANPAGES := doc/lightning-cli.1 \
 	doc/lightning-listoffers.7 \
 	doc/lightning-listpays.7 \
 	doc/lightning-listpeers.7 \
+	doc/lightning-listpeerchannels.7 \
 	doc/lightning-listsendpays.7 \
 	doc/lightning-makesecret.7 \
 	doc/lightning-multifundchannel.7 \
@@ -62,7 +63,6 @@ MANPAGES := doc/lightning-cli.1 \
 	doc/lightning-newaddr.7 \
 	doc/lightning-notifications.7 \
 	doc/lightning-offer.7 \
-	doc/lightning-offerout.7 \
 	doc/lightning-openchannel_abort.7 \
 	doc/lightning-openchannel_bump.7 \
 	doc/lightning-openchannel_init.7 \
@@ -71,6 +71,8 @@ MANPAGES := doc/lightning-cli.1 \
 	doc/lightning-pay.7 \
 	doc/lightning-parsefeerate.7 \
 	doc/lightning-plugin.7 \
+	doc/lightning-preapproveinvoice.7 \
+	doc/lightning-preapprovekeysend.7 \
 	doc/lightning-recoverchannel.7 \
 	doc/lightning-reserveinputs.7 \
 	doc/lightning-sendinvoice.7 \
@@ -200,3 +202,22 @@ doc/index.rst: $(MANPAGES:=.md)
 	  sed 's/\(.*\)\.\(.*\).*\.md/\1 <\1.\2.md>/' | \
 	  python3 devtools/blockreplace.py doc/index.rst manpages --language=rst --indent "   " \
 	)
+
+# For CI to (very roughly!) check that we only deprecated fields, or labelled added ones
+# When running on GitHub (CI=true), we need to fetch origin/master
+schema-added-check:
+	@if ! test -z $$CI; then git fetch origin master; fi; \
+	if git diff origin/master -- doc/schemas | grep -q '^+.*{' && ! git diff origin/master -- doc/schemas | grep -q '^+.*"added"'; then \
+		git diff origin/master -- doc/schemas; \
+		echo 'New schema fields must have "added": "vNEXTVERSION"' >&2; exit 1; \
+	fi
+schema-removed-check:
+	@if ! test -z $$CI; then git fetch origin master; fi; \
+	if git diff origin/master -- doc/schemas | grep -q '^-.*{' && ! git diff origin/master -- doc/schemas | grep -q '^-.*"deprecated"'; then \
+		git diff origin/master -- doc/schemas ; \
+		echo 'Schema fields must be "deprecated", with version, not removed' >&2; exit 1; \
+	fi
+
+schema-diff-check: schema-added-check schema-removed-check
+
+check-source: schema-diff-check

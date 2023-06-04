@@ -120,7 +120,6 @@ struct channel *new_full_channel(const tal_t *ctx,
 		channel->htlcs = tal(channel, struct htlc_map);
 		htlc_map_init(channel->htlcs);
 		memleak_add_helper(channel->htlcs, memleak_help_htlcmap);
-		tal_add_destructor(channel->htlcs, htlc_map_clear);
 	}
 	return channel;
 }
@@ -1111,10 +1110,15 @@ static int change_htlcs(struct channel *channel,
 		for (i = 0; i < n_hstates; i++) {
 			if (h->state == htlc_states[i]) {
 				htlc_incstate(channel, h, sidechanged, owed);
+				if (htlc_is_dead(h)) {
+					htlc_map_delval(channel->htlcs, &it);
+					tal_steal(htlcs ? *htlcs : tmpctx, h);
+				}
 				dump_htlc(h, prefix);
 				htlc_arr_append(htlcs, h);
 				cflags |= (htlc_state_flags(htlc_states[i])
 					   ^ htlc_state_flags(h->state));
+				break;
 			}
 		}
 	}
@@ -1392,20 +1396,24 @@ bool channel_sending_revoke_and_ack(struct channel *channel)
 	return (change & HTLC_REMOTE_F_PENDING);
 }
 
-size_t num_channel_htlcs(const struct channel *channel)
+static inline bool any_htlc_is_dead(const struct channel *channel)
 {
 	struct htlc_map_iter it;
 	const struct htlc *htlc;
-	size_t n = 0;
 
 	for (htlc = htlc_map_first(channel->htlcs, &it);
 	     htlc;
 	     htlc = htlc_map_next(channel->htlcs, &it)) {
-		/* FIXME: Clean these out! */
-		if (!htlc_is_dead(htlc))
-			n++;
+		if (htlc_is_dead(htlc))
+			return true;
 	}
-	return n;
+	return false;
+}
+
+size_t num_channel_htlcs(const struct channel *channel)
+{
+	assert(!any_htlc_is_dead(channel));
+	return htlc_map_count(channel->htlcs);
 }
 
 static bool adjust_balance(struct balance view_owed[NUM_SIDES][NUM_SIDES],

@@ -11,8 +11,7 @@ DESCRIPTION
 -----------
 
 The **disableoffer** RPC command disables an offer, so that no further
-invoices will be given out (if made with lightning-offer(7)) or
-invoices accepted  (if made with lightning-offerout(7)).
+invoices will be given out.
 
 We currently don't support deletion of offers, so offers are not
 forgotten entirely (there may be invoices which refer to this offer).
@@ -68,11 +67,11 @@ Rusty Russell <<rusty@rustcorp.com.au>> is mainly responsible.
 SEE ALSO
 --------
 
-lightning-offer(7), lightning-offerout(7), lightning-listoffers(7).
+lightning-offer(7), lightning-listoffers(7).
 
 RESOURCES
 ---------
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:f6896438745837d5f1f5999553b397660eded7b22e5d0765ce5feaa3fc14e48e)
+[comment]: # ( SHA256STAMP:7a813b5ae0c4ae2a9a77063d710ee7d4ef621d828e6a4a57c59d62d3f2091c89)

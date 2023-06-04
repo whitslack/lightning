@@ -110,6 +110,7 @@ const struct feature_set *plugin_feature_set(const struct plugin *p);
 struct out_req *jsonrpc_request_start_(struct plugin *plugin,
 				       struct command *cmd,
 				       const char *method,
+				       const char *id_prefix,
 				       struct command_result *(*cb)(struct command *command,
 								    const char *buf,
 								    const jsmntok_t *result,
@@ -124,6 +125,7 @@ struct out_req *jsonrpc_request_start_(struct plugin *plugin,
  * "error" members. */
 #define jsonrpc_request_start(plugin, cmd, method, cb, errcb, arg)	\
 	jsonrpc_request_start_((plugin), (cmd), (method),		\
+		     json_id_prefix(tmpctx, (cmd)),			\
 		     typesafe_cb_preargs(struct command_result *, void *, \
 					 (cb), (arg),			\
 					 struct command *command,	\
@@ -139,8 +141,8 @@ struct out_req *jsonrpc_request_start_(struct plugin *plugin,
 
 /* This variant has callbacks received whole obj, not "result" or
  * "error" members.  It also doesn't start params{}. */
-#define jsonrpc_request_whole_object_start(plugin, cmd, method, cb, arg) \
-	jsonrpc_request_start_((plugin), (cmd), (method),		\
+#define jsonrpc_request_whole_object_start(plugin, cmd, method, id_prefix, cb, arg) \
+	jsonrpc_request_start_((plugin), (cmd), (method), (id_prefix),	\
 			       typesafe_cb_preargs(struct command_result *, void *, \
 						   (cb), (arg),		\
 						   struct command *command, \
@@ -431,32 +433,26 @@ void NORETURN LAST_ARG_NULL plugin_main(char *argv[],
 					...);
 
 struct listpeers_channel {
+	struct node_id id;
+	bool connected;
 	bool private;
 	struct bitcoin_txid funding_txid;
 	const char *state;
+	/* scid or alias[LOCAL] is always non-NULL */
 	struct short_channel_id *alias[NUM_SIDES];
 	struct short_channel_id *scid;
-	int *direction;
+	int direction;
 	struct amount_msat total_msat;
 	struct amount_msat spendable_msat;
+	u16 max_accepted_htlcs;
+	size_t num_htlcs;
 	/* TODO Add fields as we need them. */
 };
 
-struct listpeers_peer {
-	struct node_id id;
-	bool connected;
-	const char **netaddr;
-	struct feature_set *features;
-	struct listpeers_channel **channels;
-};
-
-struct listpeers_result {
-	struct listpeers_peer **peers;
-};
-
-struct listpeers_result *json_to_listpeers_result(const tal_t *ctx,
-						  const char *buffer,
-						  const jsmntok_t *tok);
+/* Returns an array of listpeers_channel from listpeerchannels * */
+struct listpeers_channel **json_to_listpeers_channels(const tal_t *ctx,
+						      const char *buffer,
+						      const jsmntok_t *tok);
 
 struct createonion_response {
 	u8 *onion;
@@ -469,6 +465,9 @@ struct createonion_response *json_to_createonion_response(const tal_t *ctx,
 
 struct route_hop *json_to_route(const tal_t *ctx, const char *buffer,
 				const jsmntok_t *toks);
+
+/* Create a prefix (ending in /) for this cmd_id, if any. */
+const char *json_id_prefix(const tal_t *ctx, const struct command *cmd);
 
 #if DEVELOPER
 struct htable;

@@ -69,8 +69,6 @@
 #include <lightningd/io_loop_with_timers.h>
 #include <lightningd/lightningd.h>
 #include <lightningd/onchain_control.h>
-#include <lightningd/options.h>
-#include <lightningd/peer_control.h>
 #include <lightningd/plugin.h>
 #include <lightningd/subd.h>
 #include <sys/resource.h>
@@ -139,7 +137,7 @@ static struct lightningd *new_lightningd(const tal_t *ctx)
 	ld->dev_no_ping_timer = false;
 #endif
 
-	/*~ These are CCAN lists: an embedded double-linked list.  It's not
+	/*~ This is a CCAN list: an embedded double-linked list.  It's not
 	 * really typesafe, but relies on convention to access the contents.
 	 * It's inspired by the closely-related Linux kernel list.h.
 	 *
@@ -153,7 +151,6 @@ static struct lightningd *new_lightningd(const tal_t *ctx)
 	 *
 	 * This method of manually declaring the list hooks avoids dynamic
 	 * allocations to put things into a list. */
-	list_head_init(&ld->peers);
 	list_head_init(&ld->subds);
 
 	/*~ These are hash tables of incoming and outgoing HTLCs (contracts),
@@ -168,12 +165,29 @@ static struct lightningd *new_lightningd(const tal_t *ctx)
 	 * list attached to the channel structure itself, or even left them in
 	 * the database rather than making an in-memory version.  Obviously
 	 * I was in a premature optimization mood when I wrote this: */
-	htlc_in_map_init(&ld->htlcs_in);
-	htlc_out_map_init(&ld->htlcs_out);
+	ld->htlcs_in = tal(ld, struct htlc_in_map);
+	htlc_in_map_init(ld->htlcs_in);
+
+	/*~ Note also: we didn't need to use an allocation here!  We could
+	 * have simply made the `struct htlc_out_map` a member.  But we
+	 * override the htable allocation routines to use tal(), and they
+	 * want a tal parent, so we always make our hash table a tallocated
+	 * object. */
+	ld->htlcs_out = tal(ld, struct htlc_out_map);
+	htlc_out_map_init(ld->htlcs_out);
+
+	/*~ This is the hash table of peers: converted from a
+	 *  linked-list as part of the 100k-peers project! */
+	ld->peers = tal(ld, struct peer_node_id_map);
+	peer_node_id_map_init(ld->peers);
+	/*~ And this was done at the same time, for db lookups at startup */
+	ld->peers_by_dbid = tal(ld, struct peer_dbid_map);
+	peer_dbid_map_init(ld->peers_by_dbid);
 
 	/*~ For multi-part payments, we need to keep some incoming payments
 	 * in limbo until we get all the parts, or we time them out. */
-	htlc_set_map_init(&ld->htlc_sets);
+	ld->htlc_sets = tal(ld, struct htlc_set_map);
+	htlc_set_map_init(ld->htlc_sets);
 
 	/*~ We have a multi-entry log-book infrastructure: we define a 10MB log
 	 * book to hold all the entries (and trims as necessary), and multiple
@@ -524,6 +538,7 @@ static const char *find_daemon_dir(struct lightningd *ld, const char *argv0)
 static void free_all_channels(struct lightningd *ld)
 {
 	struct peer *p;
+	struct peer_node_id_map_iter it;
 
 	/*~ tal supports *destructors* using `tal_add_destructor()`; the most
 	 * common use is for an object to delete itself from a linked list
@@ -540,13 +555,18 @@ static void free_all_channels(struct lightningd *ld)
 
 	/*~ For every peer, we free every channel.  On allocation the peer was
 	 * given a destructor (`destroy_peer`) which removes itself from the
-	 * list.  Thus we use list_top() not list_pop() here. */
-	while ((p = list_top(&ld->peers, struct peer, list)) != NULL) {
+	 * hashtable.
+	 *
+	 * Deletion from a hashtable is allowed, but it does mean we could
+	 * skip entries in iteration.  Hence we repeat until empty!
+	 */
+again:
+	for (p = peer_node_id_map_first(ld->peers, &it);
+	     p;
+	     p = peer_node_id_map_next(ld->peers, &it)) {
 		struct channel *c;
 
-		/*~ A peer can have multiple channels; we only allow one to be
-		 * open at any time, but we remember old ones for 100 blocks,
-		 * after all the outputs we care about are spent. */
+		/*~ A peer can have multiple channels. */
 		while ((c = list_top(&p->channels, struct channel, list))
 		       != NULL) {
 			/* Removes itself from list as we free it */
@@ -562,9 +582,11 @@ static void free_all_channels(struct lightningd *ld)
 			p->uncommitted_channel = NULL;
 			tal_free(uc);
 		}
-		/* Removes itself from list as we free it */
+		/* Removes itself from htable as we free it */
 		tal_free(p);
 	}
+	if (peer_node_id_map_first(ld->peers, &it))
+		goto again;
 
 	/*~ Commit the transaction.  Note that the db is actually
 	 * single-threaded, so commits never fail and we don't need
@@ -1108,8 +1130,11 @@ int main(int argc, char *argv[])
 
 	/*~ Now that the rpc path exists, we can start the plugins and they
 	 * can start talking to us. */
-	if (!plugins_config(ld->plugins))
+	if (!plugins_config(ld->plugins)) {
+		/* Valgrind can complain about this leak! */
+		tal_free(unconnected_htlcs_in);
 		goto stop;
+	}
 
 	/*~ Process any HTLCs we were in the middle of when we exited, now
 	 * that plugins (who might want to know via htlc_accepted hook) are
@@ -1249,10 +1274,6 @@ stop:
 
 	/* Now close database */
 	ld->wallet->db = tal_free(ld->wallet->db);
-
-	/* Clean our our HTLC maps, since they use malloc. */
-	htlc_in_map_clear(&ld->htlcs_in);
-	htlc_out_map_clear(&ld->htlcs_out);
 
 	remove(ld->pidfile);
 

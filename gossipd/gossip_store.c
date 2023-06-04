@@ -17,8 +17,8 @@
 #include <wire/peer_wire.h>
 
 #define GOSSIP_STORE_TEMP_FILENAME "gossip_store.tmp"
-/* We write it as major version 0, minor version 11 */
-#define GOSSIP_STORE_VER ((0 << 5) | 11)
+/* We write it as major version 0, minor version 12 */
+#define GOSSIP_STORE_VER ((0 << 5) | 12)
 
 struct gossip_store {
 	/* This is false when we're loading */
@@ -73,7 +73,7 @@ static ssize_t gossip_pwritev(int fd, const struct iovec *iov, int iovcnt,
 #endif /* !HAVE_PWRITEV */
 
 static bool append_msg(int fd, const u8 *msg, u32 timestamp,
-		       bool push, bool spam, u64 *len)
+		       bool push, bool zombie, bool spam, u64 *len)
 {
 	struct gossip_hdr hdr;
 	u32 msglen;
@@ -88,6 +88,8 @@ static bool append_msg(int fd, const u8 *msg, u32 timestamp,
 		hdr.len |= CPU_TO_BE32(GOSSIP_STORE_LEN_PUSH_BIT);
 	if (spam)
 		hdr.len |= CPU_TO_BE32(GOSSIP_STORE_LEN_RATELIMIT_BIT);
+	if (zombie)
+		hdr.len |= CPU_TO_BE32(GOSSIP_STORE_LEN_ZOMBIE_BIT);
 	hdr.crc = cpu_to_be32(crc32c(timestamp, msg, msglen));
 	hdr.timestamp = cpu_to_be32(timestamp);
 
@@ -248,7 +250,7 @@ static u32 gossip_store_compact_offline(struct routing_state *rstate)
 	oldlen = lseek(old_fd, SEEK_END, 0);
 	newlen = lseek(new_fd, SEEK_END, 0);
 	append_msg(old_fd, towire_gossip_store_ended(tmpctx, newlen),
-		   0, true, false, &oldlen);
+		   0, true, false, false, &oldlen);
 	close(old_fd);
 	status_debug("gossip_store_compact_offline: %zu deleted, %zu copied",
 		     deleted, count);
@@ -407,11 +409,6 @@ static void move_broadcast(struct offmap *offmap,
 	offmap_del(offmap, omap);
 }
 
-static void destroy_offmap(struct offmap *offmap)
-{
-	offmap_clear(offmap);
-}
-
 /**
  * Rewrite the on-disk gossip store, compacting it along the way
  *
@@ -453,7 +450,6 @@ bool gossip_store_compact(struct gossip_store *gs)
 	/* Walk old file, copy everything and remember new offsets. */
 	offmap = tal(tmpctx, struct offmap);
 	offmap_init_sized(offmap, gs->count);
-	tal_add_destructor(offmap, destroy_offmap);
 
 	/* Start by writing all channel announcements and updates. */
 	off = 1;
@@ -536,7 +532,7 @@ bool gossip_store_compact(struct gossip_store *gs)
 
 	/* Write end marker now new one is ready */
 	append_msg(gs->fd, towire_gossip_store_ended(tmpctx, len),
-		   0, true, false, &gs->len);
+		   0, true, false, false, &gs->len);
 
 	gs->count = count;
 	gs->deleted = 0;
@@ -556,7 +552,7 @@ disable:
 }
 
 u64 gossip_store_add(struct gossip_store *gs, const u8 *gossip_msg,
-		     u32 timestamp, bool push,
+		     u32 timestamp, bool push, bool zombie,
 		     bool spam, const u8 *addendum)
 {
 	u64 off = gs->len;
@@ -564,12 +560,12 @@ u64 gossip_store_add(struct gossip_store *gs, const u8 *gossip_msg,
 	/* Should never get here during loading! */
 	assert(gs->writable);
 
-	if (!append_msg(gs->fd, gossip_msg, timestamp, push, spam, &gs->len)) {
+	if (!append_msg(gs->fd, gossip_msg, timestamp, push, zombie, spam, &gs->len)) {
 		status_broken("Failed writing to gossip store: %s",
 			      strerror(errno));
 		return 0;
 	}
-	if (addendum && !append_msg(gs->fd, addendum, 0, false, false, &gs->len)) {
+	if (addendum && !append_msg(gs->fd, addendum, 0, false, false, false, &gs->len)) {
 		status_broken("Failed writing addendum to gossip store: %s",
 			      strerror(errno));
 		return 0;
@@ -586,7 +582,7 @@ u64 gossip_store_add_private_update(struct gossip_store *gs, const u8 *update)
 	/* A local update for an unannounced channel: not broadcastable, but
 	 * otherwise the same as a normal channel_update */
 	const u8 *pupdate = towire_gossip_store_private_update(tmpctx, update);
-	return gossip_store_add(gs, pupdate, 0, false, false, NULL);
+	return gossip_store_add(gs, pupdate, 0, false, false, false, NULL);
 }
 
 /* Returns index of following entry. */
@@ -646,7 +642,97 @@ void gossip_store_mark_channel_deleted(struct gossip_store *gs,
 				       const struct short_channel_id *scid)
 {
 	gossip_store_add(gs, towire_gossip_store_delete_chan(tmpctx, scid),
-			 0, false, false, NULL);
+			 0, false, false, false, NULL);
+}
+
+/* Marks the length field of a channel_announcement with the zombie flag bit */
+void gossip_store_mark_channel_zombie(struct gossip_store *gs,
+				      struct broadcastable *bcast)
+{
+	beint32_t belen;
+	u32 index = bcast->index;
+
+	/* Should never get here during loading! */
+	assert(gs->writable);
+
+	assert(index);
+
+#if DEVELOPER
+	const u8 *msg = gossip_store_get(tmpctx, gs, index);
+	assert(fromwire_peektype(msg) == WIRE_CHANNEL_ANNOUNCEMENT);
+#endif
+
+	if (pread(gs->fd, &belen, sizeof(belen), index) != sizeof(belen))
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Failed reading len to zombie channel @%u: %s",
+			      index, strerror(errno));
+
+	assert((be32_to_cpu(belen) & GOSSIP_STORE_LEN_DELETED_BIT) == 0);
+	belen |= cpu_to_be32(GOSSIP_STORE_LEN_ZOMBIE_BIT);
+	if (pwrite(gs->fd, &belen, sizeof(belen), index) != sizeof(belen))
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Failed writing len to zombie channel @%u: %s",
+			      index, strerror(errno));
+}
+
+/* Marks the length field of a channel_update with the zombie flag bit */
+void gossip_store_mark_cupdate_zombie(struct gossip_store *gs,
+				      struct broadcastable *bcast)
+{
+	beint32_t belen;
+	u32 index = bcast->index;
+
+	/* Should never get here during loading! */
+	assert(gs->writable);
+
+	assert(index);
+
+#if DEVELOPER
+	const u8 *msg = gossip_store_get(tmpctx, gs, index);
+	assert(fromwire_peektype(msg) == WIRE_CHANNEL_UPDATE);
+#endif
+
+	if (pread(gs->fd, &belen, sizeof(belen), index) != sizeof(belen))
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Failed reading len to zombie channel update @%u: %s",
+			      index, strerror(errno));
+
+	assert((be32_to_cpu(belen) & GOSSIP_STORE_LEN_DELETED_BIT) == 0);
+	belen |= cpu_to_be32(GOSSIP_STORE_LEN_ZOMBIE_BIT);
+	if (pwrite(gs->fd, &belen, sizeof(belen), index) != sizeof(belen))
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Failed writing len to zombie channel update @%u: %s",
+			      index, strerror(errno));
+}
+
+/* Marks the length field of a node_announcement with the zombie flag bit */
+void gossip_store_mark_nannounce_zombie(struct gossip_store *gs,
+					struct broadcastable *bcast)
+{
+	beint32_t belen;
+	u32 index = bcast->index;
+
+	/* Should never get here during loading! */
+	assert(gs->writable);
+
+	assert(index);
+
+#if DEVELOPER
+	const u8 *msg = gossip_store_get(tmpctx, gs, index);
+	assert(fromwire_peektype(msg) == WIRE_NODE_ANNOUNCEMENT);
+#endif
+
+	if (pread(gs->fd, &belen, sizeof(belen), index) != sizeof(belen))
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Failed reading len to zombie node announcement @%u: %s",
+			      index, strerror(errno));
+
+	assert((be32_to_cpu(belen) & GOSSIP_STORE_LEN_DELETED_BIT) == 0);
+	belen |= cpu_to_be32(GOSSIP_STORE_LEN_ZOMBIE_BIT);
+	if (pwrite(gs->fd, &belen, sizeof(belen), index) != sizeof(belen))
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Failed writing len to zombie channel update @%u: %s",
+			      index, strerror(errno));
 }
 
 const u8 *gossip_store_get(const tal_t *ctx,

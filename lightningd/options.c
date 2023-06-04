@@ -102,6 +102,41 @@ static char *opt_set_s32(const char *arg, s32 *u)
 	return NULL;
 }
 
+char *opt_set_autobool_arg(const char *arg, enum opt_autobool *b)
+{
+	if (!strcasecmp(arg, "yes") ||
+	    !strcasecmp(arg, "true")) {
+		*b = OPT_AUTOBOOL_TRUE;
+		return NULL;
+	}
+	if (!strcasecmp(arg, "no") ||
+	    !strcasecmp(arg, "false")) {
+		*b = OPT_AUTOBOOL_FALSE;
+		return NULL;
+	}
+	if (!strcasecmp(arg, "auto") ||
+	    !strcasecmp(arg, "default")) {
+		*b = OPT_AUTOBOOL_AUTO;
+		return NULL;
+	}
+	return opt_invalid_argument(arg);
+}
+
+void opt_show_autobool(char buf[OPT_SHOW_LEN], const enum opt_autobool *b)
+{
+	switch (*b) {
+	case OPT_AUTOBOOL_TRUE:
+		strncpy(buf, "true", OPT_SHOW_LEN);
+		break;
+	case OPT_AUTOBOOL_FALSE:
+		strncpy(buf, "false", OPT_SHOW_LEN);
+		break;
+	case OPT_AUTOBOOL_AUTO:
+	default:
+		strncpy(buf, "auto", OPT_SHOW_LEN);
+	}
+}
+
 static char *opt_set_mode(const char *arg, mode_t *m)
 {
 	char *endp;
@@ -808,8 +843,11 @@ static const struct config testnet_config = {
 
 	.use_dns = true,
 
-	/* Turn off IP address announcement discovered via peer `remote_addr` */
-	.disable_ip_discovery = false,
+	/* Excplicitly turns 'on' or 'off' IP discovery feature. */
+	.ip_discovery = OPT_AUTOBOOL_AUTO,
+
+	/* Public TCP port assumed for IP discovery. Defaults to chainparams. */
+	.ip_discovery_port = 0,
 
 	/* Sets min_effective_htlc_capacity - at 1000$/BTC this is 10ct */
 	.min_capacity_sat = 10000,
@@ -874,8 +912,11 @@ static const struct config mainnet_config = {
 
 	.use_dns = true,
 
-	/* Turn off IP address announcement discovered via peer `remote_addr` */
-	.disable_ip_discovery = false,
+	/* Excplicitly turns 'on' or 'off' IP discovery feature. */
+	.ip_discovery = OPT_AUTOBOOL_AUTO,
+
+	/* Public TCP port assumed for IP discovery. Defaults to chainparams. */
+	.ip_discovery_port = 0,
 
 	/* Sets min_effective_htlc_capacity - at 1000$/BTC this is 10ct */
 	.min_capacity_sat = 10000,
@@ -1045,6 +1086,13 @@ static char *opt_set_db_upgrade(const char *arg, struct lightningd *ld)
 	return opt_set_bool_arg(arg, ld->db_upgrade_ok);
 }
 
+static char *opt_disable_ip_discovery(struct lightningd *ld)
+{
+	log_broken(ld->log, "--disable-ip-discovery has been deprecated, use --announce-addr-discovered=false");
+	ld->config.ip_discovery = OPT_AUTOBOOL_FALSE;
+	return NULL;
+}
+
 static void register_opts(struct lightningd *ld)
 {
 	/* This happens before plugins started */
@@ -1176,9 +1224,14 @@ static void register_opts(struct lightningd *ld)
 	opt_register_arg("--announce-addr", opt_add_announce_addr, NULL,
 			 ld,
 			 "Set an IP address (v4 or v6) or .onion v3 to announce, but not listen on");
-	opt_register_noarg("--disable-ip-discovery", opt_set_bool,
-			 &ld->config.disable_ip_discovery,
-			 "Turn off announcement of discovered public IPs");
+
+	opt_register_noarg("--disable-ip-discovery", opt_disable_ip_discovery, ld, opt_hidden);
+	opt_register_arg("--announce-addr-discovered", opt_set_autobool_arg, opt_show_autobool,
+			 &ld->config.ip_discovery,
+			 "Explicitly turns IP discovery 'on' or 'off'.");
+	opt_register_arg("--announce-addr-discovered-port", opt_set_uintval,
+			 opt_show_uintval, &ld->config.ip_discovery_port,
+			 "Sets the public TCP port to use for announcing discovered IPs.");
 
 	opt_register_noarg("--offline", opt_set_offline, ld,
 			   "Start in offline-mode (do not automatically reconnect and do not accept incoming connections)");
@@ -1382,6 +1435,9 @@ void handle_early_opts(struct lightningd *ld, int argc, char *argv[])
 		ld->config = testnet_config;
 	else
 		ld->config = mainnet_config;
+
+	/* Set the ln_port given from chainparams */
+	ld->config.ip_discovery_port = chainparams->ln_port;
 
 	/* Now we can initialize wallet_dsn */
 	ld->wallet_dsn = tal_fmt(ld, "sqlite3://%s/lightningd.sqlite3",
