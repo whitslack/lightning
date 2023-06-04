@@ -59,7 +59,7 @@ Clone lightning:
 
 Checkout a release tag:
 
-    git checkout v0.11.2
+    git checkout v22.11.1
 
 For development or running tests, get additional dependencies:
 
@@ -70,7 +70,7 @@ If you can't install `lowdown`, a version will be built in-tree.
 
 If you want to build the Rust plugins (currently, cln-grpc):
 
-	sudo apt-get install -y cargo rustfmt
+	sudo apt-get install -y cargo rustfmt protobuf-compiler
 
 There are two ways to build core lightning, and this depends on how you want use it.
 
@@ -142,7 +142,7 @@ $ cd lightning
 
 Checkout a release tag:
 ```
-$ git checkout v0.11.2
+$ git checkout v22.11.1
 ```
 
 Build and install lightning:
@@ -287,7 +287,7 @@ Clone lightning:
 
 Checkout a release tag:
 
-    $ git checkout v0.11.2
+    $ git checkout v22.11.1
 
 Build lightning:
 

@@ -78,7 +78,6 @@ MANPAGES := doc/lightning-cli.1 \
 	doc/lightning-sendonionmessage.7 \
 	doc/lightning-sendpay.7 \
 	doc/lightning-setchannel.7 \
-	doc/lightning-setchannelfee.7 \
 	doc/lightning-sendcustommsg.7 \
 	doc/lightning-signmessage.7 \
 	doc/lightning-staticbackup.7 \
@@ -181,6 +180,7 @@ check: check-manpages
 check-manpages: all-programs check-config-docs default-targets
 	@tools/check-manpage.sh cli/lightning-cli doc/lightning-cli.1.md
 	@tools/check-manpage.sh "lightningd/lightningd --lightning-dir=/tmp/" doc/lightningd-config.5.md
+	@awk '/^$$/ { do { getline } while ($$0 ~ /^( {4,}|\t)/) } /^\s*```/ { do { getline } while ($$0 !~ /^\s*```/) } /^([^`_\\]|`([^`\\]|\\.)*`|\b_|_\b|\\.)*\B_\B/ { print "" ; print "Unescaped underscore at " FILENAME ":" NR ":" ; print ; ret = 1 } ENDFILE { NR = 0 } END { exit ret }' doc/*.[0-9].md
 
 # Makes sure that fields mentioned in schema are in man page, and vice versa.
 check-config-docs:

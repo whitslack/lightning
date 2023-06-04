@@ -4,7 +4,7 @@ lightning-listforwards -- Command showing all htlcs and their information
 SYNOPSIS
 --------
 
-**listforwards** [*status*] [*in_channel*] [*out_channel*]
+**listforwards** [*status*] [*in\_channel*] [*out\_channel*]
 
 DESCRIPTION
 -----------
@@ -13,9 +13,9 @@ The **listforwards** RPC command displays all htlcs that have been
 attempted to be forwarded by the Core Lightning node.
 
 If *status* is specified, then only the forwards with the given status are returned.
-*status* can be either *offered* or *settled* or *failed* or *local_failed*
+*status* can be either *offered* or *settled* or *failed* or *local\_failed*
 
-If *in_channel* or *out_channel* is specified, then only the matching forwards
+If *in\_channel* or *out\_channel* is specified, then only the matching forwards
 on the given in/out channel are returned.
 
 RETURN VALUE
@@ -27,7 +27,7 @@ On success, an object containing **forwards** is returned.  It is an array of ob
 - **in\_channel** (short\_channel\_id): the channel that received the HTLC
 - **in\_htlc\_id** (u64): the unique HTLC id the sender gave this
 - **in\_msat** (msat): the value of the incoming HTLC
-- **status** (string): still ongoing, completed, failed locally, or failed after forwarding (one of "offered", "settled", "local_failed", "failed")
+- **status** (string): still ongoing, completed, failed locally, or failed after forwarding (one of "offered", "settled", "local\_failed", "failed")
 - **received\_time** (number): the UNIX timestamp when this was received
 - **out\_channel** (short\_channel\_id, optional): the channel that the HTLC (trying to) forward to
 - **out\_htlc\_id** (u64, optional): the unique HTLC id we gave this when sending
@@ -37,13 +37,13 @@ On success, an object containing **forwards** is returned.  It is an array of ob
 If **out\_msat** is present:
 
   - **fee\_msat** (msat): the amount this paid in fees
-  - **out\_msat** (msat): the amount we sent out the *out_channel*
+  - **out\_msat** (msat): the amount we sent out the *out\_channel*
 
 If **status** is "settled" or "failed":
 
   - **resolved\_time** (number): the UNIX timestamp when this was resolved
 
-If **status** is "local_failed" or "failed":
+If **status** is "local\_failed" or "failed":
 
   - **failcode** (u32, optional): the numeric onion code returned
   - **failreason** (string, optional): the name of the onion code returned
@@ -65,4 +65,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:e47c6ea912156d07bc628e86fe271c4e8395d73dae670fde69e6621275f24c79)
+[comment]: # ( SHA256STAMP:bf5e781c8120f44b3b893cd8f5a06ac3418c3f846a1ef0c7052de5daccf7428c)

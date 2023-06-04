@@ -5,13 +5,13 @@ SYNOPSIS
 --------
 **(WARNING: experimental-offers only)**
 
-**listoffers** [*offer_id*] [*active_only*]
+**listoffers** [*offer\_id*] [*active\_only*]
 
 DESCRIPTION
 -----------
 
 The **listoffers** RPC command list all offers, or with `offer_id`,
-only the offer with that offer_id (if it exists).  If `active_only` is
+only the offer with that offer\_id (if it exists).  If `active_only` is
 set and is true, only offers with `active` true are returned.
 
 EXAMPLE JSON REQUEST
@@ -80,4 +80,5 @@ RESOURCES
 ---------
 
 Main web site: <https://github.com/ElementsProject/lightning>
-[comment]: # ( SHA256STAMP:985a6bae4b0a1702cd02998859c8072eee44b219c15294af4f4078465531c8c9)
+
+[comment]: # ( SHA256STAMP:088d6fef8790bc9151b07f9b974568ce612c7fea8f52fdcaaf52b32e4ef8d5f2)

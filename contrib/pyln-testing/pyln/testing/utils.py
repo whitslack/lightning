@@ -90,7 +90,7 @@ def wait_for(success, timeout=TIMEOUT):
     while not success():
         time_left = start_time + timeout - time.time()
         if time_left <= 0:
-            raise ValueError("Timeout while waiting for {}", success)
+            raise ValueError("Timeout while waiting for {}".format(success))
         time.sleep(min(interval, time_left))
         interval *= 2
         if interval > 5:
@@ -397,7 +397,11 @@ class BitcoinD(TailableProc):
             '-nolisten',
             '-txindex',
             '-nowallet',
-            '-addresstype=bech32'
+            '-addresstype=bech32',
+            '-debug=mempool',
+            '-debug=mempoolrej',
+            '-debug=rpc',
+            '-debug=validation',
         ]
         # For up to and including 0.16.1, this needs to be in main section.
         BITCOIND_CONFIG['rpcport'] = rpcport
