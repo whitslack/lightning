@@ -20,10 +20,6 @@
       "type": "string",
       "description": ""
     },
-    "label": {
-      "type": "string",
-      "description": ""
-    },
     "absolute_expiry": {
       "type": "u64",
       "description": ""
