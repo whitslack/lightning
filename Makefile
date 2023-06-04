@@ -23,7 +23,7 @@ CCANDIR := ccan
 
 # Where we keep the BOLT RFCs
 BOLTDIR := ../bolts/
-DEFAULT_BOLTVERSION := f32c6ddb5f11b431c9bb4f501cdec604172a90de
+DEFAULT_BOLTVERSION := c4c5a8e5fb30b1b99fa5bb0aba7d0b6b4c831ee5
 # Can be overridden on cmdline.
 BOLTVERSION := $(DEFAULT_BOLTVERSION)
 
@@ -41,20 +41,6 @@ endif
 ifneq ($(VALGRIND),0)
 VG=VALGRIND=1 valgrind -q --error-exitcode=7
 VG_TEST_ARGS = --track-origins=yes --leak-check=full --show-reachable=yes --errors-for-leak-kinds=all
-endif
-
-SANITIZER_FLAGS :=
-
-ifneq ($(ASAN),0)
-SANITIZER_FLAGS += -fsanitize=address
-endif
-
-ifneq ($(UBSAN),0)
-SANITIZER_FLAGS += -fsanitize=undefined
-endif
-
-ifneq ($(FUZZING), 0)
-SANITIZER_FLAGS += -fsanitize=fuzzer-no-link
 endif
 
 ifeq ($(DEVELOPER),1)
@@ -256,7 +242,7 @@ LIBRARY_PATH := /usr/local/lib
 endif
 
 CPPFLAGS += -DBINTOPKGLIBEXECDIR="\"$(shell sh tools/rel.sh $(bindir) $(pkglibexecdir))\""
-CFLAGS = $(CPPFLAGS) $(CWARNFLAGS) $(CDEBUGFLAGS) $(COPTFLAGS) -I $(CCANDIR) $(EXTERNAL_INCLUDE_FLAGS) -I . -I$(CPATH) $(SQLITE3_CFLAGS) $(POSTGRES_INCLUDE) $(FEATURES) $(COVFLAGS) $(DEV_CFLAGS) -DSHACHAIN_BITS=48 -DJSMN_PARENT_LINKS $(PIE_CFLAGS) $(COMPAT_CFLAGS) -DBUILD_ELEMENTS=1
+CFLAGS = $(CPPFLAGS) $(CWARNFLAGS) $(CDEBUGFLAGS) $(COPTFLAGS) -I $(CCANDIR) $(EXTERNAL_INCLUDE_FLAGS) -I . -I$(CPATH) $(SQLITE3_CFLAGS) $(POSTGRES_INCLUDE) $(FEATURES) $(COVFLAGS) $(DEV_CFLAGS) -DSHACHAIN_BITS=48 -DJSMN_PARENT_LINKS $(PIE_CFLAGS) $(COMPAT_CFLAGS) $(CSANFLAGS) -DBUILD_ELEMENTS=1
 
 # If CFLAGS is already set in the environment of make (to whatever value, it
 # does not matter) then it would export it to subprocesses with the above value
@@ -268,8 +254,7 @@ unexport CFLAGS
 # We can get configurator to run a different compile cmd to cross-configure.
 CONFIGURATOR_CC := $(CC)
 
-LDFLAGS += $(PIE_LDFLAGS) $(SANITIZER_FLAGS) $(COPTFLAGS)
-CFLAGS += $(SANITIZER_FLAGS)
+LDFLAGS += $(PIE_LDFLAGS) $(CSANFLAGS) $(COPTFLAGS)
 
 ifeq ($(STATIC),1)
 # For MacOS, Jacob Rapoport <jacob@rumblemonkey.com> changed this to:
@@ -424,6 +409,16 @@ PKGLIBEXEC_PROGRAMS = \
 	       lightningd/lightning_openingd \
 	       lightningd/lightning_websocketd
 
+mkdocs.yml: $(MANPAGES:=.md)
+	@$(call VERBOSE, "genidx $@", \
+	  find doc -maxdepth 1 -name '*\.[0-9]\.md' | \
+	  cut -b 5- | LC_ALL=C sort | \
+	  sed 's/\(.*\)\.\(.*\).*\.md/- "\1": "\1.\2.md"/' | \
+	  python3 devtools/blockreplace.py mkdocs.yml manpages --language=yml --indent "          " \
+	)
+
+
+
 # Don't delete these intermediaries.
 .PRECIOUS: $(ALL_GEN_HEADERS) $(ALL_GEN_SOURCES)
 
@@ -470,6 +465,13 @@ ifeq ($(PYTEST),)
 else
 # Explicitly hand DEVELOPER and VALGRIND so you can override on make cmd line.
 	PYTHONPATH=$(MY_CHECK_PYTHONPATH) TEST_DEBUG=1 DEVELOPER=$(DEVELOPER) VALGRIND=$(VALGRIND) $(PYTEST) tests/ $(PYTEST_OPTS)
+endif
+
+check-fuzz: $(ALL_FUZZ_TARGETS)
+ifneq ($(FUZZING),0)
+	@tests/fuzz/check-fuzz.sh
+else
+	@echo "fuzzing is not enabled: first run './configure --enable-fuzzing'"
 endif
 
 # Keep includes in alpha order.
@@ -594,7 +596,7 @@ CHECK_GEN_ALL = \
 
 check-gen-updated:  $(CHECK_GEN_ALL)
 	@echo "Checking for generated files being changed by make"
-	git diff --exit-code HEAD $?
+	git diff --exit-code HEAD
 
 coverage/coverage.info: check pytest
 	mkdir coverage || true
@@ -809,8 +811,7 @@ install: install-program install-data
 # phase. If you get a missing file/executable while testing on CI it
 # is likely missing from this variable.
 TESTBINS = \
-	target/${RUST_PROFILE}/examples/cln-rpc-getinfo \
-	target/${RUST_PROFILE}/examples/cln-plugin-startup \
+	$(CLN_PLUGIN_EXAMPLES) \
 	tests/plugins/test_libplugin \
 	tests/plugins/test_selfdisable_after_getmanifest \
 	tools/hsmtool

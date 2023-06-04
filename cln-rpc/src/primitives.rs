@@ -28,6 +28,22 @@ pub enum ChannelState {
 
 #[derive(Copy, Clone, Serialize, Deserialize, Debug)]
 #[allow(non_camel_case_types)]
+pub enum HtlcState {
+    SENT_ADD_HTLC = 0,
+    SENT_ADD_COMMIT = 1,
+    RCVD_ADD_REVOCATION = 2,
+    RCVD_ADD_ACK_COMMIT = 3,
+    SENT_ADD_ACK_REVOCATION = 4,
+    RCVD_ADD_ACK_REVOCATION = 5,
+    RCVD_REMOVE_HTLC = 6,
+    RCVD_REMOVE_COMMIT = 7,
+    SENT_REMOVE_REVOCATION = 8,
+    SENT_REMOVE_ACK_COMMIT = 9,
+    RCVD_REMOVE_ACK_REVOCATION = 10,
+}
+
+#[derive(Copy, Clone, Serialize, Deserialize, Debug)]
+#[allow(non_camel_case_types)]
 #[serde(rename_all = "lowercase")]
 pub enum ChannelStateChangeCause {
     UNKNOWN,
@@ -285,6 +301,25 @@ impl TryFrom<i32> for ChannelState {
             9 => Ok(ChannelState::DUALOPEND_OPEN_INIT),
             10 => Ok(ChannelState::DUALOPEND_AWAITING_LOCKIN),
             _ => Err(anyhow!("Invalid channel state {}", value)),
+        }
+    }
+}
+
+impl From<i32> for HtlcState {
+    fn from(value: i32) -> Self {
+        match value {
+            0 => HtlcState::SENT_ADD_HTLC,
+            1 => HtlcState::SENT_ADD_COMMIT,
+            2 => HtlcState::RCVD_ADD_REVOCATION,
+            3 => HtlcState::RCVD_ADD_ACK_COMMIT,
+            4 => HtlcState::SENT_ADD_ACK_REVOCATION,
+            5 => HtlcState::RCVD_ADD_ACK_REVOCATION,
+            6 => HtlcState::RCVD_REMOVE_HTLC,
+            7 => HtlcState::RCVD_REMOVE_COMMIT,
+            8 => HtlcState::SENT_REMOVE_REVOCATION,
+            9 => HtlcState::SENT_REMOVE_ACK_COMMIT,
+            10 => HtlcState::RCVD_REMOVE_ACK_REVOCATION,
+            n => panic!("Unmapped HtlcState variant: {}", n),
         }
     }
 }
@@ -652,14 +687,60 @@ pub struct Routehop {
     pub expirydelta: u16,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct Routehint {
     pub hops: Vec<Routehop>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug)]
 pub struct RoutehintList {
     pub hints: Vec<Routehint>,
+}
+
+use serde::ser::SerializeSeq;
+
+impl Serialize for Routehint {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut seq = serializer.serialize_seq(Some(self.hops.len()))?;
+        for e in self.hops.iter() {
+            seq.serialize_element(e)?;
+        }
+        seq.end()
+    }
+}
+
+impl Serialize for RoutehintList {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut seq = serializer.serialize_seq(Some(self.hints.len()))?;
+        for e in self.hints.iter() {
+            seq.serialize_element(e)?;
+        }
+        seq.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for RoutehintList {
+    fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        todo!("Required once we roundtrip, but not necessary for cln-rpc itself")
+    }
+}
+
+impl<'de> Deserialize<'de> for Routehint {
+    fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        todo!("Required once we roundtrip, but not necessary for cln-rpc itself")
+    }
 }
 
 /// An error returned by the lightningd RPC consisting of a code and a

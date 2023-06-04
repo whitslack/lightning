@@ -3,6 +3,7 @@
 #include <bitcoin/psbt.h>
 #include <bitcoin/script.h>
 #include <bitcoin/tx.h>
+#include <ccan/cast/cast.h>
 #include <ccan/str/hex/hex.h>
 #include <ccan/tal/str/str.h>
 #include <common/type_to_string.h>
@@ -92,6 +93,15 @@ int bitcoin_tx_add_output(struct bitcoin_tx *tx, const u8 *script,
 	bitcoin_tx_output_set_amount(tx, i, amount);
 
 	return i;
+}
+
+void bitcoin_tx_remove_output(struct bitcoin_tx *tx, size_t outnum)
+{
+	int ret;
+	ret = wally_tx_remove_output(tx->wtx, outnum);
+	assert(ret == WALLY_OK);
+	ret = wally_psbt_remove_output(tx->psbt, outnum);
+	assert(ret == WALLY_OK);
 }
 
 bool elements_wtx_output_is_fee(const struct wally_tx *tx, int outnum)
@@ -559,6 +569,30 @@ struct bitcoin_tx *bitcoin_tx_with_psbt(const tal_t *ctx, struct wally_psbt *psb
 	return tx;
 }
 
+struct bitcoin_tx *clone_bitcoin_tx(const tal_t *ctx,
+				    const struct bitcoin_tx *tx)
+{
+	struct bitcoin_tx *newtx;
+
+	if (taken(tx))
+		return cast_const(struct bitcoin_tx *, tal_steal(ctx, tx));
+
+	newtx = tal(ctx, struct bitcoin_tx);
+
+	newtx->chainparams = tx->chainparams;
+
+	tal_wally_start();
+	if (wally_tx_clone_alloc(tx->wtx, 0, &newtx->wtx) != WALLY_OK)
+		newtx->wtx = NULL;
+	tal_wally_end_onto(newtx, newtx->wtx, struct wally_tx);
+	if (!newtx->wtx)
+		return tal_free(newtx);
+
+	newtx->psbt = clone_psbt(newtx, tx->psbt);
+	tal_add_destructor(newtx, bitcoin_tx_destroy);
+	return newtx;
+}
+
 static struct wally_tx *pull_wtx(const tal_t *ctx,
 				 const u8 **cursor,
 				 size_t *max)
@@ -668,7 +702,7 @@ bool bitcoin_txid_to_hex(const struct bitcoin_txid *txid,
 	return hex_encode(&rev, sizeof(rev), hexstr, hexstr_len);
 }
 
-static char *fmt_bitcoin_tx(const tal_t *ctx, const struct bitcoin_tx *tx)
+char *fmt_bitcoin_tx(const tal_t *ctx, const struct bitcoin_tx *tx)
 {
 	u8 *lin = linearize_tx(ctx, tx);
 	char *s = tal_hex(ctx, lin);
@@ -923,4 +957,15 @@ struct amount_sat change_amount(struct amount_sat excess, u32 feerate_perkw,
 		return AMOUNT_SAT(0);
 
 	return excess;
+}
+
+u32 tx_feerate(const struct bitcoin_tx *tx)
+{
+	struct amount_sat fee = bitcoin_tx_compute_fee(tx);
+
+	/* Fee should not overflow! */
+	if (!amount_sat_mul(&fee, fee, 1000))
+		abort();
+
+	return amount_sat_div(fee, bitcoin_tx_weight(tx)).satoshis; /* Raw: txfee */
 }

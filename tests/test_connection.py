@@ -3782,9 +3782,11 @@ def test_upgrade_statickey_onchaind(node_factory, executor, bitcoind):
     bitcoind.rpc.sendrawtransaction(tx)
     bitcoind.generate_block(1)
 
-    l2.wait_for_onchaind_broadcast('OUR_PENALTY_TX',
-                                   'THEIR_REVOKED_UNILATERAL/DELAYED_CHEAT_OUTPUT_TO_THEM')
-    bitcoind.generate_block(100)
+    _, txid, blocks = l2.wait_for_onchaind_tx('OUR_PENALTY_TX',
+                                              'THEIR_REVOKED_UNILATERAL/DELAYED_CHEAT_OUTPUT_TO_THEM')
+    assert blocks == 0
+
+    bitcoind.generate_block(100, wait_for_mempool=txid)
     # This works even if they disconnect and listpeerchannels() is empty:
     wait_for(lambda: l2.rpc.listpeerchannels()['channels'] == [])
 
@@ -3807,9 +3809,11 @@ def test_upgrade_statickey_onchaind(node_factory, executor, bitcoind):
     bitcoind.rpc.sendrawtransaction(tx)
     bitcoind.generate_block(1)
 
-    l2.wait_for_onchaind_broadcast('OUR_PENALTY_TX',
-                                   'THEIR_REVOKED_UNILATERAL/DELAYED_CHEAT_OUTPUT_TO_THEM')
-    bitcoind.generate_block(100)
+    _, txid, blocks = l2.wait_for_onchaind_tx('OUR_PENALTY_TX',
+                                              'THEIR_REVOKED_UNILATERAL/DELAYED_CHEAT_OUTPUT_TO_THEM')
+    assert blocks == 0
+
+    bitcoind.generate_block(100, wait_for_mempool=txid)
     # This works even if they disconnect and listpeers() is empty:
     wait_for(lambda: len(l2.rpc.listpeerchannels()['channels']) == 0)
 
@@ -3833,11 +3837,13 @@ def test_upgrade_statickey_onchaind(node_factory, executor, bitcoind):
     l2.start()
 
     # They should both handle it fine.
-    l1.daemon.wait_for_log('Propose handling OUR_UNILATERAL/DELAYED_OUTPUT_TO_US by OUR_DELAYED_RETURN_TO_WALLET .* after 5 blocks')
+    _, txid, blocks = l1.wait_for_onchaind_tx('OUR_DELAYED_RETURN_TO_WALLET',
+                                              'OUR_UNILATERAL/DELAYED_OUTPUT_TO_US')
+    assert blocks == 4
     l2.daemon.wait_for_logs(['Ignoring output .*: THEIR_UNILATERAL/OUTPUT_TO_US',
                              'Ignoring output .*: THEIR_UNILATERAL/DELAYED_OUTPUT_TO_THEM'])
-    bitcoind.generate_block(5)
-    bitcoind.generate_block(100, wait_for_mempool=1)
+    bitcoind.generate_block(4)
+    bitcoind.generate_block(100, wait_for_mempool=txid)
 
     # This works even if they disconnect and listpeerchannels() is empty:
     wait_for(lambda: len(l2.rpc.listpeerchannels()['channels']) == 0)
@@ -3858,12 +3864,14 @@ def test_upgrade_statickey_onchaind(node_factory, executor, bitcoind):
     l2.start()
 
     # They should both handle it fine.
-    l1.daemon.wait_for_log('Propose handling OUR_UNILATERAL/DELAYED_OUTPUT_TO_US by OUR_DELAYED_RETURN_TO_WALLET .* after 5 blocks')
+    _, txid, blocks = l1.wait_for_onchaind_tx('OUR_DELAYED_RETURN_TO_WALLET',
+                                              'OUR_UNILATERAL/DELAYED_OUTPUT_TO_US')
+    assert blocks == 4
     l2.daemon.wait_for_logs(['Ignoring output .*: THEIR_UNILATERAL/OUTPUT_TO_US',
                              'Ignoring output .*: THEIR_UNILATERAL/DELAYED_OUTPUT_TO_THEM'])
 
-    bitcoind.generate_block(5)
-    bitcoind.generate_block(100, wait_for_mempool=1)
+    bitcoind.generate_block(4)
+    bitcoind.generate_block(100, wait_for_mempool=txid)
 
     # This works even if they disconnect and listpeerchannels() is empty:
     wait_for(lambda: len(l2.rpc.listpeerchannels()['channels']) == 0)
@@ -4334,3 +4342,33 @@ def test_peer_disconnected_reflected_in_channel_state(node_factory):
 
     wait_for(lambda: only_one(l1.rpc.listpeers(l2.info['id'])['peers'])['connected'] is False)
     wait_for(lambda: only_one(l1.rpc.listpeerchannels(l2.info['id'])['channels'])['peer_connected'] is False)
+
+
+@pytest.mark.developer("needs dev-no-reconnect")
+def test_reconnect_no_additional_transient_failure(node_factory, bitcoind):
+    l1, l2 = node_factory.line_graph(2, opts=[{'may_reconnect': True},
+                                              {'may_reconnect': True,
+                                               'dev-no-reconnect': None}])
+    l1id = l1.info['id']
+    l2id = l2.info['id']
+    # We wait until conenction is established and channel is NORMAL
+    l2.daemon.wait_for_logs([f"{l1id}-connectd: Handed peer, entering loop",
+                             f"{l1id}-chan#1: State changed from CHANNELD_AWAITING_LOCKIN to CHANNELD_NORMAL"])
+    # We now stop l1
+    l1.stop()
+    # We wait for l2 to disconnect, ofc we also see an expected "Peer transient failure" here.
+    l2.daemon.wait_for_logs([f"{l1id}-channeld-chan#1: Peer connection lost",
+                             f"{l1id}-lightningd: peer_disconnect_done",
+                             f"{l1id}-chan#1: Peer transient failure in CHANNELD_NORMAL: channeld: Owning subdaemon channeld died"])
+
+    # When we restart l1 we should not see another Peer transient failure message.
+    offset1 = l1.daemon.logsearch_start
+    l1.start()
+
+    # We wait until l2 is fine again with l1
+    l2.daemon.wait_for_log(f"{l1id}-connectd: Handed peer, entering loop")
+
+    time.sleep(5)
+
+    # We should not see a "Peer transient failure" after restart of l1
+    assert not l1.daemon.is_in_log(f"{l2id}-chan#1: Peer transient failure in CHANNELD_NORMAL: Disconnected", start=offset1)

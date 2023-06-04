@@ -1621,13 +1621,13 @@ def test_forward_local_failed_stats(node_factory, bitcoind, executor):
     l4.daemon.wait_for_log(' to ONCHAIN')
 
     # Wait for timeout.
-    l2.daemon.wait_for_log('Propose handling THEIR_UNILATERAL/OUR_HTLC by OUR_HTLC_TIMEOUT_TO_US .* after 6 blocks')
-    bitcoind.generate_block(6)
+    _, txid, blocks = l2.wait_for_onchaind_tx('OUR_HTLC_TIMEOUT_TO_US',
+                                              'THEIR_UNILATERAL/OUR_HTLC')
+    assert blocks == 5
+    bitcoind.generate_block(5)
 
-    l2.wait_for_onchaind_broadcast('OUR_HTLC_TIMEOUT_TO_US',
-                                   'THEIR_UNILATERAL/OUR_HTLC')
-
-    bitcoind.generate_block(1)
+    # Could be RBF!
+    l2.mine_txid_or_rbf(txid)
     l2.daemon.wait_for_log('Resolved THEIR_UNILATERAL/OUR_HTLC by our proposal OUR_HTLC_TIMEOUT_TO_US')
     l4.daemon.wait_for_log('Ignoring output.*: OUR_UNILATERAL/THEIR_HTLC')
 
@@ -3147,9 +3147,9 @@ def test_partial_payment(node_factory, bitcoind, executor):
     l2.rpc.dev_reenable_commit(l1.info['id'])
     l3.rpc.dev_reenable_commit(l1.info['id'])
 
-    res = l1.rpc.waitsendpay(payment_hash=inv['payment_hash'], partid=1)
+    res = l1.rpc.waitsendpay(payment_hash=inv['payment_hash'], partid=1, timeout=TIMEOUT)
     assert res['partid'] == 1
-    res = l1.rpc.waitsendpay(payment_hash=inv['payment_hash'], partid=2)
+    res = l1.rpc.waitsendpay(payment_hash=inv['payment_hash'], partid=2, timeout=TIMEOUT)
     assert res['partid'] == 2
 
     for i in range(2):
@@ -3471,53 +3471,6 @@ def test_reject_invalid_payload(node_factory):
 
     with pytest.raises(RpcError, match=r'WIRE_INVALID_ONION_PAYLOAD'):
         l1.rpc.waitsendpay(inv['payment_hash'])
-
-
-@pytest.mark.skip("Needs to be updated for modern onion")
-@unittest.skipIf(not EXPERIMENTAL_FEATURES, "Needs blinding args to sendpay")
-def test_sendpay_blinding(node_factory):
-    l1, l2, l3, l4 = node_factory.line_graph(4)
-
-    blindedpathtool = os.path.join(os.path.dirname(__file__), "..", "devtools", "blindedpath")
-
-    # Create blinded path l2->l4
-    output = subprocess.check_output(
-        [blindedpathtool, '--simple-output', 'create',
-         l2.info['id'] + "/" + l2.get_channel_scid(l3),
-         l3.info['id'] + "/" + l3.get_channel_scid(l4),
-         l4.info['id']]
-    ).decode('ASCII').strip()
-
-    # First line is blinding, then <peerid> then <encblob>.
-    blinding, p1, p1enc, p2, p2enc, p3 = output.split('\n')
-    # First hop can't be blinded!
-    assert p1 == l2.info['id']
-
-    amt = 10**3
-    inv = l4.rpc.invoice(amt, "lbl", "desc")
-
-    route = [{'id': l2.info['id'],
-              'channel': l1.get_channel_scid(l2),
-              'amount_msat': Millisatoshi(1002),
-              'delay': 21,
-              'blinding': blinding,
-              'enctlv': p1enc},
-             {'id': p2,
-              'amount_msat': Millisatoshi(1001),
-              'delay': 15,
-              # FIXME: this is a dummy!
-              'channel': '0x0x0',
-              'enctlv': p2enc},
-             {'id': p3,
-              # FIXME: this is a dummy!
-              'channel': '0x0x0',
-              'amount_msat': Millisatoshi(1000),
-              'delay': 9,
-              'style': 'tlv'}]
-    l1.rpc.sendpay(route=route,
-                   payment_hash=inv['payment_hash'],
-                   bolt11=inv['bolt11'], payment_secret=inv['payment_secret'])
-    l1.rpc.waitsendpay(inv['payment_hash'])
 
 
 def test_excluded_adjacent_routehint(node_factory, bitcoind):
@@ -4093,6 +4046,29 @@ def test_delpay_payment_split(node_factory, bitcoind):
     delpay_result = l1.rpc.delpay(inv['payment_hash'], 'complete')['payments']
     assert len(delpay_result) >= 4
     assert len(l1.rpc.listpays()['pays']) == 0
+
+
+@pytest.mark.developer("needs dev-no-reconnect, dev-routes to force failover")
+def test_delpay_mixed_status(node_factory, bitcoind):
+    """
+    One failure, one success; we only want to delete the failed one!
+    """
+    l1, l2, l3 = node_factory.line_graph(3, fundamount=10**5,
+                                         wait_for_announce=True)
+    # Expensive route!
+    l4 = node_factory.get_node(options={'fee-per-satoshi': 1000,
+                                        'fee-base': 2000})
+    node_factory.join_nodes([l1, l4, l3], wait_for_announce=True)
+
+    # Don't give a hint, so l1 chooses cheapest.
+    inv = l3.dev_invoice(10**5, 'lbl', 'desc', dev_routes=[])
+    l3.rpc.disconnect(l2.info['id'], force=True)
+    l1.rpc.pay(inv['bolt11'])
+
+    assert len(l1.rpc.listsendpays()['payments']) == 2
+    delpay_result = l1.rpc.delpay(inv['payment_hash'], 'failed')['payments']
+    assert len(delpay_result) == 1
+    assert len(l1.rpc.listsendpays()['payments']) == 1
 
 
 def test_listpay_result_with_paymod(node_factory, bitcoind):
@@ -4673,6 +4649,57 @@ def test_fetchinvoice(node_factory, bitcoind):
     with pytest.raises(RpcError, match='Offer no longer available'):
         l1.rpc.call('fetchinvoice', {'offer': offer2})
 
+    # Now, test amount in different currency!
+    plugin = os.path.join(os.path.dirname(__file__), 'plugins/currencyUSDAUD5000.py')
+    l3.rpc.plugin_start(plugin)
+
+    offerusd = l3.rpc.call('offer', {'amount': '10.05USD',
+                                     'description': 'USD test'})['bolt12']
+
+    inv = l1.rpc.call('fetchinvoice', {'offer': offerusd})
+    assert inv['changes']['amount_msat'] == Millisatoshi(int(10.05 * 5000))
+
+    # Check we can request invoice without a channel.
+    offer3 = l2.rpc.call('offer', {'amount': '1msat',
+                                   'description': 'offer3'})
+    l4 = node_factory.get_node(options={'experimental-offers': None})
+    l4.rpc.connect(l2.info['id'], 'localhost', l2.port)
+    # ... even if we can't find ourselves.
+    l4.rpc.call('fetchinvoice', {'offer': offer3['bolt12']})
+    # ... even if we know it from gossmap
+    wait_for(lambda: l4.rpc.listnodes(l3.info['id'])['nodes'] != [])
+    l4.rpc.connect(l3.info['id'], 'localhost', l3.port)
+    l4.rpc.call('fetchinvoice', {'offer': offer1['bolt12']})
+
+    # If we remove plugin, it can no longer give us an invoice.
+    l3.rpc.plugin_stop(plugin)
+
+    with pytest.raises(RpcError, match="Internal error"):
+        l1.rpc.call('fetchinvoice', {'offer': offerusd})
+    l3.daemon.wait_for_log("Unknown command 'currencyconvert'")
+    # But we can still pay the (already-converted) invoice.
+    l1.rpc.pay(inv['invoice'])
+
+    # Identical creation gives it again, just with created false.
+    offer1 = l3.rpc.call('offer', {'amount': '2msat',
+                                   'description': 'simple test'})
+    assert offer1['created'] is False
+    l3.rpc.call('disableoffer', {'offer_id': offer1['offer_id']})
+    with pytest.raises(RpcError, match="1000.*Already exists, but isn't active"):
+        l3.rpc.call('offer', {'amount': '2msat',
+                              'description': 'simple test'})
+
+    # Test timeout.
+    l3.stop()
+    with pytest.raises(RpcError, match='Timeout waiting for response'):
+        l1.rpc.call('fetchinvoice', {'offer': offer1['bolt12'], 'timeout': 10})
+
+
+def test_fetchinvoice_recurrence(node_factory, bitcoind):
+    """Test for our recurrence extension"""
+    l1, l2, l3 = node_factory.line_graph(3, wait_for_announce=True,
+                                         opts={'experimental-offers': None})
+
     # Recurring offer.
     offer3 = l2.rpc.call('offer', {'amount': '1msat',
                                    'description': 'recurring test',
@@ -4723,51 +4750,6 @@ def test_fetchinvoice(node_factory, bitcoind):
     l1.rpc.call('fetchinvoice', {'offer': offer3['bolt12'],
                                  'recurrence_counter': 2,
                                  'recurrence_label': 'test recurrence'})
-
-    # Check we can request invoice without a channel.
-    l4 = node_factory.get_node(options={'experimental-offers': None})
-    l4.rpc.connect(l2.info['id'], 'localhost', l2.port)
-    # ... even if we can't find ourselves.
-    l4.rpc.call('fetchinvoice', {'offer': offer3['bolt12'],
-                                 'recurrence_counter': 0,
-                                 'recurrence_label': 'test nochannel'})
-    # ... even if we know it from gossmap
-    wait_for(lambda: l4.rpc.listnodes(l3.info['id'])['nodes'] != [])
-    l4.rpc.connect(l3.info['id'], 'localhost', l3.port)
-    l4.rpc.call('fetchinvoice', {'offer': offer1['bolt12']})
-
-    # Now, test amount in different currency!
-    plugin = os.path.join(os.path.dirname(__file__), 'plugins/currencyUSDAUD5000.py')
-    l3.rpc.plugin_start(plugin)
-
-    offerusd = l3.rpc.call('offer', {'amount': '10.05USD',
-                                     'description': 'USD test'})['bolt12']
-
-    inv = l1.rpc.call('fetchinvoice', {'offer': offerusd})
-    assert inv['changes']['amount_msat'] == Millisatoshi(int(10.05 * 5000))
-
-    # If we remove plugin, it can no longer give us an invoice.
-    l3.rpc.plugin_stop(plugin)
-
-    with pytest.raises(RpcError, match="Internal error"):
-        l1.rpc.call('fetchinvoice', {'offer': offerusd})
-    l3.daemon.wait_for_log("Unknown command 'currencyconvert'")
-    # But we can still pay the (already-converted) invoice.
-    l1.rpc.pay(inv['invoice'])
-
-    # Identical creation gives it again, just with created false.
-    offer1 = l3.rpc.call('offer', {'amount': '2msat',
-                                   'description': 'simple test'})
-    assert offer1['created'] is False
-    l3.rpc.call('disableoffer', {'offer_id': offer1['offer_id']})
-    with pytest.raises(RpcError, match="1000.*Offer already exists, but isn't active"):
-        l3.rpc.call('offer', {'amount': '2msat',
-                              'description': 'simple test'})
-
-    # Test timeout.
-    l3.stop()
-    with pytest.raises(RpcError, match='Timeout waiting for response'):
-        l1.rpc.call('fetchinvoice', {'offer': offer1['bolt12'], 'timeout': 10})
 
     # Now try an offer with a more complex paywindow (only 10 seconds before)
     offer = l2.rpc.call('offer', {'amount': '1msat',

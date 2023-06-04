@@ -87,6 +87,8 @@ static struct migration dbmigrations[] = {
      NULL},
     {SQL("CREATE TABLE channels ("
 	 "  id BIGSERIAL," /* chan->id */
+	 /* FIXME: We deliberately never delete a peer with channels, so this constraint is
+	  * unnecessary! */
 	 "  peer_id BIGINT REFERENCES peers(id) ON DELETE CASCADE,"
 	 "  short_channel_id TEXT,"
 	 "  channel_config_local BIGINT,"
@@ -1034,11 +1036,7 @@ void fillin_missing_scriptpubkeys(struct lightningd *ld, struct db *db)
 
 			channel_id = db_col_u64(stmt, "channel_id");
 			db_col_node_id(stmt, "peer_id", &peer_id);
-			if (!db_col_is_null(stmt, "commitment_point")) {
-				commitment_point = tal(stmt, struct pubkey);
-				db_col_pubkey(stmt, "commitment_point", commitment_point);
-			} else
-				commitment_point = NULL;
+			commitment_point = db_col_optional(stmt, stmt, "commitment_point", pubkey);
 
 			/* Have to go ask the HSM to derive the pubkey for us */
 			msg = towire_hsmd_get_output_scriptpubkey(NULL,

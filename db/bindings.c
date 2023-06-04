@@ -166,8 +166,8 @@ void db_bind_short_channel_id_str(struct db_stmt *stmt, int col,
 	db_bind_text(stmt, col, ser);
 }
 
-void db_bind_scid(struct db_stmt *stmt, int col,
-		  const struct short_channel_id *id)
+void db_bind_short_channel_id(struct db_stmt *stmt, int col,
+			      const struct short_channel_id *id)
 {
 	db_bind_u64(stmt, col, id->u64);
 }
@@ -379,10 +379,21 @@ bool db_col_short_channel_id_str(struct db_stmt *stmt, const char *colname,
 	return short_channel_id_from_str(source, sourcelen, dest);
 }
 
-void db_col_scid(struct db_stmt *stmt, const char *colname,
-		 struct short_channel_id *dest)
+void db_col_short_channel_id(struct db_stmt *stmt, const char *colname,
+				 struct short_channel_id *dest)
 {
 	dest->u64 = db_col_u64(stmt, colname);
+}
+
+void *db_col_optional_(tal_t *dst,
+		       struct db_stmt *stmt, const char *colname,
+		       void (*colfn)(struct db_stmt *, const char *, void *))
+{
+	if (db_col_is_null(stmt, colname))
+		return tal_free(dst);
+
+	colfn(stmt, colname, dst);
+	return dst;
 }
 
 struct short_channel_id *

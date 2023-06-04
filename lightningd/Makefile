@@ -8,6 +8,7 @@ LIGHTNINGD_SRC :=				\
 	lightningd/closing_control.c		\
 	lightningd/coin_mvts.c			\
 	lightningd/dual_open_control.c		\
+	lightningd/closed_channel.c		\
 	lightningd/connect_control.c		\
 	lightningd/onion_message.c		\
 	lightningd/feerate.c			\
@@ -98,6 +99,7 @@ LIGHTNINGD_COMMON_OBJS :=			\
 	common/hsm_encryption.o			\
 	common/htlc_state.o			\
 	common/htlc_trim.o			\
+	common/htlc_tx.o			\
 	common/htlc_wire.o			\
 	common/invoice_path_id.o		\
 	common/key_derive.o			\

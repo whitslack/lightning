@@ -630,9 +630,9 @@ struct state_change_entry *wallet_state_change_get(struct wallet *w,
 						   u64 channel_id);
 
 /**
- * wallet_peer_delete -- After no more channels in peer, forget about it
+ * wallet_delete_peer_if_unused -- After no more channels in peer, forget about it
  */
-void wallet_peer_delete(struct wallet *w, u64 peer_dbid);
+void wallet_delete_peer_if_unused(struct wallet *w, u64 peer_dbid);
 
 /**
  * wallet_init_channels -- Loads active channels into peers
@@ -644,6 +644,16 @@ void wallet_peer_delete(struct wallet *w, u64 peer_dbid);
  * loaded from the database to the list without checking.
  */
 bool wallet_init_channels(struct wallet *w);
+
+/**
+ * wallet_load_closed_channels -- Loads dead channels.
+ * @ctx: context to allocate returned array from
+ * @w: wallet to load from
+ *
+ * These will be all state CLOSED.
+ */
+struct closed_channel **wallet_load_closed_channels(const tal_t *ctx,
+						    struct wallet *w);
 
 /**
  * wallet_channel_stats_incr_* - Increase channel statistics.
@@ -1095,8 +1105,8 @@ void wallet_payment_store(struct wallet *wallet,
  */
 void wallet_payment_delete(struct wallet *wallet,
 			   const struct sha256 *payment_hash,
-			   const u64 *groupid,
-			   const u64 *partid);
+			   const u64 *groupid, const u64 *partid,
+			   const enum wallet_payment_status *status);
 
 /**
  * wallet_local_htlc_out_delete - Remove a local outgoing failed HTLC
@@ -1612,4 +1622,11 @@ struct db_stmt *wallet_datastore_next(const tal_t *ctx,
 				      const u8 **data,
 				      u64 *generation);
 
+/* Make a PSBT from these utxos, or enhance @base if non-NULL. */
+struct wally_psbt *psbt_using_utxos(const tal_t *ctx,
+				    struct wallet *wallet,
+				    struct utxo **utxos,
+				    u32 nlocktime,
+				    u32 nsequence,
+				    struct wally_psbt *base);
 #endif /* LIGHTNING_WALLET_WALLET_H */

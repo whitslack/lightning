@@ -51,14 +51,17 @@ char *bolt11_encode_(const tal_t *ctx UNNEEDED,
 				  void *arg) UNNEEDED,
 		     void *arg UNNEEDED)
 { fprintf(stderr, "bolt11_encode_ called!\n"); abort(); }
-/* Generated stub for broadcast_tx */
-void broadcast_tx(struct chain_topology *topo UNNEEDED,
-		  struct channel *channel UNNEEDED, const struct bitcoin_tx *tx UNNEEDED,
-		  const char *cmd_id UNNEEDED, bool allowhighfees UNNEEDED,
-		  void (*failed)(struct channel * UNNEEDED,
-				 bool success UNNEEDED,
-				 const char *err))
-{ fprintf(stderr, "broadcast_tx called!\n"); abort(); }
+/* Generated stub for broadcast_tx_ */
+void broadcast_tx_(struct chain_topology *topo UNNEEDED,
+		   struct channel *channel UNNEEDED,
+		   const struct bitcoin_tx *tx TAKES UNNEEDED,
+		   const char *cmd_id UNNEEDED, bool allowhighfees UNNEEDED, u32 minblock UNNEEDED,
+		   void (*finished)(struct channel * UNNEEDED,
+				    bool success UNNEEDED,
+				    const char *err) UNNEEDED,
+		   bool (*refresh)(struct channel * UNNEEDED, const struct bitcoin_tx ** UNNEEDED, void *) UNNEEDED,
+		   void *refresh_arg TAKES UNNEEDED)
+{ fprintf(stderr, "broadcast_tx_ called!\n"); abort(); }
 /* Generated stub for channel_change_state_reason_str */
 const char *channel_change_state_reason_str(enum state_change reason UNNEEDED)
 { fprintf(stderr, "channel_change_state_reason_str called!\n"); abort(); }
@@ -114,6 +117,9 @@ bool channel_tell_depth(struct lightningd *ld UNNEEDED,
 /* Generated stub for channel_type_has */
 bool channel_type_has(const struct channel_type *type UNNEEDED, int feature UNNEEDED)
 { fprintf(stderr, "channel_type_has called!\n"); abort(); }
+/* Generated stub for channel_type_name */
+const char **channel_type_name(const tal_t *ctx UNNEEDED, const struct channel_type *t UNNEEDED)
+{ fprintf(stderr, "channel_type_name called!\n"); abort(); }
 /* Generated stub for channel_unsaved_close_conn */
 void channel_unsaved_close_conn(struct channel *channel UNNEEDED, const char *why UNNEEDED)
 { fprintf(stderr, "channel_unsaved_close_conn called!\n"); abort(); }
@@ -286,6 +292,11 @@ u32 get_feerate(const struct fee_states *fee_states UNNEEDED,
 /* Generated stub for hash_htlc_key */
 size_t hash_htlc_key(const struct htlc_key *htlc_key UNNEEDED)
 { fprintf(stderr, "hash_htlc_key called!\n"); abort(); }
+/* Generated stub for hsm_sync_req */
+const u8 *hsm_sync_req(const tal_t *ctx UNNEEDED,
+		       struct lightningd *ld UNNEEDED,
+		       const u8 *msg TAKES UNNEEDED)
+{ fprintf(stderr, "hsm_sync_req called!\n"); abort(); }
 /* Generated stub for htlc_is_trimmed */
 bool htlc_is_trimmed(enum side htlc_owner UNNEEDED,
 		     struct amount_msat htlc_amount UNNEEDED,
@@ -821,6 +832,9 @@ void wallet_channeltxs_add(struct wallet *w UNNEEDED, struct channel *chan UNNEE
 			    const int type UNNEEDED, const struct bitcoin_txid *txid UNNEEDED,
 			   const u32 input_num UNNEEDED, const u32 blockheight UNNEEDED)
 { fprintf(stderr, "wallet_channeltxs_add called!\n"); abort(); }
+/* Generated stub for wallet_delete_peer_if_unused */
+void wallet_delete_peer_if_unused(struct wallet *w UNNEEDED, u64 peer_dbid UNNEEDED)
+{ fprintf(stderr, "wallet_delete_peer_if_unused called!\n"); abort(); }
 /* Generated stub for wallet_htlcs_load_in_for_channel */
 bool wallet_htlcs_load_in_for_channel(struct wallet *wallet UNNEEDED,
 				      struct channel *chan UNNEEDED,
@@ -916,9 +930,6 @@ char *wallet_offer_find(const tal_t *ctx UNNEEDED,
 			enum offer_status *status)
 
 { fprintf(stderr, "wallet_offer_find called!\n"); abort(); }
-/* Generated stub for wallet_peer_delete */
-void wallet_peer_delete(struct wallet *w UNNEEDED, u64 peer_dbid UNNEEDED)
-{ fprintf(stderr, "wallet_peer_delete called!\n"); abort(); }
 /* Generated stub for wallet_state_change_get */
 struct state_change_entry *wallet_state_change_get(struct wallet *w UNNEEDED,
 						   const tal_t *ctx UNNEEDED,

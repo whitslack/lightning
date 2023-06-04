@@ -43,6 +43,8 @@ Core Lightning Documentation
    lightning-checkmessage <lightning-checkmessage.7.md>
    lightning-cli <lightning-cli.1.md>
    lightning-close <lightning-close.7.md>
+   lightning-commando-blacklist <lightning-commando-blacklist.7.md>
+   lightning-commando-listrunes <lightning-commando-listrunes.7.md>
    lightning-commando-rune <lightning-commando-rune.7.md>
    lightning-commando <lightning-commando.7.md>
    lightning-connect <lightning-connect.7.md>
@@ -74,6 +76,7 @@ Core Lightning Documentation
    lightning-invoice <lightning-invoice.7.md>
    lightning-keysend <lightning-keysend.7.md>
    lightning-listchannels <lightning-listchannels.7.md>
+   lightning-listclosedchannels <lightning-listclosedchannels.7.md>
    lightning-listconfigs <lightning-listconfigs.7.md>
    lightning-listdatastore <lightning-listdatastore.7.md>
    lightning-listforwards <lightning-listforwards.7.md>
