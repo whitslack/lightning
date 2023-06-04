@@ -850,7 +850,7 @@ static void delete_node_from_db(struct command *cmd,
 	err = sqlite3_exec(db,
 			   tal_fmt(tmpctx,
 				   "DELETE FROM nodes"
-				   " WHERE nodeid = %s",
+				   " WHERE nodeid = X'%s'",
 				   node_id_to_hexstr(tmpctx, id)),
 			   NULL, NULL, &errmsg);
 	if (err != SQLITE_OK)
@@ -880,7 +880,7 @@ static bool extract_node_id(int gosstore_fd, size_t off, u16 type,
 	    != sizeof(flen))
 		return false;
 
-	node_id_off = off + feature_len_off + 2 + flen + 4;
+	node_id_off = off + feature_len_off + 2 + be16_to_cpu(flen) + 4;
 	if (pread(gosstore_fd, id, sizeof(*id), node_id_off) != sizeof(*id))
 		return false;
 

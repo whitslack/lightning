@@ -872,20 +872,14 @@ u32 gossip_store_load(struct routing_state *rstate, struct gossip_store *gs)
 		case WIRE_CHANNEL_UPDATE:
 			if (!routing_add_channel_update(rstate,
 							take(msg), gs->len,
-							NULL, false, spam)) {
+							NULL, false,
+							spam, false)) {
 				bad = "Bad channel_update";
 				goto badmsg;
 			}
 			stats[1]++;
 			break;
 		case WIRE_NODE_ANNOUNCEMENT:
-			/* In early v23.02 rcs we had zombie node announcements,
-			 * so throw them away here. */
-			if (be16_to_cpu(hdr.flags) & GOSSIP_STORE_ZOMBIE_BIT) {
-				status_unusual("gossip_store: removing zombie"
-					       " node_announcement from v23.02 rcs");
-				break;
-			}
 			if (!routing_add_node_announcement(rstate,
 							   take(msg), gs->len,
 							   NULL, NULL, spam)) {
