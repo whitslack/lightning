@@ -68,7 +68,7 @@ RETURN VALUE
 On success, an object is returned, containing:
 
 - **id** (u64): unique ID for this payment attempt
-- **payment\_hash** (hash): the hash of the *payment\_preimage* which will prove payment (always 64 characters)
+- **payment\_hash** (hash): the hash of the *payment\_preimage* which will prove payment
 - **status** (string): status of the payment (could be complete if already sent previously) (one of "pending", "complete")
 - **created\_at** (u64): the UNIX timestamp showing when this payment was initiated
 - **amount\_sent\_msat** (msat): The amount sent
@@ -82,7 +82,7 @@ On success, an object is returned, containing:
 
 If **status** is "complete":
 
-  - **payment\_preimage** (secret): the proof of payment: SHA256 of this **payment\_hash** (always 64 characters)
+  - **payment\_preimage** (secret): the proof of payment: SHA256 of this **payment\_hash**
 
 If **status** is "pending":
 
@@ -141,4 +141,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:fdaa1c7d534634a8c1c0eed920b1555dd955e0dba500e936e86e67deedd65c38)
+[comment]: # ( SHA256STAMP:3076505aa83048dfa3ea494cbb1c439ab51bce0b6170b302140cbb6ede598a4d)

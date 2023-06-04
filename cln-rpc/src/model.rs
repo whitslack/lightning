@@ -60,7 +60,9 @@ pub enum Request {
 	ListForwards(requests::ListforwardsRequest),
 	ListPays(requests::ListpaysRequest),
 	Ping(requests::PingRequest),
+	SendCustomMsg(requests::SendcustommsgRequest),
 	SetChannel(requests::SetchannelRequest),
+	SignInvoice(requests::SigninvoiceRequest),
 	SignMessage(requests::SignmessageRequest),
 	Stop(requests::StopRequest),
 }
@@ -113,7 +115,9 @@ pub enum Response {
 	ListForwards(responses::ListforwardsResponse),
 	ListPays(responses::ListpaysResponse),
 	Ping(responses::PingResponse),
+	SendCustomMsg(responses::SendcustommsgResponse),
 	SetChannel(responses::SetchannelResponse),
+	SignInvoice(responses::SigninvoiceResponse),
 	SignMessage(responses::SignmessageResponse),
 	Stop(responses::StopResponse),
 }
@@ -1217,6 +1221,22 @@ pub mod requests {
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct SendcustommsgRequest {
+	    pub node_id: PublicKey,
+	    pub msg: String,
+	}
+
+	impl From<SendcustommsgRequest> for Request {
+	    fn from(r: SendcustommsgRequest) -> Self {
+	        Request::SendCustomMsg(r)
+	    }
+	}
+
+	impl IntoRequest for SendcustommsgRequest {
+	    type Response = super::responses::SendcustommsgResponse;
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct SetchannelRequest {
 	    pub id: String,
 	    #[serde(skip_serializing_if = "Option::is_none")]
@@ -1239,6 +1259,21 @@ pub mod requests {
 
 	impl IntoRequest for SetchannelRequest {
 	    type Response = super::responses::SetchannelResponse;
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct SigninvoiceRequest {
+	    pub invstring: String,
+	}
+
+	impl From<SigninvoiceRequest> for Request {
+	    fn from(r: SigninvoiceRequest) -> Self {
+	        Request::SignInvoice(r)
+	    }
+	}
+
+	impl IntoRequest for SigninvoiceRequest {
+	    type Response = super::responses::SigninvoiceResponse;
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1390,8 +1425,7 @@ pub mod responses {
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub msatoshi_fees_collected: Option<u64>,
 	    pub fees_collected_msat: Amount,
-	    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
-	    pub address: Option<Vec<GetinfoAddress>>,
+	    pub address: Vec<GetinfoAddress>,
 	    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
 	    pub binding: Option<Vec<GetinfoBinding>>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
@@ -1703,6 +1737,7 @@ pub mod responses {
 	pub struct ListpeersPeers {
 	    pub id: PublicKey,
 	    pub connected: bool,
+	    pub num_channels: u32,
 	    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
 	    pub log: Option<Vec<ListpeersPeersLog>>,
 	    #[deprecated]
@@ -2357,7 +2392,7 @@ pub mod responses {
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub bolt12: Option<String>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub local_offer_id: Option<String>,
+	    pub local_offer_id: Option<Sha256>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub invreq_payer_note: Option<String>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
@@ -2468,6 +2503,8 @@ pub mod responses {
 	pub struct ListsendpaysPayments {
 	    pub id: u64,
 	    pub groupid: u64,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub partid: Option<u64>,
 	    pub payment_hash: Sha256,
 	    // Path `ListSendPays.payments[].status`
 	    pub status: ListsendpaysPaymentsStatus,
@@ -3422,7 +3459,7 @@ pub mod responses {
 	}
 	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct ListpaysPays {
-	    pub payment_hash: String,
+	    pub payment_hash: Sha256,
 	    // Path `ListPays.pays[].status`
 	    pub status: ListpaysPaysStatus,
 	    #[serde(skip_serializing_if = "Option::is_none")]
@@ -3437,7 +3474,7 @@ pub mod responses {
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub bolt12: Option<String>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub preimage: Option<String>,
+	    pub preimage: Option<Secret>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub number_of_parts: Option<u64>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
@@ -3477,6 +3514,22 @@ pub mod responses {
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct SendcustommsgResponse {
+	    pub status: String,
+	}
+
+	impl TryFrom<Response> for SendcustommsgResponse {
+	    type Error = super::TryFromResponseError;
+
+	    fn try_from(response: Response) -> Result<Self, Self::Error> {
+	        match response {
+	            Response::SendCustomMsg(response) => Ok(response),
+	            _ => Err(TryFromResponseError)
+	        }
+	    }
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct SetchannelChannels {
 	    pub peer_id: PublicKey,
 	    pub channel_id: String,
@@ -3503,6 +3556,22 @@ pub mod responses {
 	    fn try_from(response: Response) -> Result<Self, Self::Error> {
 	        match response {
 	            Response::SetChannel(response) => Ok(response),
+	            _ => Err(TryFromResponseError)
+	        }
+	    }
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct SigninvoiceResponse {
+	    pub bolt11: String,
+	}
+
+	impl TryFrom<Response> for SigninvoiceResponse {
+	    type Error = super::TryFromResponseError;
+
+	    fn try_from(response: Response) -> Result<Self, Self::Error> {
+	        match response {
+	            Response::SignInvoice(response) => Ok(response),
 	            _ => Err(TryFromResponseError)
 	        }
 	    }

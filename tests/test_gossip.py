@@ -6,7 +6,7 @@ from pyln.client import RpcError, Millisatoshi
 from utils import (
     DEVELOPER, wait_for, TIMEOUT, only_one, sync_blockheight,
     expected_node_features,
-    mine_funding_to_announce, default_ln_port
+    mine_funding_to_announce, default_ln_port, CHANNEL_SIZE
 )
 
 import json
@@ -179,7 +179,7 @@ def test_announce_dns_suppressed(node_factory, bitcoind):
 
     addresses = only_one(l2.rpc.listnodes(l1.info['id'])['nodes'])['addresses']
     assert len(addresses) == 1
-    assert addresses[0]['type'] == 'ipv4'
+    assert addresses[0]['type'] in ['ipv4', 'ipv6']
     assert addresses[0]['address'] != 'example.com'
     assert addresses[0]['port'] == 1236
 
@@ -632,11 +632,11 @@ def test_routing_gossip_reconnect(node_factory):
                                               {'may_reconnect': True},
                                               {}])
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
-    l1.openchannel(l2, 25000)
+    l1.openchannel(l2, CHANNEL_SIZE)
 
     # Now open new channels and everybody should sync
     l2.rpc.connect(l3.info['id'], 'localhost', l3.port)
-    l2.openchannel(l3, 25000)
+    l2.openchannel(l3, CHANNEL_SIZE)
 
     # Settle the gossip
     for n in [l1, l2, l3]:
@@ -694,7 +694,7 @@ def test_routing_gossip(node_factory, bitcoind):
     for i in range(len(nodes) - 1):
         src, dst = nodes[i], nodes[i + 1]
         src.rpc.connect(dst.info['id'], 'localhost', dst.port)
-        src.openchannel(dst, 25000, confirm=False, wait_for_announce=False)
+        src.openchannel(dst, CHANNEL_SIZE, confirm=False, wait_for_announce=False)
 
     # openchannel calls fundwallet which mines a block; so first channel
     # is 4 deep, last is unconfirmed.
@@ -1307,12 +1307,8 @@ def test_node_reannounce(node_factory, bitcoind, chainparams):
     wait_for(lambda: 'alias' in only_one(l2.rpc.listnodes(l1.info['id'])['nodes']))
     assert only_one(l2.rpc.listnodes(l1.info['id'])['nodes'])['alias'].startswith('JUNIORBEAM')
 
-    lfeatures = expected_node_features()
-    if l1.config('experimental-dual-fund'):
-        lfeatures = expected_node_features(extra=[21, 29])
-
     # Make sure it gets features correct.
-    assert only_one(l2.rpc.listnodes(l1.info['id'])['nodes'])['features'] == lfeatures
+    assert only_one(l2.rpc.listnodes(l1.info['id'])['nodes'])['features'] == expected_node_features()
 
     l1.stop()
     l1.daemon.opts['alias'] = 'SENIORBEAM'

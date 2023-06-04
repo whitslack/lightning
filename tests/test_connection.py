@@ -9,7 +9,8 @@ from utils import (
     expected_channel_features,
     check_coin_moves, first_channel_id, account_balance, basic_fee,
     scriptpubkey_addr, default_ln_port,
-    EXPERIMENTAL_FEATURES, mine_funding_to_announce, first_scid
+    EXPERIMENTAL_FEATURES, mine_funding_to_announce, first_scid,
+    anchor_expected, CHANNEL_SIZE
 )
 from pyln.testing.utils import SLOW_MACHINE, VALGRIND, EXPERIMENTAL_DUAL_FUND, FUNDAMOUNT
 
@@ -24,26 +25,28 @@ import websocket
 
 def test_connect_basic(node_factory):
     l1, l2 = node_factory.line_graph(2, fundchannel=False)
+    l1id = l1.info['id']
+    l2id = l2.info['id']
 
     # These should be in openingd.
-    assert l1.rpc.getpeer(l2.info['id'])['connected']
-    assert l2.rpc.getpeer(l1.info['id'])['connected']
-    assert len(l1.rpc.listpeerchannels(l2.info['id'])['channels']) == 0
-    assert len(l2.rpc.listpeerchannels(l1.info['id'])['channels']) == 0
+    assert l1.rpc.getpeer(l2id)['connected']
+    assert l2.rpc.getpeer(l1id)['connected']
+    assert len(l1.rpc.listpeerchannels(l2id)['channels']) == 0
+    assert len(l2.rpc.listpeerchannels(l1id)['channels']) == 0
 
     # Reconnect should be a noop
-    ret = l1.rpc.connect(l2.info['id'], 'localhost', port=l2.port)
-    assert ret['id'] == l2.info['id']
+    ret = l1.rpc.connect(l2id, 'localhost', port=l2.port)
+    assert ret['id'] == l2id
     assert ret['address'] == {'type': 'ipv4', 'address': '127.0.0.1', 'port': l2.port}
 
-    ret = l2.rpc.connect(l1.info['id'], host='localhost', port=l1.port)
-    assert ret['id'] == l1.info['id']
+    ret = l2.rpc.connect(l1id, host='localhost', port=l1.port)
+    assert ret['id'] == l1id
     # FIXME: This gives a bogus address (since they connected to us): better to give none!
     assert 'address' in ret
 
     # Should still only have one peer!
-    assert len(l1.rpc.listpeers()) == 1
-    assert len(l2.rpc.listpeers()) == 1
+    assert len(l1.rpc.listpeers()['peers']) == 1
+    assert len(l2.rpc.listpeers()['peers']) == 1
 
     # Should get reasonable error if unknown addr for peer.
     with pytest.raises(RpcError, match=r'Unable to connect, no address known'):
@@ -56,6 +59,13 @@ def test_connect_basic(node_factory):
     # Should get reasonable error if wrong key for peer.
     with pytest.raises(RpcError, match=r'Cryptographic handshake: peer closed connection \(wrong key\?\)'):
         l1.rpc.connect('032cf15d1ad9c4a08d26eab1918f732d8ef8fdc6abb9640bf3db174372c491304e', 'localhost', l2.port)
+
+    # test new `num_channels` param
+    assert l1.rpc.listpeers(l2id)['peers'][0]['num_channels'] == 0
+    l1.fundchannel(l2)
+    assert l1.rpc.listpeers(l2id)['peers'][0]['num_channels'] == 1
+    l1.fundchannel(l2)
+    assert l1.rpc.listpeers(l2id)['peers'][0]['num_channels'] == 2
 
 
 @pytest.mark.developer("needs DEVELOPER=1 for fast gossip and --dev-allow-localhost for local remote_addr")
@@ -378,7 +388,7 @@ def test_opening_tiny_channel(node_factory):
     reserves = 2 * dustlimit
     min_commit_tx_fees = basic_fee(7500)
     overhead = reserves + min_commit_tx_fees
-    if EXPERIMENTAL_FEATURES or EXPERIMENTAL_DUAL_FUND:
+    if anchor_expected():
         # Gotta fund those anchors too!
         overhead += 660
 
@@ -397,20 +407,29 @@ def test_opening_tiny_channel(node_factory):
 
     with pytest.raises(RpcError, match=r'They sent [error|warning].*channel capacity is .*, which is below .*sat'):
         l1.fundchannel(l2, l2_min_capacity + overhead - 1)
-    wait_for(lambda: l1.rpc.listpeers(l2.info['id'])['peers'] == [])
-    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
+    if EXPERIMENTAL_DUAL_FUND:
+        assert only_one(l1.rpc.listpeers(l2.info['id'])['peers'])['connected']
+    else:
+        wait_for(lambda: l1.rpc.listpeers(l2.info['id'])['peers'] == [])
+        l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     l1.fundchannel(l2, l2_min_capacity + overhead)
 
     with pytest.raises(RpcError, match=r'They sent [error|warning].*channel capacity is .*, which is below .*sat'):
         l1.fundchannel(l3, l3_min_capacity + overhead - 1)
-    wait_for(lambda: l1.rpc.listpeers(l3.info['id'])['peers'] == [])
-    l1.rpc.connect(l3.info['id'], 'localhost', l3.port)
+    if EXPERIMENTAL_DUAL_FUND:
+        assert only_one(l1.rpc.listpeers(l3.info['id'])['peers'])['connected']
+    else:
+        wait_for(lambda: l1.rpc.listpeers(l3.info['id'])['peers'] == [])
+        l1.rpc.connect(l3.info['id'], 'localhost', l3.port)
     l1.fundchannel(l3, l3_min_capacity + overhead)
 
     with pytest.raises(RpcError, match=r'They sent [error|warning].*channel capacity is .*, which is below .*sat'):
         l1.fundchannel(l4, l4_min_capacity + overhead - 1)
-    wait_for(lambda: l1.rpc.listpeers(l4.info['id'])['peers'] == [])
-    l1.rpc.connect(l4.info['id'], 'localhost', l4.port)
+    if EXPERIMENTAL_DUAL_FUND:
+        assert only_one(l1.rpc.listpeers(l4.info['id'])['peers'])['connected']
+    else:
+        wait_for(lambda: l1.rpc.listpeers(l4.info['id'])['peers'] == [])
+        l1.rpc.connect(l4.info['id'], 'localhost', l4.port)
     l1.fundchannel(l4, l4_min_capacity + overhead)
 
     # Note that this check applies locally too, so you can't open it if
@@ -418,8 +437,12 @@ def test_opening_tiny_channel(node_factory):
     l3.rpc.connect(l2.info['id'], 'localhost', l2.port)
     with pytest.raises(RpcError, match=r"channel capacity is .*, which is below .*sat"):
         l3.fundchannel(l2, l3_min_capacity + overhead - 1)
-    wait_for(lambda: l3.rpc.listpeers(l2.info['id'])['peers'] == [])
-    l3.rpc.connect(l2.info['id'], 'localhost', l2.port)
+
+    if EXPERIMENTAL_DUAL_FUND:
+        assert only_one(l3.rpc.listpeers(l2.info['id'])['peers'])['connected']
+    else:
+        wait_for(lambda: l3.rpc.listpeers(l2.info['id'])['peers'] == [])
+        l3.rpc.connect(l2.info['id'], 'localhost', l2.port)
     l3.fundchannel(l2, l3_min_capacity + overhead)
 
 
@@ -516,13 +539,13 @@ def test_disconnect_opener(node_factory):
     for d in disconnects:
         l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
         with pytest.raises(RpcError):
-            l1.rpc.fundchannel(l2.info['id'], 25000)
+            l1.rpc.fundchannel(l2.info['id'], CHANNEL_SIZE)
         # First peer valishes, but later it just disconnects
         wait_for(lambda: all([p['connected'] is False for p in l1.rpc.listpeers()['peers']]))
 
     # This one will succeed.
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
-    l1.rpc.fundchannel(l2.info['id'], 25000)
+    l1.rpc.fundchannel(l2.info['id'], CHANNEL_SIZE)
 
     # Should still only have one peer!
     assert len(l1.rpc.listpeers()['peers']) == 1
@@ -561,13 +584,13 @@ def test_disconnect_fundee(node_factory):
     for d in disconnects:
         l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
         with pytest.raises(RpcError):
-            l1.rpc.fundchannel(l2.info['id'], 25000)
+            l1.rpc.fundchannel(l2.info['id'], CHANNEL_SIZE)
         # First peer valishes, but later it just disconnects
         wait_for(lambda: all([p['connected'] is False for p in l1.rpc.listpeers()['peers']]))
 
     # This one will succeed.
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
-    l1.rpc.fundchannel(l2.info['id'], 25000)
+    l1.rpc.fundchannel(l2.info['id'], CHANNEL_SIZE)
 
     # Should still only have one peer!
     assert len(l1.rpc.listpeers()) == 1
@@ -601,12 +624,12 @@ def test_disconnect_fundee_v2(node_factory):
     for d in disconnects:
         l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
         with pytest.raises(RpcError):
-            l1.rpc.fundchannel(l2.info['id'], 25000)
+            l1.rpc.fundchannel(l2.info['id'], CHANNEL_SIZE)
         assert l1.rpc.getpeer(l2.info['id']) is None
 
     # This one will succeed.
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
-    l1.rpc.fundchannel(l2.info['id'], 25000)
+    l1.rpc.fundchannel(l2.info['id'], CHANNEL_SIZE)
 
     # Should still only have one peer!
     assert len(l1.rpc.listpeers()['peers']) == 1
@@ -629,7 +652,7 @@ def test_disconnect_half_signed(node_factory):
 
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     with pytest.raises(RpcError):
-        l1.rpc.fundchannel(l2.info['id'], 25000)
+        l1.rpc.fundchannel(l2.info['id'], CHANNEL_SIZE)
 
     # Peer remembers, opener doesn't.
     wait_for(lambda: l1.rpc.listpeers(l2.info['id'])['peers'] == [])
@@ -652,7 +675,7 @@ def test_reconnect_signed(node_factory):
     l1.fundwallet(2000000)
 
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
-    l1.rpc.fundchannel(l2.info['id'], 25000)
+    l1.rpc.fundchannel(l2.info['id'], CHANNEL_SIZE)
 
     # They haven't forgotten each other.
     assert l1.rpc.getpeer(l2.info['id'])['id'] == l2.info['id']
@@ -692,7 +715,7 @@ def test_reconnect_openingd(node_factory):
 
     # l2 closes on l1, l1 forgets.
     with pytest.raises(RpcError):
-        l1.rpc.fundchannel(l2.info['id'], 25000)
+        l1.rpc.fundchannel(l2.info['id'], CHANNEL_SIZE)
     assert l1.rpc.getpeer(l2.info['id']) is None
 
     # Reconnect.
@@ -703,7 +726,7 @@ def test_reconnect_openingd(node_factory):
     l2.daemon.wait_for_log('Handed peer, entering loop')
 
     # Should work fine.
-    l1.rpc.fundchannel(l2.info['id'], 25000)
+    l1.rpc.fundchannel(l2.info['id'], CHANNEL_SIZE)
     l1.daemon.wait_for_log('sendrawtx exit 0')
 
     l1.bitcoin.generate_block(3)
@@ -1120,9 +1143,10 @@ def test_funding_fail(node_factory, bitcoind):
     with pytest.raises(RpcError, match=r'to_self_delay \d+ larger than \d+'):
         l1.rpc.fundchannel(l2.info['id'], int(funds / 10))
 
-    # channels disconnect on failure
-    wait_for(lambda: len(l1.rpc.listpeers()['peers']) == 0)
-    wait_for(lambda: len(l2.rpc.listpeers()['peers']) == 0)
+    # channels disconnect on failure (v1)
+    if not EXPERIMENTAL_DUAL_FUND:
+        wait_for(lambda: len(l1.rpc.listpeers()['peers']) == 0)
+        wait_for(lambda: len(l2.rpc.listpeers()['peers']) == 0)
 
     # Restart l2 without ridiculous locktime.
     del l2.daemon.opts['watchtime-blocks']
@@ -2027,7 +2051,10 @@ def test_multifunding_wumbo(node_factory):
         l1.rpc.multifundchannel(destinations)
 
     # Make sure it's disconnected from l2 before retrying.
-    wait_for(lambda: l1.rpc.listpeers(l2.info['id'])['peers'] == [])
+    if not EXPERIMENTAL_DUAL_FUND:
+        wait_for(lambda: l1.rpc.listpeers(l2.info['id'])['peers'] == [])
+    else:
+        assert only_one(l1.rpc.listpeers(l2.info['id'])['peers'])['connected']
 
     # This should succeed.
     destinations = [{"id": '{}@localhost:{}'.format(l2.info['id'], l2.port),
@@ -2083,7 +2110,7 @@ def test_multifunding_feerates(node_factory, bitcoind):
 
     # Because of how the anchor outputs protocol is designed,
     # we *always* pay for 2 anchor outs and their weight
-    if EXPERIMENTAL_FEATURES or EXPERIMENTAL_DUAL_FUND:  # opt_anchor_outputs
+    if anchor_expected():
         weight = 1124
     else:
         # the commitment transactions' feerate is calculated off
@@ -2096,7 +2123,7 @@ def test_multifunding_feerates(node_factory, bitcoind):
     # tx, but we subtract out the extra anchor output amount
     # from the to_us output, so it ends up inflating
     # our fee by that much.
-    if EXPERIMENTAL_FEATURES or EXPERIMENTAL_DUAL_FUND:  # opt_anchor_outputs
+    if anchor_expected():
         expected_fee += 330
 
     assert expected_fee == entry['fees']['base'] * 10 ** 8
@@ -2668,12 +2695,8 @@ def test_forget_channel(node_factory):
 def test_peerinfo(node_factory, bitcoind):
     l1, l2 = node_factory.line_graph(2, fundchannel=False, opts={'may_reconnect': True})
 
-    if l1.config('experimental-dual-fund'):
-        lfeatures = expected_peer_features(extra=[21, 29])
-        nfeatures = expected_node_features(extra=[21, 29])
-    else:
-        lfeatures = expected_peer_features()
-        nfeatures = expected_node_features()
+    lfeatures = expected_peer_features()
+    nfeatures = expected_node_features()
 
     # Gossiping but no node announcement yet
     assert l1.rpc.getpeer(l2.info['id'])['connected']
@@ -3469,10 +3492,6 @@ def test_wumbo_channels(node_factory, bitcoind):
     conn = l1.rpc.connect(l2.info['id'], 'localhost', port=l2.port)
 
     expected_features = expected_peer_features(wumbo_channels=True)
-    if l1.config('experimental-dual-fund'):
-        expected_features = expected_peer_features(wumbo_channels=True,
-                                                   extra=[21, 29])
-
     assert conn['features'] == expected_features
     assert only_one(l1.rpc.listpeers(l2.info['id'])['peers'])['features'] == expected_features
 
@@ -3557,7 +3576,7 @@ def test_channel_features(node_factory, bitcoind):
     # We should see features in unconfirmed channels.
     chan = only_one(l1.rpc.listpeerchannels()['channels'])
     assert 'option_static_remotekey' in chan['features']
-    if EXPERIMENTAL_FEATURES or l1.config('experimental-dual-fund'):
+    if EXPERIMENTAL_FEATURES:
         assert 'option_anchor_outputs' in chan['features']
 
     # l2 should agree.
@@ -3570,7 +3589,7 @@ def test_channel_features(node_factory, bitcoind):
 
     chan = only_one(l1.rpc.listpeerchannels()['channels'])
     assert 'option_static_remotekey' in chan['features']
-    if EXPERIMENTAL_FEATURES or l1.config('experimental-dual-fund'):
+    if EXPERIMENTAL_FEATURES:
         assert 'option_anchor_outputs' in chan['features']
 
     # l2 should agree.

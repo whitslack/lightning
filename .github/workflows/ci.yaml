@@ -153,6 +153,8 @@ jobs:
 
           # Rename now so we don't clash
           mv testpack.tar.bz2 cln-${CFG}.tar.bz2
+      - name: Check rust packages
+        run: cargo test --all
       - uses: actions/upload-artifact@v2.2.4
         with:
           name: cln-${{ matrix.CFG }}.tar.bz2
@@ -163,7 +165,7 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       COMPAT: 1
-      BITCOIN_VERSION: 0.20.1
+      BITCOIN_VERSION: 24.0.1
       ELEMENTS_VERSION: 0.18.1.8
       RUST_PROFILE: release  # Has to match the one in the compile step
     needs:
@@ -178,24 +180,28 @@ jobs:
             EXPERIMENTAL_FEATURES: 1
             TEST_DB_PROVIDER: sqlite3
             COMPILER: gcc
+            TEST_NETWORK: regtest
           - NAME:  gcc-dev1-exp0
             CFG: gcc-dev1-exp0
             DEVELOPER: 1
             EXPERIMENTAL_FEATURES: 0
             TEST_DB_PROVIDER: sqlite3
             COMPILER: gcc
+            TEST_NETWORK: regtest
           - NAME: gcc-dev0-exp1
             CFG: gcc-dev0-exp1
             DEVELOPER: 0
             EXPERIMENTAL_FEATURES: 1
             TEST_DB_PROVIDER: sqlite3
             COMPILER: gcc
+            TEST_NETWORK: regtest
           - NAME: gcc-dev0-exp0
             CFG: gcc-dev0-exp0
             DEVELOPER: 0
             EXPERIMENTAL_FEATURES: 0
             TEST_DB_PROVIDER: sqlite3
             COMPILER: gcc
+            TEST_NETWORK: regtest
           # While we're at it let's try to compile with clang
           - NAME: clang-dev1-exp1
             CFG: clang-dev1-exp1
@@ -203,6 +209,7 @@ jobs:
             EXPERIMENTAL_FEATURES: 1
             TEST_DB_PROVIDER: sqlite3
             COMPILER: clang
+            TEST_NETWORK: regtest
           # And of course we want to test postgres too
           - NAME: postgres
             CFG: gcc-dev1-exp1
@@ -210,7 +217,16 @@ jobs:
             EXPERIMENTAL_FEATURES: 1
             COMPILER: gcc
             TEST_DB_PROVIDER: postgres
-
+            TEST_NETWORK: regtest
+          # And don't forget about elements (like cdecker did when
+          # reworking the CI...)
+          - NAME: liquid
+            CFG: gcc-dev1-exp1
+            DEVELOPER: 1
+            EXPERIMENTAL_FEATURES: 1
+            COMPILER: gcc
+            TEST_NETWORK: liquid-regtest
+            TEST_DB_PROVIDER: sqlite3
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -245,6 +261,7 @@ jobs:
           PYTEST_PAR: 10
           TEST_DEBUG: 1
           TEST_DB_PROVIDER: ${{ matrix.TEST_DB_PROVIDER }}
+          TEST_NETWORK: ${{ matrix.TEST_NETWORK }}
         run: |
           tar -xaf cln-${CFG}.tar.bz2
           poetry run pytest tests/ -vvv -n ${PYTEST_PAR} ${PYTEST_OPTS}
@@ -254,7 +271,7 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       COMPAT: 1
-      BITCOIN_VERSION: 0.20.1
+      BITCOIN_VERSION: 24.0.1
       ELEMENTS_VERSION: 0.18.1.8
       RUST_PROFILE: release  # Has to match the one in the compile step
       VALGRIND: 1

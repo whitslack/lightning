@@ -67,6 +67,7 @@ struct open_attempt {
 	struct command *cmd;
 	struct amount_sat funding;
 	const u8 *our_upfront_shutdown_script;
+	bool req_confirmed_ins;
 
 	/* First msg to send to dualopend (to make it create channel) */
 	const u8 *open_msg;
@@ -374,9 +375,6 @@ void channel_set_owner(struct channel *channel, struct subd *owner);
 /* Channel has failed, but can try again. */
 void channel_fail_transient(struct channel *channel,
 			    const char *fmt, ...) PRINTF_FMT(2,3);
-/* Channel has failed, but can try again after a minute. */
-void channel_fail_transient_delayreconnect(struct channel *channel,
-					   const char *fmt,...) PRINTF_FMT(2,3);
 
 /* Channel has failed, give up on it. */
 void channel_fail_permanent(struct channel *channel,

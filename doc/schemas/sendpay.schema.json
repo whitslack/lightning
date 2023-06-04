@@ -20,9 +20,7 @@
     },
     "payment_hash": {
       "type": "hash",
-      "description": "the hash of the *payment_preimage* which will prove payment",
-      "maxLength": 64,
-      "minLength": 64
+      "description": "the hash of the *payment_preimage* which will prove payment"
     },
     "status": {
       "type": "string",
@@ -31,9 +29,6 @@
         "complete"
       ],
       "description": "status of the payment (could be complete if already sent previously)"
-    },
-    "msatoshi": {
-      "deprecated": true
     },
     "amount_msat": {
       "type": "msat",
@@ -46,9 +41,6 @@
     "created_at": {
       "type": "u64",
       "description": "the UNIX timestamp showing when this payment was initiated"
-    },
-    "msatoshi_sent": {
-      "deprecated": true
     },
     "amount_sent_msat": {
       "type": "msat",
@@ -105,9 +97,7 @@
           "bolt12": {},
           "payment_preimage": {
             "type": "secret",
-            "description": "the proof of payment: SHA256 of this **payment_hash**",
-            "maxLength": 64,
-            "minLength": 64
+            "description": "the proof of payment: SHA256 of this **payment_hash**"
           }
         }
       }

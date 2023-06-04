@@ -36,7 +36,7 @@ On success, an object containing **channels** is returned.  It is an array of ob
   - **perkb** (u32): Feerate per 1000 virtual bytes
 - **owner** (string, optional): The current subdaemon controlling this connection
 - **short\_channel\_id** (short\_channel\_id, optional): The short\_channel\_id (once locked in)
-- **channel\_id** (hash, optional): The full channel\_id (funding txid Xored with output number) (always 64 characters)
+- **channel\_id** (hash, optional): The full channel\_id (funding txid Xored with output number)
 - **funding\_txid** (txid, optional): ID of the funding transaction
 - **funding\_outnum** (u32, optional): The 0-based output number of the funding transaction which opens the channel
 - **initial\_feerate** (string, optional): For inflight opens, the first feerate used to initiate the channel open
@@ -56,8 +56,6 @@ On success, an object containing **channels** is returned.  It is an array of ob
 - **funding** (object, optional):
   - **local\_funds\_msat** (msat): Amount of channel we funded
   - **remote\_funds\_msat** (msat): Amount of channel they funded
-  - **local\_msat** (msat, optional): Amount of channel we funded (deprecated)
-  - **remote\_msat** (msat, optional): Amount of channel they funded (deprecated)
   - **pushed\_msat** (msat, optional): Amount pushed from opener to peer
   - **fee\_paid\_msat** (msat, optional): Amount we paid peer at open
   - **fee\_rcvd\_msat** (msat, optional): Amount we were paid by peer at open
@@ -103,7 +101,7 @@ On success, an object containing **channels** is returned.  It is an array of ob
   - **id** (u64): Unique ID for this htlc on this channel in this direction
   - **amount\_msat** (msat): Amount send/received for this HTLC
   - **expiry** (u32): Block this HTLC expires at (after which an `in` direction HTLC will be returned to the peer, an `out` returned to us).  If this expiry is too close, lightningd(8) will automatically unilaterally close the channel in order to enforce the timeout onchain.
-  - **payment\_hash** (hash): the hash of the payment\_preimage which will prove payment (always 64 characters)
+  - **payment\_hash** (hash): the hash of the payment\_preimage which will prove payment
   - **local\_trimmed** (boolean, optional): If this is too small to enforce onchain; it doesn't appear in the commitment transaction and will not be enforced in a unilateral close.  Generally true if the HTLC (after subtracting onchain fees) is below the `dust_limit_msat` for the channel. (always *true*)
   - **status** (string, optional): set if this HTLC is currently waiting on a hook (and shows what plugin)
 
@@ -191,4 +189,4 @@ Main web site: <https://github.com/ElementsProject/lightning> Lightning
 RFC site (BOLT \#9):
 <https://github.com/lightningnetwork/lightning-rfc/blob/master/09-features.md>
 
-[comment]: # ( SHA256STAMP:485344d9d9a47bf3093c8e54fcf80bea14623e2611f2a4e2d2b5c723d8e6094b)
+[comment]: # ( SHA256STAMP:f9919b6967137945cb49392d64a42bd159123b9d3bb83833c5df3bc777065d2e)

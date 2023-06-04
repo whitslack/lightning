@@ -62,6 +62,7 @@ On success, an object is returned, containing:
 - **experimental-offers** (boolean, optional): `experimental-offers` field from config or cmdline, or default
 - **experimental-shutdown-wrong-funding** (boolean, optional): `experimental-shutdown-wrong-funding` field from config or cmdline, or default
 - **experimental-websocket-port** (u16, optional): `experimental-websocket-port` field from config or cmdline, or default
+- **experimental-peer-storage** (boolean, optional): `experimental-peer-storage` field from config or cmdline, or default *(added v23.02)*
 - **database-upgrade** (boolean, optional): `database-upgrade` field from config or cmdline
 - **rgb** (hex, optional): `rgb` field from config or cmdline, or default (always 6 characters)
 - **alias** (string, optional): `alias` field from config or cmdline, or default
@@ -222,4 +223,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:2f325aa6ef0506dc627409e3253c8627c49a7d1749ea9dbf24a5baa0fc8c307c)
+[comment]: # ( SHA256STAMP:e8edbeddad08f6928c7dd15ca9c4928f0888cc485157ef93a3b973dc824a5460)

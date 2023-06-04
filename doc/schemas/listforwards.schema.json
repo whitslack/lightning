@@ -27,9 +27,6 @@
             "type": "u64",
             "description": "the unique HTLC id the sender gave this"
           },
-          "in_msatoshi": {
-            "deprecated": true
-          },
           "in_msat": {
             "type": "msat",
             "description": "the value of the incoming HTLC"
@@ -100,15 +97,9 @@
                 "payment_hash": {},
                 "failcode": {},
                 "failreason": {},
-                "fee": {
-                  "deprecated": true
-                },
                 "fee_msat": {
                   "type": "msat",
                   "description": "the amount this paid in fees"
-                },
-                "out_msatoshi": {
-                  "deprecated": true
                 },
                 "out_msat": {
                   "type": "msat",

@@ -81,6 +81,7 @@ MANPAGES := doc/lightning-cli.1 \
 	doc/lightning-sendpay.7 \
 	doc/lightning-setchannel.7 \
 	doc/lightning-sendcustommsg.7 \
+	doc/lightning-signinvoice.7 \
 	doc/lightning-signmessage.7 \
 	doc/lightning-staticbackup.7 \
 	doc/lightning-txprepare.7 \
@@ -104,6 +105,11 @@ MANPAGES := doc/lightning-cli.1 \
 	doc/lightning-help.7 \
 	doc/lightning-getlog.7 \
 	doc/reckless.7
+
+ifeq ($(HAVE_SQLITE3),1)
+MANPAGES += doc/lightning-listsqlschemas.7 \
+	    doc/lightning-sql.7
+endif
 
 doc-all: $(MANPAGES) doc/index.rst
 
@@ -145,6 +151,14 @@ $(MANPAGES): doc/%: doc/%.md tools/md2man.sh version_gen.h
 
 $(MANPAGES): $(FORCE)
 $(MARKDOWN_WITH_SCHEMA): $(FORCE)
+
+# Use awk for preamble, then again for post, with the new docs in the middle.
+# We can't put plugins/sql in deps directly, since they all get sha256!
+doc/.sqlgen: plugins/sql
+	@plugins/sql --print-docs > $@
+
+doc/lightning-sql.7.md: doc/.sqlgen $(FORCE)
+	@if $(call SHA256STAMP_CHANGED); then $(call VERBOSE, "sql-print-docs $@", awk "/GENERATE-DOC-START/ { print \$$0; exit } { print \$$0 }" < $@ > $@.tmp && cat doc/.sqlgen >> $@.tmp && (awk "/GENERATE-DOC-END/ { PRINT=1 } { if (PRINT) { print \$$0 } }" | grep -v SHA256STAMP) < $@ >> $@.tmp && mv $@.tmp $@ && $(call SHA256STAMP,[comment]: # $(LBRACKET),$(RBRACKET))); else touch $@; fi 
 
 doc/protocol-%.svg: test/test_protocol
 	test/test_protocol --svg < test/commits/$*.script > $@
@@ -199,7 +213,7 @@ doc/index.rst: $(MANPAGES:=.md)
 	@$(call VERBOSE, "genidx $@", \
 	  find doc -maxdepth 1 -name '*\.[0-9]\.md' | \
 	  cut -b 5- | LC_ALL=C sort | \
-	  sed 's/\(.*\)\.\(.*\).*\.md/\1 <\1.\2.md>/' | \
+	  sed "s/\(.*\)\.\(.*\).*\.md/\1 <\1.\2.md>/" | \
 	  python3 devtools/blockreplace.py doc/index.rst manpages --language=rst --indent "   " \
 	)
 

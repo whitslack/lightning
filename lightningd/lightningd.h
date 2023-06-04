@@ -183,6 +183,8 @@ struct lightningd {
 
 	/* Daemon looking after peers during init / before channel. */
 	struct subd *connectd;
+	/* Reconnection attempts */
+	struct delayed_reconnect_map *delayed_reconnect_map;
 
 	/* All peers we're tracking (by node_id) */
 	struct peer_node_id_map *peers;
@@ -196,7 +198,7 @@ struct lightningd {
 	struct chain_topology *topology;
 
 	/* Blockheight (as acknowledged by gossipd) */
-	u32 blockheight;
+	u32 gossip_blockheight;
 
 	/* HTLCs in flight. */
 	struct htlc_in_map *htlcs_in;

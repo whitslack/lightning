@@ -1245,6 +1245,9 @@ static void send_commit(struct peer *peer)
 		peer->commit_timer = NULL;
 		start_commit_timer(peer);
 		return;
+	} else {
+		/* We can advance; wipe attempts */
+		peer->commit_timer_attempts = 0;
 	}
 
 	/* BOLT #2:
@@ -1399,7 +1402,6 @@ static void start_commit_timer(struct peer *peer)
 	if (peer->commit_timer)
 		return;
 
-	peer->commit_timer_attempts = 0;
 	peer->commit_timer = new_reltimer(&peer->timers, peer,
 					  time_from_msec(peer->commit_msec),
 					  send_commit, peer);
@@ -2270,13 +2272,14 @@ static void peer_in(struct peer *peer, const u8 *msg)
 	case WIRE_TX_ADD_OUTPUT:
 	case WIRE_TX_REMOVE_OUTPUT:
 	case WIRE_TX_COMPLETE:
+	case WIRE_TX_ABORT:
 	case WIRE_OPEN_CHANNEL2:
 	case WIRE_ACCEPT_CHANNEL2:
 	case WIRE_TX_SIGNATURES:
 		handle_unexpected_tx_sigs(peer, msg);
 		return;
-	case WIRE_INIT_RBF:
-	case WIRE_ACK_RBF:
+	case WIRE_TX_INIT_RBF:
+	case WIRE_TX_ACK_RBF:
 		break;
 
 	case WIRE_CHANNEL_REESTABLISH:
@@ -2297,6 +2300,8 @@ static void peer_in(struct peer *peer, const u8 *msg)
 	case WIRE_WARNING:
 	case WIRE_ERROR:
 	case WIRE_ONION_MESSAGE:
+	case WIRE_PEER_STORAGE:
+	case WIRE_YOUR_PEER_STORAGE:
 		abort();
 	}
 
@@ -3984,6 +3989,7 @@ int main(int argc, char *argv[])
 	peer->shutdown_wrong_funding = NULL;
 	peer->last_update_timestamp = 0;
 	peer->last_empty_commitment = 0;
+	peer->commit_timer_attempts = 0;
 #if EXPERIMENTAL_FEATURES
 	peer->stfu = false;
 	peer->stfu_sent[LOCAL] = peer->stfu_sent[REMOTE] = false;

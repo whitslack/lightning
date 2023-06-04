@@ -10,7 +10,6 @@
 #include <common/dev_disconnect.h>
 #include <common/features.h>
 #include <common/gossip_constants.h>
-#include <common/gossip_store.h>
 #include <common/memleak.h>
 #include <common/per_peer_state.h>
 #include <common/ping.h>
@@ -23,6 +22,7 @@
 #include <connectd/connectd_gossipd_wiregen.h>
 #include <connectd/connectd_wiregen.h>
 #include <connectd/gossip_rcvd_filter.h>
+#include <connectd/gossip_store.h>
 #include <connectd/multiplex.h>
 #include <connectd/onion_message.h>
 #include <errno.h>
@@ -355,6 +355,7 @@ static bool is_urgent(enum peer_wire type)
 	case WIRE_TX_REMOVE_INPUT:
 	case WIRE_TX_REMOVE_OUTPUT:
 	case WIRE_TX_COMPLETE:
+	case WIRE_TX_ABORT:
 	case WIRE_TX_SIGNATURES:
 	case WIRE_OPEN_CHANNEL:
 	case WIRE_ACCEPT_CHANNEL:
@@ -363,8 +364,8 @@ static bool is_urgent(enum peer_wire type)
 	case WIRE_CHANNEL_READY:
 	case WIRE_OPEN_CHANNEL2:
 	case WIRE_ACCEPT_CHANNEL2:
-	case WIRE_INIT_RBF:
-	case WIRE_ACK_RBF:
+	case WIRE_TX_INIT_RBF:
+	case WIRE_TX_ACK_RBF:
 	case WIRE_SHUTDOWN:
 	case WIRE_CLOSING_SIGNED:
 	case WIRE_UPDATE_ADD_HTLC:
@@ -384,6 +385,8 @@ static bool is_urgent(enum peer_wire type)
 	case WIRE_REPLY_CHANNEL_RANGE:
 	case WIRE_GOSSIP_TIMESTAMP_FILTER:
 	case WIRE_ONION_MESSAGE:
+	case WIRE_PEER_STORAGE:
+	case WIRE_YOUR_PEER_STORAGE:
 #if EXPERIMENTAL_FEATURES
 	case WIRE_STFU:
 #endif
@@ -720,7 +723,7 @@ static bool handle_custommsg(struct daemon *daemon,
 			     const u8 *msg)
 {
 	enum peer_wire type = fromwire_peektype(msg);
-	if (type % 2 == 1 && !peer_wire_is_defined(type)) {
+	if (type % 2 == 1 && !peer_wire_is_internal(type)) {
 		/* The message is not part of the messages we know how to
 		 * handle. Assuming this is a custommsg, we just forward it to the
 		 * master. */
@@ -1132,6 +1135,14 @@ static struct io_plan *read_body_from_peer_done(struct io_conn *peer_conn,
        subd = find_subd(peer, &channel_id);
        if (!subd) {
 	       enum peer_wire t = fromwire_peektype(decrypted);
+
+	       /* Simplest to close on them at this point. */
+	       if (peer->daemon->shutting_down) {
+		       status_peer_debug(&peer->id,
+					 "Shutting down: hanging up for %s",
+					 peer_wire_name(t));
+		       return io_close(peer_conn);
+	       }
 	       status_peer_debug(&peer->id, "Activating for message %s",
 				 peer_wire_name(t));
 	       subd = new_subd(peer, &channel_id);
