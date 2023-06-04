@@ -63,8 +63,6 @@ impl From<responses::GetinfoResponse> for pb::GetinfoResponse {
             our_features: c.our_features.map(|v| v.into()),
             blockheight: c.blockheight, // Rule #2 for type u32
             network: c.network, // Rule #2 for type string
-            #[allow(deprecated)]
-            msatoshi_fees_collected: c.msatoshi_fees_collected, // Rule #2 for type u64?
             fees_collected_msat: Some(c.fees_collected_msat.into()), // Rule #2 for type msat
             address: c.address.into_iter().map(|i| i.into()).collect(), // Rule #3 for type GetinfoAddress 
             binding: c.binding.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3 
@@ -117,10 +115,6 @@ impl From<responses::ListpeersPeersChannelsInflight> for pb::ListpeersPeersChann
 impl From<responses::ListpeersPeersChannelsFunding> for pb::ListpeersPeersChannelsFunding {
     fn from(c: responses::ListpeersPeersChannelsFunding) -> Self {
         Self {
-            #[allow(deprecated)]
-            local_msat: c.local_msat.map(|f| f.into()), // Rule #2 for type msat?
-            #[allow(deprecated)]
-            remote_msat: c.remote_msat.map(|f| f.into()), // Rule #2 for type msat?
             pushed_msat: c.pushed_msat.map(|f| f.into()), // Rule #2 for type msat?
             local_funds_msat: Some(c.local_funds_msat.into()), // Rule #2 for type msat
             remote_funds_msat: Some(c.remote_funds_msat.into()), // Rule #2 for type msat
@@ -265,6 +259,7 @@ impl From<responses::ListfundsChannels> for pb::ListfundsChannels {
             funding_output: c.funding_output, // Rule #2 for type u32
             connected: c.connected, // Rule #2 for type boolean
             state: c.state as i32,
+            channel_id: c.channel_id.to_vec(), // Rule #2 for type hash
             short_channel_id: c.short_channel_id.map(|v| v.to_string()), // Rule #2 for type short_channel_id?
         }
     }
@@ -996,8 +991,6 @@ impl From<responses::GetrouteRoute> for pb::GetrouteRoute {
             id: c.id.serialize().to_vec(), // Rule #2 for type pubkey
             channel: c.channel.to_string(), // Rule #2 for type short_channel_id
             direction: c.direction, // Rule #2 for type u32
-            #[allow(deprecated)]
-            msatoshi: c.msatoshi, // Rule #2 for type u64?
             amount_msat: Some(c.amount_msat.into()), // Rule #2 for type msat
             delay: c.delay, // Rule #2 for type u32
             style: c.style as i32,
@@ -2405,7 +2398,6 @@ impl From<pb::GetinfoResponse> for responses::GetinfoResponse {
             our_features: c.our_features.map(|v| v.into()),
             blockheight: c.blockheight, // Rule #1 for type u32
             network: c.network, // Rule #1 for type string
-            msatoshi_fees_collected: c.msatoshi_fees_collected, // Rule #1 for type u64?
             fees_collected_msat: c.fees_collected_msat.unwrap().into(), // Rule #1 for type msat
             address: c.address.into_iter().map(|s| s.into()).collect(), // Rule #4
             binding: Some(c.binding.into_iter().map(|s| s.into()).collect()), // Rule #4
@@ -2458,8 +2450,6 @@ impl From<pb::ListpeersPeersChannelsInflight> for responses::ListpeersPeersChann
 impl From<pb::ListpeersPeersChannelsFunding> for responses::ListpeersPeersChannelsFunding {
     fn from(c: pb::ListpeersPeersChannelsFunding) -> Self {
         Self {
-            local_msat: c.local_msat.map(|a| a.into()), // Rule #1 for type msat?
-            remote_msat: c.remote_msat.map(|a| a.into()), // Rule #1 for type msat?
             pushed_msat: c.pushed_msat.map(|a| a.into()), // Rule #1 for type msat?
             local_funds_msat: c.local_funds_msat.unwrap().into(), // Rule #1 for type msat
             remote_funds_msat: c.remote_funds_msat.unwrap().into(), // Rule #1 for type msat
@@ -2604,6 +2594,7 @@ impl From<pb::ListfundsChannels> for responses::ListfundsChannels {
             funding_output: c.funding_output, // Rule #1 for type u32
             connected: c.connected, // Rule #1 for type boolean
             state: c.state.try_into().unwrap(),
+            channel_id: Sha256::from_slice(&c.channel_id).unwrap(), // Rule #1 for type hash
             short_channel_id: c.short_channel_id.map(|v| cln_rpc::primitives::ShortChannelId::from_str(&v).unwrap()), // Rule #1 for type short_channel_id?
         }
     }
@@ -3334,7 +3325,6 @@ impl From<pb::GetrouteRoute> for responses::GetrouteRoute {
             id: PublicKey::from_slice(&c.id).unwrap(), // Rule #1 for type pubkey
             channel: cln_rpc::primitives::ShortChannelId::from_str(&c.channel).unwrap(), // Rule #1 for type short_channel_id
             direction: c.direction, // Rule #1 for type u32
-            msatoshi: c.msatoshi, // Rule #1 for type u64?
             amount_msat: c.amount_msat.unwrap().into(), // Rule #1 for type msat
             delay: c.delay, // Rule #1 for type u32
             style: c.style.try_into().unwrap(),

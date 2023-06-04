@@ -13,51 +13,34 @@
 #include <errno.h>
 #include <hsmd/hsmd_wiregen.h>
 #include <lightningd/channel.h>
+#include <lightningd/hsm_control.h>
 #include <lightningd/plugin_hook.h>
 #include <wallet/db.h>
 #include <wire/wire_sync.h>
 
-/* Small container for things that are needed by migrations. The
- * fields are guaranteed to be initialized and can be relied upon when
- * migrating.
- */
-struct migration_context {
-	const struct ext_key *bip32_base;
-	int hsm_fd;
-};
-
 struct migration {
 	const char *sql;
-	void (*func)(struct lightningd *ld, struct db *db,
-		     const struct migration_context *mc);
+	void (*func)(struct lightningd *ld, struct db *db);
 };
 
-static void migrate_pr2342_feerate_per_channel(struct lightningd *ld, struct db *db,
-					       const struct migration_context *mc);
+static void migrate_pr2342_feerate_per_channel(struct lightningd *ld, struct db *db);
 
-static void migrate_our_funding(struct lightningd *ld, struct db *db,
-				const struct migration_context *mc);
+static void migrate_our_funding(struct lightningd *ld, struct db *db);
 
-static void migrate_last_tx_to_psbt(struct lightningd *ld, struct db *db,
-				    const struct migration_context *mc);
+static void migrate_last_tx_to_psbt(struct lightningd *ld, struct db *db);
 
 static void
-migrate_inflight_last_tx_to_psbt(struct lightningd *ld, struct db *db,
-				 const struct migration_context *mc);
+migrate_inflight_last_tx_to_psbt(struct lightningd *ld, struct db *db);
 
-static void fillin_missing_scriptpubkeys(struct lightningd *ld, struct db *db,
-					 const struct migration_context *mc);
+static void fillin_missing_scriptpubkeys(struct lightningd *ld, struct db *db);
 
-static void fillin_missing_channel_id(struct lightningd *ld, struct db *db,
-				      const struct migration_context *mc);
+static void fillin_missing_channel_id(struct lightningd *ld, struct db *db);
 
 static void fillin_missing_local_basepoints(struct lightningd *ld,
-					    struct db *db,
-					    const struct migration_context *mc);
+					    struct db *db);
 
 static void fillin_missing_channel_blockheights(struct lightningd *ld,
-						struct db *db,
-						const struct migration_context *mc);
+						struct db *db);
 
 /* Do not reorder or remove elements from this array, it is used to
  * migrate existing databases from a previous state, based on the
@@ -897,10 +880,6 @@ static bool db_migrate(struct lightningd *ld, struct db *db,
 	int current, orig, available;
 	char *err_msg;
 	struct db_stmt *stmt;
-	const struct migration_context mc = {
-	    .bip32_base = bip32_base,
-	    .hsm_fd = ld->hsm_fd,
-	};
 
 	orig = current = db_get_version(db);
 	available = ARRAY_SIZE(dbmigrations) - 1;
@@ -936,7 +915,7 @@ static bool db_migrate(struct lightningd *ld, struct db *db,
 			tal_free(stmt);
 		}
 		if (dbmigrations[current].func)
-			dbmigrations[current].func(ld, db, &mc);
+			dbmigrations[current].func(ld, db);
 	}
 
 	/* Finally update the version number in the version table */
@@ -983,8 +962,7 @@ struct db *db_setup(const tal_t *ctx, struct lightningd *ld,
 }
 
 /* Will apply the current config fee settings to all channels */
-static void migrate_pr2342_feerate_per_channel(struct lightningd *ld, struct db *db,
-					       const struct migration_context *mc)
+static void migrate_pr2342_feerate_per_channel(struct lightningd *ld, struct db *db)
 {
 	struct db_stmt *stmt = db_prepare_v2(
 	    db, SQL("UPDATE channels SET feerate_base = ?, feerate_ppm = ?;"));
@@ -1002,8 +980,7 @@ static void migrate_pr2342_feerate_per_channel(struct lightningd *ld, struct db 
  * is the same as the funding_satoshi for every channel where we are
  * the `funder`
  */
-static void migrate_our_funding(struct lightningd *ld, struct db *db,
-				const struct migration_context *mc)
+static void migrate_our_funding(struct lightningd *ld, struct db *db)
 {
 	struct db_stmt *stmt;
 
@@ -1019,8 +996,7 @@ static void migrate_our_funding(struct lightningd *ld, struct db *db,
 	tal_free(stmt);
 }
 
-void fillin_missing_scriptpubkeys(struct lightningd *ld, struct db *db,
-				  const struct migration_context *mc)
+void fillin_missing_scriptpubkeys(struct lightningd *ld, struct db *db)
 {
 	struct db_stmt *stmt;
 
@@ -1079,8 +1055,7 @@ void fillin_missing_scriptpubkeys(struct lightningd *ld, struct db *db,
 		} else {
 			db_col_ignore(stmt, "peer_id");
 			db_col_ignore(stmt, "commitment_point");
-			/* Build from bip32_base */
-			bip32_pubkey(mc->bip32_base, &key, keyindex);
+			bip32_pubkey(ld, &key, keyindex);
 			if (type == p2sh_wpkh) {
 				u8 *redeemscript = bitcoin_redeem_p2sh_p2wpkh(stmt, &key);
 				scriptPubkey = scriptpubkey_p2sh(tmpctx, redeemscript);
@@ -1107,8 +1082,7 @@ void fillin_missing_scriptpubkeys(struct lightningd *ld, struct db *db,
  * could simply derive the channel_id whenever it was required, but since there
  * are now two ways to do it, we save the derived channel id.
  */
-static void fillin_missing_channel_id(struct lightningd *ld, struct db *db,
-				      const struct migration_context *mc)
+static void fillin_missing_channel_id(struct lightningd *ld, struct db *db)
 {
 
 	struct db_stmt *stmt;
@@ -1145,8 +1119,7 @@ static void fillin_missing_channel_id(struct lightningd *ld, struct db *db,
 }
 
 static void fillin_missing_local_basepoints(struct lightningd *ld,
-					    struct db *db,
-					    const struct migration_context *mc)
+					    struct db *db)
 {
 
 	struct db_stmt *stmt;
@@ -1172,12 +1145,12 @@ static void fillin_missing_local_basepoints(struct lightningd *ld,
 		dbid = db_col_u64(stmt, "channels.id");
 		db_col_node_id(stmt, "peers.node_id", &peer_id);
 
-		if (!wire_sync_write(mc->hsm_fd,
+		if (!wire_sync_write(ld->hsm_fd,
 				     towire_hsmd_get_channel_basepoints(
 					 tmpctx, &peer_id, dbid)))
 			fatal("could not retrieve basepoint from hsmd");
 
-		msg = wire_sync_read(tmpctx, mc->hsm_fd);
+		msg = wire_sync_read(tmpctx, ld->hsm_fd);
 		if (!fromwire_hsmd_get_channel_basepoints_reply(
 			msg, &base, &funding_pubkey))
 			fatal("malformed hsmd_get_channel_basepoints_reply "
@@ -1209,8 +1182,7 @@ static void fillin_missing_local_basepoints(struct lightningd *ld,
 /* New 'channel_blockheights' table, every existing channel gets a
  * 'initial blockheight' of 0 */
 static void fillin_missing_channel_blockheights(struct lightningd *ld,
-						struct db *db,
-						const struct migration_context *mc)
+						struct db *db)
 {
 	struct db_stmt *stmt;
 
@@ -1234,8 +1206,7 @@ static void fillin_missing_channel_blockheights(struct lightningd *ld,
 }
 
 void
-migrate_inflight_last_tx_to_psbt(struct lightningd *ld, struct db *db,
-				 const struct migration_context *mc)
+migrate_inflight_last_tx_to_psbt(struct lightningd *ld, struct db *db)
 {
 	struct db_stmt *stmt, *update_stmt;
 	stmt = db_prepare_v2(db, SQL("SELECT "
@@ -1331,8 +1302,7 @@ migrate_inflight_last_tx_to_psbt(struct lightningd *ld, struct db *db,
  * This migration loads all of the last_tx's and 're-formats' them into psbts,
  * adds the required input witness utxo information, and then saves it back to disk
  * */
-void migrate_last_tx_to_psbt(struct lightningd *ld, struct db *db,
-			     const struct migration_context *mc)
+void migrate_last_tx_to_psbt(struct lightningd *ld, struct db *db)
 {
 	struct db_stmt *stmt, *update_stmt;
 

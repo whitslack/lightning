@@ -13,6 +13,10 @@ struct channel *any_channel_by_scid(struct lightningd *ld UNNEEDED,
 				    const struct short_channel_id *scid UNNEEDED,
 				    bool privacy_leak_ok UNNEEDED)
 { fprintf(stderr, "any_channel_by_scid called!\n"); abort(); }
+/* Generated stub for bip32_pubkey */
+void bip32_pubkey(struct lightningd *ld UNNEEDED,
+		  struct pubkey *pubkey UNNEEDED, u32 index UNNEEDED)
+{ fprintf(stderr, "bip32_pubkey called!\n"); abort(); }
 /* Generated stub for bitcoind_getutxout_ */
 void bitcoind_getutxout_(struct bitcoind *bitcoind UNNEEDED,
 			 const struct bitcoin_outpoint *outpoint UNNEEDED,
@@ -333,26 +337,12 @@ void json_add_address_internal(struct json_stream *response UNNEEDED,
 			       const char *fieldname UNNEEDED,
 			       const struct wireaddr_internal *addr UNNEEDED)
 { fprintf(stderr, "json_add_address_internal called!\n"); abort(); }
-/* Generated stub for json_add_amount_msat_compat */
-void json_add_amount_msat_compat(struct json_stream *result UNNEEDED,
-				 struct amount_msat msat UNNEEDED,
-				 const char *rawfieldname UNNEEDED,
-				 const char *msatfieldname)
-
-{ fprintf(stderr, "json_add_amount_msat_compat called!\n"); abort(); }
-/* Generated stub for json_add_amount_msat_only */
-void json_add_amount_msat_only(struct json_stream *result UNNEEDED,
+/* Generated stub for json_add_amount_msat */
+void json_add_amount_msat(struct json_stream *result UNNEEDED,
 			  const char *msatfieldname UNNEEDED,
 			  struct amount_msat msat)
 
-{ fprintf(stderr, "json_add_amount_msat_only called!\n"); abort(); }
-/* Generated stub for json_add_amount_sat_compat */
-void json_add_amount_sat_compat(struct json_stream *result UNNEEDED,
-				struct amount_sat sat UNNEEDED,
-				const char *rawfieldname UNNEEDED,
-				const char *msatfieldname)
-
-{ fprintf(stderr, "json_add_amount_sat_compat called!\n"); abort(); }
+{ fprintf(stderr, "json_add_amount_msat called!\n"); abort(); }
 /* Generated stub for json_add_amount_sat_msat */
 void json_add_amount_sat_msat(struct json_stream *result UNNEEDED,
 			      const char *msatfieldname UNNEEDED,

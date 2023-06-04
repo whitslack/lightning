@@ -1421,9 +1421,6 @@ pub mod responses {
 	    pub our_features: Option<GetinfoOur_features>,
 	    pub blockheight: u32,
 	    pub network: String,
-	    #[deprecated]
-	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub msatoshi_fees_collected: Option<u64>,
 	    pub fees_collected_msat: Amount,
 	    pub address: Vec<GetinfoAddress>,
 	    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
@@ -1561,12 +1558,6 @@ pub mod responses {
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct ListpeersPeersChannelsFunding {
-	    #[deprecated]
-	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub local_msat: Option<Amount>,
-	    #[deprecated]
-	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub remote_msat: Option<Amount>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub pushed_msat: Option<Amount>,
 	    pub local_funds_msat: Amount,
@@ -1815,6 +1806,7 @@ pub mod responses {
 	    pub connected: bool,
 	    // Path `ListFunds.channels[].state`
 	    pub state: ChannelState,
+	    pub channel_id: Sha256,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub short_channel_id: Option<ShortChannelId>,
 	}
@@ -3328,9 +3320,6 @@ pub mod responses {
 	    pub id: PublicKey,
 	    pub channel: ShortChannelId,
 	    pub direction: u32,
-	    #[deprecated]
-	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub msatoshi: Option<u64>,
 	    pub amount_msat: Amount,
 	    pub delay: u32,
 	    // Path `GetRoute.route[].style`

@@ -436,7 +436,7 @@ def test_htlc_in_timeout(node_factory, bitcoind, executor):
     l2.daemon.wait_for_log('onchaind complete, forgetting peer')
 
 
-@unittest.skipIf(not TEST_NETWORK == 'regtest', 'must be on bitcoin network')
+@unittest.skipIf(TEST_NETWORK == 'liquid-regtest', 'must be on bitcoin network')
 @pytest.mark.developer("needs DEVELOPER=1")
 def test_bech32_funding(node_factory, chainparams):
     # Don't get any funds from previous runs.
@@ -2011,8 +2011,7 @@ def test_relative_config_dir(node_factory):
 
 
 def test_signmessage(node_factory):
-    l1, l2 = node_factory.line_graph(2, wait_for_announce=True,
-                                     opts={'allow-deprecated-apis': True})
+    l1, l2 = node_factory.line_graph(2, wait_for_announce=True)
     l1.rpc.jsonschemas = {}
 
     corpus = [[None,
@@ -2049,13 +2048,17 @@ def test_signmessage(node_factory):
 
         assert l1.rpc.checkmessage(c[1], c[2], c[3])['verified']
         assert not l1.rpc.checkmessage(c[1] + "modified", c[2], c[3])['verified']
-        checknokey = l1.rpc.checkmessage(c[1], c[2])
+
         # Of course, we know our own pubkey
         if c[3] == l1.info['id']:
-            assert checknokey['verified']
+            assert l1.rpc.checkmessage(c[1], c[2])['verified']
         else:
-            assert not checknokey['verified']
-        assert checknokey['pubkey'] == c[3]
+            # It will error, as it can't verify.
+            with pytest.raises(RpcError, match="pubkey not found in the graph") as err:
+                l1.rpc.checkmessage(c[1], c[2])
+
+            # But error contains the key which it claims.
+            assert err.value.error['data']['claimed_key'] == c[3]
 
     # l2 knows about l1, so it can validate it.
     zm = l1.rpc.signmessage(message="message for you")['zbase']
@@ -3041,3 +3044,9 @@ def test_checkmessage_pubkey_not_found(node_factory):
     check_result = l1.rpc.checkmessage(msg, zbase, pubkey=pubkey)
     assert check_result["pubkey"] == pubkey
     assert check_result["verified"] is True
+
+
+def test_hsm_capabilities(node_factory):
+    l1 = node_factory.get_node()
+    # This appears before the start message, so it'll already be present.
+    assert l1.daemon.is_in_log(r"hsmd: capability \+WIRE_HSMD_CHECK_PUBKEY")

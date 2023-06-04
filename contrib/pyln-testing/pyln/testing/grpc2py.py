@@ -59,7 +59,6 @@ def getinfo2py(m):
         "lightning_dir": m.lightning_dir,  # PrimitiveField in generate_composite
         "blockheight": m.blockheight,  # PrimitiveField in generate_composite
         "network": m.network,  # PrimitiveField in generate_composite
-        "msatoshi_fees_collected": m.msatoshi_fees_collected,  # PrimitiveField in generate_composite
         "fees_collected_msat": amount2msat(m.fees_collected_msat),  # PrimitiveField in generate_composite
         "address": [getinfo_address2py(i) for i in m.address],  # ArrayField[composite] in generate_composite
         "binding": [getinfo_binding2py(i) for i in m.binding],  # ArrayField[composite] in generate_composite
@@ -100,8 +99,6 @@ def listpeers_peers_channels_inflight2py(m):
 
 def listpeers_peers_channels_funding2py(m):
     return remove_default({
-        "local_msat": amount2msat(m.local_msat),  # PrimitiveField in generate_composite
-        "remote_msat": amount2msat(m.remote_msat),  # PrimitiveField in generate_composite
         "pushed_msat": amount2msat(m.pushed_msat),  # PrimitiveField in generate_composite
         "local_funds_msat": amount2msat(m.local_funds_msat),  # PrimitiveField in generate_composite
         "remote_funds_msat": amount2msat(m.remote_funds_msat),  # PrimitiveField in generate_composite
@@ -223,6 +220,7 @@ def listfunds_channels2py(m):
         "funding_output": m.funding_output,  # PrimitiveField in generate_composite
         "connected": m.connected,  # PrimitiveField in generate_composite
         "state": str(m.state),  # EnumField in generate_composite
+        "channel_id": hexlify(m.channel_id),  # PrimitiveField in generate_composite
         "short_channel_id": m.short_channel_id,  # PrimitiveField in generate_composite
     })
 
@@ -787,7 +785,6 @@ def getroute_route2py(m):
         "id": hexlify(m.id),  # PrimitiveField in generate_composite
         "channel": m.channel,  # PrimitiveField in generate_composite
         "direction": m.direction,  # PrimitiveField in generate_composite
-        "msatoshi": m.msatoshi,  # PrimitiveField in generate_composite
         "amount_msat": amount2msat(m.amount_msat),  # PrimitiveField in generate_composite
         "delay": m.delay,  # PrimitiveField in generate_composite
         "style": str(m.style),  # EnumField in generate_composite

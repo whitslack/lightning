@@ -18,6 +18,7 @@
 #include <lightningd/chaintopology.h>
 #include <lightningd/channel.h>
 #include <lightningd/coin_mvts.h>
+#include <lightningd/hsm_control.h>
 #include <lightningd/jsonrpc.h>
 #include <lightningd/lightningd.h>
 #include <lightningd/peer_control.h>
@@ -127,8 +128,7 @@ static struct command_result *json_newaddr(struct command *cmd,
 		return command_fail(cmd, LIGHTNINGD, "Keys exhausted ");
 	}
 
-	if (!bip32_pubkey(cmd->ld->wallet->bip32_base, &pubkey, keyidx))
-		return command_fail(cmd, LIGHTNINGD, "Keys generation failure");
+	bip32_pubkey(cmd->ld, &pubkey, keyidx);
 
 	b32script = scriptpubkey_p2wpkh(tmpctx, &pubkey);
 	if (*addrtype & ADDR_BECH32)
@@ -189,8 +189,7 @@ static struct command_result *json_listaddrs(struct command *cmd,
 			break;
 		}
 
-		if (!bip32_pubkey(cmd->ld->wallet->bip32_base, &pubkey, keyidx))
-			abort();
+		bip32_pubkey(cmd->ld, &pubkey, keyidx);
 
 		// p2sh
 		u8 *redeemscript_p2sh;
@@ -246,12 +245,11 @@ static void json_add_utxo(struct json_stream *response,
 	json_object_start(response, fieldname);
 	json_add_txid(response, "txid", &utxo->outpoint.txid);
 	json_add_num(response, "output", utxo->outpoint.n);
-	json_add_amount_sat_compat(response, utxo->amount,
-				   "value", "amount_msat");
+	json_add_amount_sat_msat(response, "amount_msat", utxo->amount);
 
 	if (utxo->is_p2sh) {
 		struct pubkey key;
-		bip32_pubkey(wallet->bip32_base, &key, utxo->keyindex);
+		bip32_pubkey(wallet->ld, &key, utxo->keyindex);
 
 		json_add_hex_talarr(response, "redeemscript",
 				    bitcoin_redeem_p2sh_p2wpkh(tmpctx, &key));
@@ -351,18 +349,18 @@ static struct command_result *json_listfunds(struct command *cmd,
 				      channel_is_connected(c));
 			json_add_string(response, "state",
 					channel_state_name(c));
+			json_add_channel_id(response, "channel_id", &c->cid);
 			if (c->scid)
 				json_add_short_channel_id(response,
 							  "short_channel_id",
 							  c->scid);
 
-			json_add_amount_sat_compat(response,
-						   amount_msat_to_sat_round_down(c->our_msat),
-						   "channel_sat",
-						   "our_amount_msat");
-			json_add_amount_sat_compat(response, c->funding_sats,
-						   "channel_total_sat",
-						   "amount_msat");
+			json_add_amount_msat(response,
+					     "our_amount_msat",
+					     c->our_msat);
+			json_add_amount_sat_msat(response,
+						 "amount_msat",
+						 c->funding_sats);
 			json_add_txid(response, "funding_txid",
 				      &c->funding.txid);
 			json_add_num(response, "funding_output",
@@ -543,7 +541,7 @@ static void json_transaction_details(struct json_stream *response,
 			json_object_start(response, NULL);
 
 			json_add_u32(response, "index", i);
-			json_add_amount_sats_deprecated(response, "msat", "amount_msat", sat);
+			json_add_amount_sat_msat(response, "amount_msat", sat);
 
 #if EXPERIMENTAL_FEATURES
 			struct tx_annotation *ann = &tx->output_annotations[i];
@@ -647,8 +645,7 @@ static struct command_result *match_psbt_inputs_to_utxos(struct command *cmd,
 				u8 *redeemscript;
 				int wally_err;
 
-				bip32_pubkey(cmd->ld->wallet->bip32_base, &key,
-					     utxo->keyindex);
+				bip32_pubkey(cmd->ld, &key, utxo->keyindex);
 				redeemscript = bitcoin_redeem_p2sh_p2wpkh(tmpctx, &key);
 				scriptPubKey = scriptpubkey_p2sh(tmpctx, redeemscript);
 
@@ -689,7 +686,7 @@ static void match_psbt_outputs_to_wallet(struct wally_psbt *psbt,
 			continue;
 
 		if (bip32_key_from_parent(
-			    w->bip32_base, index, BIP32_FLAG_KEY_PUBLIC, &ext) != WALLY_OK) {
+			    w->ld->bip32_base, index, BIP32_FLAG_KEY_PUBLIC, &ext) != WALLY_OK) {
 			abort();
 		}
 

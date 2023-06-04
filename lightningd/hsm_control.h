@@ -16,5 +16,13 @@ int hsm_get_client_fd(struct lightningd *ld,
 /* Ask HSM for an fd for a global subdaemon to use (gossipd, connectd) */
 int hsm_get_global_fd(struct lightningd *ld, int capabilities);
 
+/* Is this capability supported by the HSM? (So far, always a message
+ * number) */
+bool hsm_capable(struct lightningd *ld, u32 msgtype);
+
 struct ext_key *hsm_init(struct lightningd *ld);
+
+/* Get (and check!) a bip32 derived pubkey */
+void bip32_pubkey(struct lightningd *ld, struct pubkey *pubkey, u32 index);
+
 #endif /* LIGHTNING_LIGHTNINGD_HSM_CONTROL_H */
