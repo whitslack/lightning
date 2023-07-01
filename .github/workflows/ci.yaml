@@ -30,6 +30,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Rebase
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git fetch origin ${{ github.base_ref }}
+          git rebase origin/${{ github.base_ref }}
 
       - name: Set up Python 3.7
         uses: actions/setup-python@v4
@@ -48,7 +58,7 @@ jobs:
       - name: Configure
         run: ./configure
       - name: Check source
-        run: make -j 4 check-source
+        run: make -j 4 check-source BASE_REF="origin/${{ github.base_ref }}"
       - name: Check Generated Files have been updated
         run: make -j 4 check-gen-updated
       - name: Check docs
@@ -69,6 +79,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Set up Python 3.7
         uses: actions/setup-python@v4
@@ -106,6 +118,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Set up Python 3.7
         uses: actions/setup-python@v4
@@ -161,6 +175,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Set up Python 3.7
         uses: actions/setup-python@v4
@@ -268,6 +284,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Set up Python 3.7
         uses: actions/setup-python@v4
@@ -347,6 +365,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
 
       - name: Set up Python 3.7
         uses: actions/setup-python@v4
