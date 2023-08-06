@@ -7,7 +7,7 @@ from pyln.proto.onion import TlvPayload
 from pyln.testing.utils import EXPERIMENTAL_DUAL_FUND, FUNDAMOUNT, scid_to_int
 from utils import (
     DEVELOPER, wait_for, only_one, sync_blockheight, TIMEOUT,
-    VALGRIND, mine_funding_to_announce, first_scid, anchor_expected
+    VALGRIND, mine_funding_to_announce, first_scid
 )
 import copy
 import os
@@ -70,6 +70,9 @@ def test_pay(node_factory):
     # Test listsendpays indexed by bolt11.
     payments = l1.rpc.listsendpays(inv)['payments']
     assert len(payments) == 1 and payments[0]['payment_preimage'] == preimage
+
+    # Make sure they're completely settled, so accounting correct.
+    wait_for(lambda: only_one(l1.rpc.listpeerchannels()['channels'])['htlcs'] == [])
 
     # Check channels apy summary view of channel activity
     apys_1 = l1.rpc.bkpr_channelsapy()['channels_apy']
@@ -699,10 +702,14 @@ def test_sendpay(node_factory):
 
 
 @unittest.skipIf(TEST_NETWORK != 'regtest', "The reserve computation is bitcoin specific")
-def test_sendpay_cant_afford(node_factory):
+@pytest.mark.parametrize("anchors", [False, True])
+def test_sendpay_cant_afford(node_factory, anchors):
     # Set feerates the same so we don't have to wait for update.
-    l1, l2 = node_factory.line_graph(2, fundamount=10**6,
-                                     opts={'feerates': (15000, 15000, 15000, 15000)})
+    opts = {'feerates': (15000, 15000, 15000, 15000)}
+    if anchors:
+        opts['experimental-anchors'] = None
+
+    l1, l2 = node_factory.line_graph(2, fundamount=10**6, opts=opts)
 
     # Can't pay more than channel capacity.
     with pytest.raises(RpcError):
@@ -726,7 +733,7 @@ def test_sendpay_cant_afford(node_factory):
     # assert False
 
     # This is the fee, which needs to be taken into account for l1.
-    if anchor_expected(l1, l2):
+    if anchors:
         # option_anchor_outputs
         available = 10**9 - 44700000
     else:
@@ -5397,3 +5404,57 @@ def test_fetchinvoice_with_no_quantity(node_factory):
     inv = inv['invoice']
     decode_inv = l2.rpc.decode(inv)
     assert decode_inv['invreq_quantity'] == 2, f'`invreq_quantity` in the invoice did not match, received {decode_inv["quantity"]}, expected 2'
+
+
+def test_invoice_pay_desc_with_quotes(node_factory):
+    """Test that we can decode and pay invoice where hashed description contains double quotes"""
+    l1, l2 = node_factory.line_graph(2)
+    description = '[["text/plain","Funding @odell on stacker.news"],["text/identifier","odell@stacker.news"]]'
+
+    invoice = l2.rpc.invoice(label="test12345", amount_msat=1000,
+                             description=description, deschashonly=True)["bolt11"]
+
+    l1.rpc.decodepay(invoice, description)
+
+    # pay an invoice
+    l1.rpc.pay(invoice, description=description)
+
+
+def test_strip_lightning_suffix_from_inv(node_factory):
+    """
+    Reproducer for [1] that pay an invoice with the `lightning:<bolt11|bolt12>`
+    prefix and then, will check if core lightning is able to strip it during
+    list `listpays` command.
+
+    [1] https://github.com/ElementsProject/lightning/issues/6207
+    """
+    l1, l2 = node_factory.line_graph(2)
+    inv = l2.rpc.invoice(40, "strip-lightning-prefix", "test to be able to strip the `lightning:` prefix.")["bolt11"]
+    wait_for(lambda: only_one(l1.rpc.listpeerchannels(l2.info['id'])['channels'])['state'] == 'CHANNELD_NORMAL')
+
+    # Testing the prefix stripping case
+    l1.rpc.pay(f"lightning:{inv}")
+    listpays = l1.rpc.listpays()["pays"]
+    assert len(listpays) == 1, f"the list pays is bigger than what we expected {listpays}"
+    # we can access by index here because the payment are sorted by db idx
+    assert listpays[0]['bolt11'] == inv, f"list pays contains a different invoice, expected is {inv} but we get {listpays[0]['bolt11']}"
+
+    # Testing the case of the invoice is upper case
+    inv = l2.rpc.invoice(40, "strip-lightning-prefix-upper-case", "test to be able to strip the `lightning:` prefix with an upper case invoice.")["bolt11"]
+    wait_for(lambda: only_one(l1.rpc.listpeerchannels(l2.info['id'])['channels'])['state'] == 'CHANNELD_NORMAL')
+
+    # Testing the prefix stripping with an invoice in upper case case
+    l1.rpc.pay(f"lightning:{inv.upper()}")
+    listpays = l1.rpc.listpays()["pays"]
+    assert len(listpays) == 2, f"the list pays is bigger than what we expected {listpays}"
+    assert listpays[1]['bolt11'] == inv, f"list pays contains a different invoice, expected is {inv} but we get {listpays[0]['bolt11']}"
+
+    # Testing the string lowering of an invoice in upper case
+    # Testing the case of the invoice is upper case
+    inv = l2.rpc.invoice(40, "strip-lightning-upper-case", "test to be able to lower the invoice string.")["bolt11"]
+    wait_for(lambda: only_one(l1.rpc.listpeerchannels(l2.info['id'])['channels'])['state'] == 'CHANNELD_NORMAL')
+
+    l1.rpc.pay(inv.upper())
+    listpays = l1.rpc.listpays()["pays"]
+    assert len(listpays) == 3, f"the list pays is bigger than what we expected {listpays}"
+    assert listpays[2]['bolt11'] == inv, f"list pays contains a different invoice, expected is {inv} but we get {listpays[0]['bolt11']}"

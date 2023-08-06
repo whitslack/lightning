@@ -848,7 +848,7 @@ static struct channel *find_channel_for_htlc_add(struct lightningd *ld,
 		return channel;
 
 	/* We used to ignore scid: now all-zero means "any" */
-	if (!channel && (deprecated_apis || memeqzero(scid_or_alias, sizeof(*scid_or_alias)))) {
+	if (!channel && (ld->deprecated_apis || memeqzero(scid_or_alias, sizeof(*scid_or_alias)))) {
 		list_for_each(&peer->channels, channel, list) {
 			if (channel_can_add_htlc(channel)) {
 				return channel;
@@ -1415,7 +1415,7 @@ static struct command_result *json_sendpay(struct command *cmd,
 		   p_opt("label", param_escaped_string, &label),
 		   p_opt("amount_msat|msatoshi", param_msat, &msat),
 		   /* FIXME: parameter should be invstring now */
-		   p_opt("bolt11", param_string, &invstring),
+		   p_opt("bolt11", param_invstring, &invstring),
 		   p_opt("payment_secret", param_secret, &payment_secret),
 		   p_opt_def("partid", param_u64, &partid, 0),
 		   p_opt("localinvreqid", param_sha256, &local_invreq_id),

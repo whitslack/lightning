@@ -529,13 +529,11 @@ static int generate_hsm(const char *hsm_secret_path)
 }
 
 static int dumponchaindescriptors(const char *hsm_secret_path, const char *old_passwd UNUSED,
-				  const bool is_testnet)
+				  const u32 version)
 {
 	struct secret hsm_secret;
 	u8 bip32_seed[BIP32_ENTROPY_LEN_256];
 	u32 salt = 0;
-	u32 version = is_testnet ?
-		BIP32_VER_TEST_PRIVATE : BIP32_VER_MAIN_PRIVATE;
 	struct ext_key master_extkey;
 	char *enc_xpub, *descriptor;
 	struct descriptor_checksum checksum;
@@ -558,7 +556,7 @@ static int dumponchaindescriptors(const char *hsm_secret_path, const char *old_p
 	if (bip32_key_to_base58(&master_extkey, BIP32_FLAG_KEY_PUBLIC, &enc_xpub) != WALLY_OK)
 		errx(ERROR_LIBWALLY, "Can't encode xpub");
 
-	/* Now we format the descriptor strings (we only ever create P2WPKH and
+	/* Now we format the descriptor strings (we only ever create P2TR, P2WPKH, and
 	 * P2SH-P2WPKH outputs). */
 
 	descriptor = tal_fmt(NULL, "wpkh(%s/0/0/*)", enc_xpub);
@@ -570,6 +568,12 @@ static int dumponchaindescriptors(const char *hsm_secret_path, const char *old_p
 	descriptor = tal_fmt(NULL, "sh(wpkh(%s/0/0/*))", enc_xpub);
 	if (!descriptor_checksum(descriptor, strlen(descriptor), &checksum))
 		errx(ERROR_LIBWALLY, "Can't derive descriptor checksum for sh(wpkh)");
+	printf("%s#%s\n", descriptor, checksum.csum);
+	tal_free(descriptor);
+
+	descriptor = tal_fmt(NULL, "tr(%s/0/0/*)", enc_xpub);
+	if (!descriptor_checksum(descriptor, strlen(descriptor), &checksum))
+		errx(ERROR_LIBWALLY, "Can't derive descriptor checksum for tr");
 	printf("%s#%s\n", descriptor, checksum.csum);
 	tal_free(descriptor);
 
@@ -709,7 +713,7 @@ int main(int argc, char *argv[])
 
 	if (streq(method, "dumponchaindescriptors")) {
 		char *net = NULL;
-		bool is_testnet;
+		u32 version;
 
 		if (argc < 3)
 			show_usage(argv[0]);
@@ -717,16 +721,16 @@ int main(int argc, char *argv[])
 		if (argc > 3)
 			net = argv[3];
 
-		if (net && streq(net, "testnet"))
-			is_testnet = true;
+		if (net && (streq(net, "testnet") || streq(net, "signet")))
+			version = BIP32_VER_TEST_PRIVATE;
 		else if (net && !streq(net, "bitcoin"))
 			errx(ERROR_USAGE, "Network '%s' not supported."
 					  " Supported networks: bitcoin (default),"
-					  " testnet", net);
+					  " testnet and signet", net);
 		else
-			is_testnet = false;
+			version = BIP32_VER_MAIN_PRIVATE;
 
-		return dumponchaindescriptors(argv[2], NULL, is_testnet);
+		return dumponchaindescriptors(argv[2], NULL, version);
 	}
 
 	if (streq(method, "checkhsm")) {

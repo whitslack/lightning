@@ -101,7 +101,8 @@ static void plugin_check_subscriptions(struct plugins *plugins,
 {
 	for (size_t i = 0; i < tal_count(plugin->subscriptions); i++) {
 		const char *topic = plugin->subscriptions[i];
-		if (!notifications_have_topic(plugins, topic))
+		if (!streq(topic, "*")
+		    && !notifications_have_topic(plugins, topic))
 			log_unusual(
 			    plugin->log,
 			    "topic '%s' is not a known notification topic",
@@ -823,7 +824,7 @@ struct io_plan *plugin_stdout_conn_init(struct io_conn *conn,
 static char *plugin_opt_check(struct plugin_opt *popt)
 {
 	/* Warn them that this is deprecated */
-	if (popt->deprecated && !deprecated_apis)
+	if (popt->deprecated && !popt->plugin->plugins->ld->deprecated_apis)
 		return tal_fmt(tmpctx, "deprecated option (will be removed!)");
 	return NULL;
 }
@@ -847,7 +848,7 @@ static char *plugin_opt_bool_check(const char *arg, struct plugin_opt *popt)
 {
 	/* FIXME: For some reason, '1' and '0' were allowed here? */
 	if (streq(arg, "1") || streq(arg, "0")) {
-		if (!deprecated_apis)
+		if (!popt->plugin->plugins->ld->deprecated_apis)
 			return "boolean plugin arguments must be true or false";
 	} else {
 		bool v;
@@ -893,22 +894,43 @@ bool is_plugin_opt(const struct opt_table *ot)
 		|| ot->cb_arg == (void *)plugin_opt_bool_check;
 }
 
+/* Sets *ret to false if it doesn't appear, otherwise, sets to value */
+static char *bool_setting(tal_t *ctx,
+			  const char *optname,
+			  const char *buffer,
+			  const jsmntok_t *opt,
+			  const char *tokname,
+			  bool *ret)
+{
+	const jsmntok_t *tok = json_get_member(buffer, opt, tokname);
+	if (!tok) {
+		*ret = false;
+		return NULL;
+	}
+	if (!json_to_bool(buffer, tok, ret))
+		return tal_fmt(ctx,
+			       "%s: invalid \"%s\" field %.*s",
+			       optname, tokname,
+			       tok->end - tok->start,
+			       buffer + tok->start);
+	return NULL;
+}
+
 /* Add a single plugin option to the plugin as well as registering it with the
  * command line options. */
 static const char *plugin_opt_add(struct plugin *plugin, const char *buffer,
 				  const jsmntok_t *opt)
 {
-	const jsmntok_t *nametok, *typetok, *defaulttok, *desctok, *deptok, *multitok;
+	const jsmntok_t *nametok, *typetok, *defaulttok, *desctok;
 	struct plugin_opt *popt;
-	bool multi;
-	const char *name;
+	const char *name, *err;
+	enum opt_type optflags = 0;
+	bool set;
 
 	nametok = json_get_member(buffer, opt, "name");
 	typetok = json_get_member(buffer, opt, "type");
 	desctok = json_get_member(buffer, opt, "description");
 	defaulttok = json_get_member(buffer, opt, "default");
-	deptok = json_get_member(buffer, opt, "deprecated");
-	multitok = json_get_member(buffer, opt, "multi");
 
 	if (!typetok || !nametok || !desctok) {
 		return tal_fmt(plugin,
@@ -916,6 +938,7 @@ static const char *plugin_opt_add(struct plugin *plugin, const char *buffer,
 	}
 
 	popt = tal(plugin, struct plugin_opt);
+	popt->plugin = plugin;
 	popt->name = tal_fmt(popt, "--%s",
 			     json_strdup(tmpctx, buffer, nametok));
 	name = popt->name + 2;
@@ -938,25 +961,21 @@ static const char *plugin_opt_add(struct plugin *plugin, const char *buffer,
 	}
 
 	popt->description = json_strdup(popt, buffer, desctok);
-	if (deptok) {
-		if (!json_to_bool(buffer, deptok, &popt->deprecated))
-			return tal_fmt(plugin,
-				       "%s: invalid \"deprecated\" field %.*s",
-				       name,
-				       deptok->end - deptok->start,
-				       buffer + deptok->start);
-	} else
-		popt->deprecated = false;
+	err = bool_setting(plugin, popt->name, buffer, opt, "deprecated", &popt->deprecated);
+	if (err)
+		return err;
 
-	if (multitok) {
-		if (!json_to_bool(buffer, multitok, &multi))
-			return tal_fmt(plugin,
-				       "%s: invalid \"multi\" field %.*s",
-				       name,
-				       multitok->end - multitok->start,
-				       buffer + multitok->start);
-	} else
-		multi = false;
+	err = bool_setting(plugin, popt->name, buffer, opt, "multi", &set);
+	if (err)
+		return err;
+	if (set)
+		optflags |= OPT_MULTI;
+
+	err = bool_setting(plugin, popt->name, buffer, opt, "dynamic", &set);
+	if (err)
+		return err;
+	if (set)
+		optflags |= OPT_DYNAMIC;
 
 	if (json_tok_streq(buffer, typetok, "flag")) {
 		if (defaulttok) {
@@ -964,7 +983,7 @@ static const char *plugin_opt_add(struct plugin *plugin, const char *buffer,
 			/* We used to allow (ignore) anything, now make sure it's 'false' */
 			if (!json_to_bool(buffer, defaulttok, &val)
 			    || val != false) {
-				if (!deprecated_apis)
+				if (!plugin->plugins->ld->deprecated_apis)
 					return tal_fmt(plugin, "%s type flag default must be 'false' not %.*s",
 						       popt->name,
 						       json_tok_full_len(defaulttok),
@@ -979,16 +998,15 @@ static const char *plugin_opt_add(struct plugin *plugin, const char *buffer,
 			}
 			defaulttok = NULL;
 		}
-		if (multi)
+		if (optflags & OPT_MULTI)
 			return tal_fmt(plugin, "flag type cannot be multi");
 		clnopt_noarg(popt->name,
-			     0,
+			     optflags,
 			     plugin_opt_flag_check, popt,
 			     popt->description);
 	} else {
 		/* These all take an arg. */
 		char *(*cb_arg)(const char *optarg, void *arg);
-		enum opt_type optflags = multi ? OPT_MULTI : 0;
 
 		if (json_tok_streq(buffer, typetok, "string")) {
 			cb_arg = (void *)plugin_opt_string_check;
@@ -996,7 +1014,7 @@ static const char *plugin_opt_add(struct plugin *plugin, const char *buffer,
 			cb_arg = (void *)plugin_opt_long_check;
 			optflags |= OPT_SHOWINT;
 		} else if (json_tok_streq(buffer, typetok, "bool")) {
-			if (multi)
+			if (optflags & OPT_MULTI)
 				return tal_fmt(plugin, "bool type cannot be multi");
 			optflags |= OPT_SHOWBOOL;
 			cb_arg = (void *)plugin_opt_bool_check;
@@ -1289,7 +1307,8 @@ static const char *plugin_subscriptions_add(struct plugin *plugin,
 					    const char *buffer,
 					    const jsmntok_t *resulttok)
 {
-	const jsmntok_t *subscriptions =
+	size_t i;
+	const jsmntok_t *s, *subscriptions =
 	    json_get_member(buffer, resulttok, "subscriptions");
 
 	if (!subscriptions) {
@@ -1301,12 +1320,11 @@ static const char *plugin_subscriptions_add(struct plugin *plugin,
 		return tal_fmt(plugin, "\"result.subscriptions\" is not an array");
 	}
 
-	for (int i = 0; i < subscriptions->size; i++) {
+	json_for_each_arr(i, s, subscriptions) {
 		char *topic;
-		const jsmntok_t *s = json_get_arr(subscriptions, i);
 		if (s->type != JSMN_STRING) {
 			return tal_fmt(plugin,
-				       "result.subscriptions[%d] is not a string: '%.*s'", i,
+				       "result.subscriptions[%zu] is not a string: '%.*s'", i,
 					json_tok_full_len(s),
 					json_tok_full(buffer, s));
 		}
@@ -1379,6 +1397,27 @@ static struct plugin_opt *plugin_opt_find(const struct plugin *plugin,
 	return NULL;
 }
 
+/* Find the plugin_opt for this ot */
+static struct plugin *plugin_opt_find_any(const struct plugins *plugins,
+					  const struct opt_table *ot,
+					  struct plugin_opt **poptp)
+{
+	struct plugin *plugin;
+
+	/* Find the plugin that registered this RPC call */
+	list_for_each(&plugins->plugins, plugin, list) {
+		struct plugin_opt *popt = plugin_opt_find(plugin, ot->names+2);
+		if (popt) {
+			if (poptp)
+				*poptp = popt;
+			return plugin;
+		}
+	}
+
+	/* Reaching here is possible, if a plugin was stopped! */
+	return NULL;
+}
+
 void json_add_config_plugin(struct json_stream *stream,
 			    const struct plugins *plugins,
 			    const char *fieldname,
@@ -1391,15 +1430,9 @@ void json_add_config_plugin(struct json_stream *stream,
 		return;
 
 	/* Find the plugin that registered this RPC call */
-	list_for_each(&plugins->plugins, plugin, list) {
-		struct plugin_opt *popt = plugin_opt_find(plugin, ot->names+2);
-		if (popt) {
-			json_add_string(stream, fieldname, plugin->cmd);
-			return;
-		}
-	}
-
-	/* Reaching here is possible, if a plugin was stopped! */
+	plugin = plugin_opt_find_any(plugins, ot, NULL);
+	if (plugin)
+		json_add_string(stream, fieldname, plugin->cmd);
 }
 
 /* Start command might have included plugin-specific parameters.
@@ -1593,12 +1626,13 @@ static const char *plugin_parse_getmanifest_response(const char *buffer,
 				       "Invalid nonnumericids: %.*s",
 				       json_tok_full_len(tok),
 				       json_tok_full(buffer, tok));
-		if (!deprecated_apis && !plugin->non_numeric_ids)
+		if (!plugin->plugins->ld->deprecated_apis
+		    && !plugin->non_numeric_ids)
 			return tal_fmt(plugin,
 				       "Plugin does not allow nonnumericids");
 	} else
 		/* Default is false in deprecated mode */
-		plugin->non_numeric_ids = !deprecated_apis;
+		plugin->non_numeric_ids = !plugin->plugins->ld->deprecated_apis;
 
 	err = plugin_notifications_add(buffer, resulttok, plugin);
 	if (!err)
@@ -1698,7 +1732,7 @@ char *add_plugin_dir(struct plugins *plugins, const char *dir, bool error_ok)
 	if (!d) {
 		if (!error_ok && errno == ENOENT)
 			return NULL;
-		return tal_fmt(NULL, "Failed to open plugin-dir %s: %s",
+		return tal_fmt(tmpctx, "Failed to open plugin-dir %s: %s",
 			       dir, strerror(errno));
 	}
 
@@ -1718,7 +1752,7 @@ char *add_plugin_dir(struct plugins *plugins, const char *dir, bool error_ok)
 					    NULL, NULL);
 			if (!p && !error_ok) {
 				closedir(d);
-				return tal_fmt(NULL, "Failed to register %s: %s",
+				return tal_fmt(tmpctx, "Failed to register %s: %s",
 				               fullpath, strerror(errno));
 			}
 		}
@@ -1806,7 +1840,8 @@ const char *plugin_send_getmanifest(struct plugin *p, const char *cmd_id)
 	p->stdin_conn = io_new_conn(p, stdinfd, plugin_stdin_conn_init, p);
 	req = jsonrpc_request_start(p, "getmanifest", cmd_id, p->non_numeric_ids,
 				    p->log, NULL, plugin_manifest_cb, p);
-	json_add_bool(req->stream, "allow-deprecated-apis", deprecated_apis);
+	json_add_bool(req->stream, "allow-deprecated-apis",
+		      p->plugins->ld->deprecated_apis);
 	jsonrpc_request_end(req);
 	plugin_request_send(p, req);
 	p->plugin_state = AWAITING_GETMANIFEST_RESPONSE;
@@ -2041,6 +2076,104 @@ bool plugins_config(struct plugins *plugins)
 	return true;
 }
 
+struct plugin_set_return {
+	struct command *cmd;
+	const char *val;
+	const char *optname;
+	struct command_result *(*success)(struct command *,
+					  const struct opt_table *,
+					  const char *);
+};
+
+static void plugin_setconfig_done(const char *buffer,
+				  const jsmntok_t *toks,
+				  const jsmntok_t *idtok UNUSED,
+				  struct plugin_set_return *psr)
+{
+	const jsmntok_t *t;
+	const struct opt_table *ot;
+
+	t = json_get_member(buffer, toks, "error");
+	if (t) {
+		const jsmntok_t *e;
+		int ecode;
+
+		e = json_get_member(buffer, t, "code");
+		if (!e || !json_to_int(buffer, e, &ecode))
+			goto bad_response;
+		e = json_get_member(buffer, t, "message");
+		if (!e)
+			goto bad_response;
+		was_pending(command_fail(psr->cmd, ecode, "%.*s",
+					 e->end - e->start, buffer + e->start));
+		return;
+	}
+
+	/* We have to look this up again, since a new plugin could have added some
+	 * while we were in callback, and moved opt_table! */
+	ot = opt_find_long(psr->optname, NULL);
+	if (!ot) {
+		log_broken(command_log(psr->cmd),
+			   "Missing opt %s on plugin return?", psr->optname);
+		was_pending(command_fail(psr->cmd, LIGHTNINGD,
+					 "Missing opt %s on plugin return?", psr->optname));
+		return;
+	}
+
+	t = json_get_member(buffer, toks, "result");
+	if (!t)
+		goto bad_response;
+	was_pending(psr->success(psr->cmd, ot, psr->val));
+	return;
+
+bad_response:
+	log_broken(command_log(psr->cmd),
+		   "Invalid setconfig %s response from plugin: %.*s",
+		   psr->optname,
+		   json_tok_full_len(toks), json_tok_full(buffer, toks));
+	was_pending(command_fail(psr->cmd, LIGHTNINGD,
+				 "Malformed setvalue %s plugin return", psr->optname));
+}
+
+struct command_result *plugin_set_dynamic_opt(struct command *cmd,
+					      const struct opt_table *ot,
+					      const char *val,
+					      struct command_result *(*success)
+					      (struct command *,
+					       const struct opt_table *,
+					       const char *))
+{
+	struct plugin_opt *popt;
+	struct plugin *plugin;
+	struct jsonrpc_request *req;
+	struct plugin_set_return *psr;
+
+	plugin = plugin_opt_find_any(cmd->ld->plugins, ot, &popt);
+	assert(plugin);
+
+	assert(ot->type & OPT_DYNAMIC);
+
+	psr = tal(cmd, struct plugin_set_return);
+	psr->cmd = cmd;
+	/* val is a child of cmd, so no copy needed. */
+	psr->val = val;
+	psr->optname = tal_strdup(psr, ot->names + 2);
+	psr->success = success;
+
+	req = jsonrpc_request_start(cmd, "setconfig",
+				    cmd->id,
+				    plugin->non_numeric_ids,
+				    command_log(cmd),
+				    NULL, plugin_setconfig_done,
+				    psr);
+	json_add_string(req->stream, "config", psr->optname);
+	if (psr->val)
+		json_add_string(req->stream, "val", psr->val);
+	jsonrpc_request_end(req);
+	plugin_request_send(plugin, req);
+	return command_still_pending(cmd);
+}
+
 /** json_add_opt_plugins_array
  *
  * @brief add a named array of plugins to the given response,
@@ -2075,7 +2208,7 @@ void json_add_opt_plugins_array(struct json_stream *response,
 
 		if (!list_empty(&p->plugin_opts)) {
 			json_add_plugin_options(response, "options", p,
-						!deprecated_apis);
+						!plugins->ld->deprecated_apis);
 		}
 		json_object_end(response);
 	}
@@ -2104,9 +2237,13 @@ void json_add_opt_disable_plugins(struct json_stream *response,
 static bool plugin_subscriptions_contains(struct plugin *plugin,
 					  const char *method)
 {
-	for (size_t i = 0; i < tal_count(plugin->subscriptions); i++)
-		if (streq(method, plugin->subscriptions[i]))
+	for (size_t i = 0; i < tal_count(plugin->subscriptions); i++) {
+		if (streq(method, plugin->subscriptions[i])
+		    /* Asterisk is magic "all" */
+		    || streq(plugin->subscriptions[i], "*")) {
 			return true;
+		}
+	}
 
 	return false;
 }

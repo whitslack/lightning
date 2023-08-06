@@ -17,6 +17,11 @@ struct bitcoin_signature;
 struct bitcoin_txid;
 struct pubkey;
 
+
+/* Utility we need for psbt stuffs;
+ * add the varint onto the given array */
+void add_varint(u8 **arr, size_t val);
+
 /**
  * create_psbt - Create a new psbt object
  *
@@ -153,7 +158,7 @@ void psbt_rm_output(struct wally_psbt *psbt,
 		    size_t remove_at);
 
 void psbt_input_add_pubkey(struct wally_psbt *psbt, size_t in,
-			   const struct pubkey *pubkey);
+			   const struct pubkey *pubkey, bool is_taproot);
 
 WARN_UNUSED_RESULT bool psbt_input_set_signature(struct wally_psbt *psbt, size_t in,
 						 const struct pubkey *pubkey,

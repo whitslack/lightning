@@ -99,7 +99,8 @@ example:
       "type": "string",
       "default": "World",
       "description": "What name should I call you?",
-      "deprecated": false
+      "deprecated": false,
+	  "dynamic": false
     }
   ],
   "rpcmethods": [
@@ -143,7 +144,7 @@ example:
 During startup the `options` will be added to the list of command line options that
 `lightningd` accepts. If any `options` "name" is already taken startup will abort. The above will add a `--greeting` option with a
 default value of `World` and the specified description. *Notice that
-currently string, integers, bool, and flag options are supported.*
+currently string, integers, bool, and flag options are supported.*  If an option specifies `dynamic`: `true`, then it should allow a `setvalue` call for that option after initialization.
 
 The `rpcmethods` are methods that will be exposed via `lightningd`'s
 JSON-RPC over Unix-Socket interface, just like the builtin
@@ -253,11 +254,6 @@ Here's an example option set, as sent in response to `getmanifest`
     }
   ],
 ```
-
-**Note**: `lightningd` command line options are only parsed during startup and their
-values are not remembered when the plugin is stopped or killed.
-For dynamic plugins started with `plugin start`, options can be
-passed as extra arguments to that [command][lightning-plugin].
 
 
 #### Custom notifications
@@ -435,6 +431,13 @@ above for example subscribes to the two topics `connect` and
 corresponding payloads are listed below.
 
 
+### `*`
+
+This is a way of specifying that you want to subscribe to all possible
+event notifications.  It is not recommended, but is useful for plugins
+which want to provide generic infrastructure for others (in future, we
+may add the ability to dynamically subscribe/unsubscribe).
+
 ### `channel_opened`
 
 A notification for topic `channel_opened` is sent if a peer successfully
@@ -517,9 +520,11 @@ to a peer is established. `direction` is either `"in"` or `"out"`.
 
 ```json
 {
-  "id": "02f6725f9c1c40333b67faea92fd211c183050f28df32cac3f9d69685fe9665432",
-  "direction": "in",
-  "address": "1.2.3.4:1234"
+  "connect": {
+    "id": "02f6725f9c1c40333b67faea92fd211c183050f28df32cac3f9d69685fe9665432",
+    "direction": "in",
+    "address": "1.2.3.4:1234"
+  }
 }
 ```
 
@@ -530,7 +535,9 @@ to a peer was lost.
 
 ```json
 {
-  "id": "02f6725f9c1c40333b67faea92fd211c183050f28df32cac3f9d69685fe9665432"
+  "disconnect": {
+    "id": "02f6725f9c1c40333b67faea92fd211c183050f28df32cac3f9d69685fe9665432"
+  }
 }
 ```
 
@@ -848,7 +855,7 @@ current accounts (`account_id` matches the `account_id` emitted from
 
 ```json
 {
-    "balance_snapshots": [
+    "balance_snapshot": [
 	{
 	    'node_id': '035d2b1192dfba134e10e540875d366ebc8bc353d5aa766b80c090b39c3a5d885d',
 	    'blockheight': 101,
@@ -888,7 +895,7 @@ throughout the node's life as new blocks appear.
 
 ```json
 {
-    "block": {
+    "block_added": {
       "hash": "000000000000000000034bdb3c01652a0aa8f63d32f949313d55af2509f9d245",
       "height": 753304
     }
@@ -922,6 +929,12 @@ logging or notifications. New rpc calls will fail with error code -5 and (plugin
 responses will be ignored. Because lightningd can crash or be killed, a plugin cannot
 rely on the shutdown notification always been send.
 
+```json
+{
+    "shutdown": {
+    }
+}
+```
 
 ## Hooks
 

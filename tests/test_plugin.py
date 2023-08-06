@@ -465,7 +465,13 @@ def test_plugin_connected_hook_chaining(node_factory):
     ])
     assert len(l1.rpc.listpeers(l2id)['peers']) == 1
 
-    l3.connect(l1)
+    # If reject happens fast enough, connect fails with "disconnected
+    # during connection"
+    try:
+        l3.connect(l1)
+    except RpcError as err:
+        assert "disconnected during connection" in err.error
+
     l1.daemon.wait_for_logs([
         f"peer_connected_logger_a {l3id}",
         f"{l3id} is in reject list"
@@ -3181,8 +3187,7 @@ def test_commando_badrune(node_factory):
 
 
 def test_autoclean(node_factory):
-    l1, l2, l3 = node_factory.line_graph(3, opts={'autoclean-cycle': 10,
-                                                  'may_reconnect': True},
+    l1, l2, l3 = node_factory.line_graph(3, opts={'may_reconnect': True},
                                          wait_for_announce=True)
 
     # Under valgrind in CI, it can 50 seconds between creating invoice
@@ -3201,9 +3206,11 @@ def test_autoclean(node_factory):
     inv4 = l3.rpc.invoice(amount_msat=12300, label='inv4', description='description4', expiry=2000)
     inv5 = l3.rpc.invoice(amount_msat=12300, label='inv5', description='description5', expiry=2000)
 
-    l3.stop()
-    l3.daemon.opts['autoclean-expiredinvoices-age'] = 2
-    l3.start()
+    # It must be an integer!
+    with pytest.raises(RpcError, match=r'is not a number'):
+        l3.rpc.setconfig('autoclean-expiredinvoices-age', 'xxx')
+
+    l3.rpc.setconfig('autoclean-expiredinvoices-age', 2)
     assert l3.rpc.autoclean_status()['autoclean']['expiredinvoices']['enabled'] is True
     assert l3.rpc.autoclean_status()['autoclean']['expiredinvoices']['age'] == 2
 
@@ -3212,6 +3219,8 @@ def test_autoclean(node_factory):
     assert len(l3.rpc.listinvoices('inv1')['invoices']) == 1
     assert len(l3.rpc.listinvoices('inv2')['invoices']) == 1
     assert l3.rpc.listinvoices('inv1')['invoices'][0]['description'] == 'description1'
+
+    l3.rpc.setconfig('autoclean-cycle', 10)
 
     # First it expires.
     wait_for(lambda: only_one(l3.rpc.listinvoices('inv1')['invoices'])['status'] == 'expired')
@@ -3227,9 +3236,7 @@ def test_autoclean(node_factory):
     assert l3.rpc.autoclean_status()['autoclean']['expiredinvoices']['cleaned'] == 1
 
     # Disabling works
-    l3.stop()
-    l3.daemon.opts['autoclean-expiredinvoices-age'] = 0
-    l3.start()
+    l3.rpc.setconfig('autoclean-expiredinvoices-age', 0)
     assert l3.rpc.autoclean_status()['autoclean']['expiredinvoices']['enabled'] is False
     assert 'age' not in l3.rpc.autoclean_status()['autoclean']['expiredinvoices']
 
@@ -3250,9 +3257,7 @@ def test_autoclean(node_factory):
     assert 'age' not in l3.rpc.autoclean_status()['autoclean']['expiredinvoices']
 
     # Now enable: they will get autocleaned
-    l3.stop()
-    l3.daemon.opts['autoclean-expiredinvoices-age'] = 2
-    l3.start()
+    l3.rpc.setconfig('autoclean-expiredinvoices-age', 2)
     wait_for(lambda: len(l3.rpc.listinvoices()['invoices']) == 2)
     assert l3.rpc.autoclean_status()['autoclean']['expiredinvoices']['cleaned'] == 3
 
@@ -3267,9 +3272,7 @@ def test_autoclean(node_factory):
 
     assert l3.rpc.autoclean_status()['autoclean']['paidinvoices']['enabled'] is False
     assert l3.rpc.autoclean_status()['autoclean']['paidinvoices']['cleaned'] == 0
-    l3.stop()
-    l3.daemon.opts['autoclean-paidinvoices-age'] = 1
-    l3.start()
+    l3.rpc.setconfig('autoclean-paidinvoices-age', 1)
     assert l3.rpc.autoclean_status()['autoclean']['paidinvoices']['enabled'] is True
 
     wait_for(lambda: l3.rpc.listinvoices()['invoices'] == [])
@@ -3278,17 +3281,14 @@ def test_autoclean(node_factory):
 
     assert only_one(l1.rpc.listpays(inv5['bolt11'])['pays'])['status'] == 'failed'
     assert only_one(l1.rpc.listpays(inv4['bolt11'])['pays'])['status'] == 'complete'
-    l1.stop()
-    l1.daemon.opts['autoclean-failedpays-age'] = 1
-    l1.start()
+    l1.rpc.setconfig('autoclean-failedpays-age', 1)
+    l1.rpc.setconfig('autoclean-cycle', 5)
 
     wait_for(lambda: l1.rpc.listpays(inv5['bolt11'])['pays'] == [])
     assert l1.rpc.autoclean_status()['autoclean']['failedpays']['cleaned'] == 1
     assert l1.rpc.autoclean_status()['autoclean']['succeededpays']['cleaned'] == 0
 
-    l1.stop()
-    l1.daemon.opts['autoclean-succeededpays-age'] = 2
-    l1.start()
+    l1.rpc.setconfig('autoclean-succeededpays-age', 2)
     wait_for(lambda: l1.rpc.listpays(inv4['bolt11'])['pays'] == [])
     assert l1.rpc.listsendpays() == {'payments': []}
 
@@ -3298,9 +3298,8 @@ def test_autoclean(node_factory):
     assert len(l2.rpc.listforwards()['forwards']) == 2
 
     # Clean failed ones.
-    l2.stop()
-    l2.daemon.opts['autoclean-failedforwards-age'] = 2
-    l2.start()
+    l2.rpc.setconfig('autoclean-cycle', 5)
+    l2.rpc.setconfig('autoclean-failedforwards-age', 2)
     wait_for(lambda: l2.rpc.listforwards(status='failed')['forwards'] == [])
 
     assert len(l2.rpc.listforwards(status='settled')['forwards']) == 1
@@ -3310,9 +3309,7 @@ def test_autoclean(node_factory):
     amt_before = l2.rpc.getinfo()['fees_collected_msat']
 
     # Clean succeeded ones
-    l2.stop()
-    l2.daemon.opts['autoclean-succeededforwards-age'] = 2
-    l2.start()
+    l2.rpc.setconfig('autoclean-succeededforwards-age', 2)
     wait_for(lambda: l2.rpc.listforwards(status='settled')['forwards'] == [])
     assert l2.rpc.listforwards() == {'forwards': []}
     assert l2.rpc.autoclean_status()['autoclean']['failedforwards']['cleaned'] == 1
@@ -4251,3 +4248,32 @@ def test_plugin_persist_option(node_factory):
     assert c['value_str'] == "Static option"
     assert c['plugin'] == plugin_path
     assert l1.rpc.call("hello") == "Static option world"
+
+
+def test_all_subscription(node_factory, directory):
+    """Ensure that registering for all notifications works."""
+    plugin1 = os.path.join(os.getcwd(), 'tests/plugins/all_notifications.py')
+    plugin2 = os.path.join(os.getcwd(), "tests/plugins/test_libplugin")
+
+    l1, l2 = node_factory.line_graph(2, opts=[{"plugin": plugin1},
+                                              {"plugin": plugin2}])
+
+    l1.stop()
+    l2.stop()
+
+    # There will be a lot of these!
+    for notstr in ("block_added: {'block_added': {'hash': ",
+                   "balance_snapshot: {'balance_snapshot': {'node_id': ",
+                   "connect: {'connect': {'id': ",
+                   "channel_state_changed: {'channel_state_changed': {'peer_id': ",
+                   "shutdown: {'shutdown': {}"):
+        assert l1.daemon.is_in_log(f".*plugin-all_notifications.py: notification {notstr}.*")
+
+    for notstr in ('block_added: ',
+                   'balance_snapshot: ',
+                   'channel_state_changed: {'):
+        assert l2.daemon.is_in_log(f'.*test_libplugin: all: {notstr}.*')
+
+    # shutdown and connect are subscribed before the wildcard, so is handled by that handler
+    assert not l2.daemon.is_in_log(f'.*test_libplugin: all: shutdown.*')
+    assert not l2.daemon.is_in_log(f'.*test_libplugin: all: connect.*')

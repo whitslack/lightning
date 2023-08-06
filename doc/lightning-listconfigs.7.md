@@ -9,12 +9,27 @@ SYNOPSIS
 DESCRIPTION
 -----------
 
-*config* (optional) is a configuration option name, or "plugin" to show plugin options
+*config* (optional) is a configuration option name to restrict return.
 
-The **listconfigs** RPC command to list all configuration options, or with *config* only a selection.
+The **listconfigs** RPC command to list all configuration options, or with *config* only one.
 
 The returned values reflect the current configuration, including
-showing default values (`dev-` options are not shown).
+showing default values (`dev-` options are not shown unless specified as *config* explicitly).
+
+Note: as plugins can add options, not all configuration settings are
+listed here!  The format of each entry is as follows:
+
+- **source** (string): source of configuration setting (`file`:`linenum`)
+- **dynamic** (boolean, optional): true if this option is settable via setconfig
+- **plugin** (string, optional): set if this is from a plugin
+
+Depending on the option type, exactly one of the following is present:
+
+- **set** (boolean, optional): for simple flag options
+- **value\_str** (string, optional): for string options
+- **value\_msat** (msat, optional): for msat options
+- **value\_int** (integer, optional): for integer options
+- **value\_bool** (boolean, optional): for boolean options
 
 EXAMPLE JSON REQUEST
 --------------------
@@ -120,6 +135,9 @@ On success, an object is returned, containing:
   - **experimental-peer-storage** (object, optional) *(added v23.02)*:
     - **set** (boolean): `true` if set in config or cmdline
     - **source** (string): source of configuration setting
+  - **experimental-anchors** (object, optional) *(added v23.08)*:
+    - **set** (boolean): `true` if set in config or cmdline
+    - **source** (string): source of configuration setting
   - **database-upgrade** (object, optional):
     - **value\_bool** (boolean): field from config or cmdline, or default
     - **source** (string): source of configuration setting
@@ -177,6 +195,7 @@ On success, an object is returned, containing:
   - **min-capacity-sat** (object, optional):
     - **value\_int** (u64): field from config or cmdline, or default
     - **source** (string): source of configuration setting
+    - **dynamic** (boolean, optional): Can this be set by setconfig() (always *true*)
   - **addr** (object, optional):
     - **values\_str** (array of strings):
       - field from config or cmdline
@@ -330,6 +349,7 @@ On success, an object is returned, containing:
 - **announce-addr-dns** (boolean, optional): Whether we put DNS entries into node\_announcement **deprecated, removal in v24.05** *(added v22.11.1)*
 - **require-confirmed-inputs** (boolean, optional): Request peers to only send confirmed inputs (dual-fund only) **deprecated, removal in v24.05**
 - **commit-fee** (u64, optional): The percentage of the 6-block fee estimate to use for commitment transactions **deprecated, removal in v24.05** *(added v23.05)*
+- **min-emergency-msat** (msat, optional): field from config or cmdline, or default *(added v23.08)*
 
 [comment]: # (GENERATE-FROM-SCHEMA-END)
 
@@ -447,4 +467,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:2b3588b395919162c122cd386f0f4b320d906d0190e706bfa1b68db4126e7ee2)
+[comment]: # ( SHA256STAMP:a40882cad0d889aa736a2932250102be43ae7e62b3d2429b26e0961e4c315f7b)

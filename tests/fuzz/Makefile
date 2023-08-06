@@ -2,6 +2,9 @@ LIBFUZZ_SRC := tests/fuzz/libfuzz.c
 LIBFUZZ_HEADERS := $(LIBFUZZ_SRC:.c=.h)
 LIBFUZZ_OBJS := $(LIBFUZZ_SRC:.c=.o)
 
+tests/fuzz/fuzz-connectd-handshake-act*.o: tests/fuzz/connectd_handshake.h
+tests/fuzz/fuzz-ripemd160: LDLIBS += -lcrypto
+tests/fuzz/fuzz-sha256: LDLIBS += -lcrypto
 
 FUZZ_TARGETS_SRC := $(wildcard tests/fuzz/fuzz-*.c)
 FUZZ_TARGETS_OBJS := $(FUZZ_TARGETS_SRC:.c=.o)
@@ -23,6 +26,7 @@ FUZZ_COMMON_OBJS := \
 	common/configvar.o				\
 	common/channel_id.o				\
 	common/channel_type.o				\
+	common/cryptomsg.o				\
 	common/daemon.o					\
 	common/daemon_conn.o				\
 	common/derive_basepoints.o			\

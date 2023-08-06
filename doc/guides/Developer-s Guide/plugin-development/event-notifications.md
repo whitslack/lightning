@@ -13,6 +13,13 @@ Event notifications allow a plugin to subscribe to events in `lightningd`. `ligh
 
 Plugins subscribe by returning an array of subscriptions as part of the `getmanifest` response. The result for the `getmanifest` call above for example subscribes to the two topics `connect` and `disconnect`. The topics that are currently defined and the corresponding payloads are listed below.
 
+### `*`
+
+This is a way of specifying that you want to subscribe to all possible
+event notifications.  It is not recommended, but is useful for plugins
+which want to provide generic infrastructure for others (in future, we
+may add the ability to dynamically subscribe/unsubscribe).
+
 ### `channel_opened`
 
 A notification for topic `channel_opened` is sent if a peer successfully funded a channel with us. It contains the peer id, the funding amount (in millisatoshis), the funding transaction id, and a boolean indicating if the funding transaction has been included into a block.
@@ -87,9 +94,11 @@ A notification for topic `connect` is sent every time a new connection to a peer
 
 ```json
 {
-  "id": "02f6725f9c1c40333b67faea92fd211c183050f28df32cac3f9d69685fe9665432",
-  "direction": "in",
-  "address": "1.2.3.4:1234"
+  "connect": {
+    "id": "02f6725f9c1c40333b67faea92fd211c183050f28df32cac3f9d69685fe9665432",
+    "direction": "in",
+    "address": "1.2.3.4:1234"
+  }
 }
 ```
 
@@ -101,7 +110,9 @@ A notification for topic `disconnect` is sent every time a connection to a peer 
 
 ```json
 {
-  "id": "02f6725f9c1c40333b67faea92fd211c183050f28df32cac3f9d69685fe9665432"
+  "disconnect": {
+    "id": "02f6725f9c1c40333b67faea92fd211c183050f28df32cac3f9d69685fe9665432"
+  }
 }
 ```
 
@@ -378,7 +389,7 @@ Emitted after we've caught up to the chain head on first start. Lists all curren
 
 ```json
 {
-    "balance_snapshots": [
+    "balance_snapshot": [
 	{
 	    'node_id': '035d2b1192dfba134e10e540875d366ebc8bc353d5aa766b80c090b39c3a5d885d',
 	    'blockheight': 101,
@@ -419,7 +430,7 @@ Emitted after each block is received from bitcoind, either during the initial sy
 
 ```json
 {
-    "block": {
+    "block_added": {
       "hash": "000000000000000000034bdb3c01652a0aa8f63d32f949313d55af2509f9d245",
       "height": 753304
     }

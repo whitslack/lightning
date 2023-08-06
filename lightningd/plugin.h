@@ -130,6 +130,7 @@ struct plugins {
  * command line and passing them off to the plugin
  */
 struct plugin_opt {
+	struct plugin *plugin;
 	/* off plugin->plugin_opts */
 	struct list_node list;
 	/* includes -- prefix! */
@@ -365,4 +366,12 @@ void json_add_config_plugin(struct json_stream *stream,
 			    const char *fieldname,
 			    const struct opt_table *ot);
 
+/* Attempt to setconfig an option in a plugin.  Calls success or fail, may be async! */
+struct command_result *plugin_set_dynamic_opt(struct command *cmd,
+					      const struct opt_table *ot,
+					      const char *val,
+					      struct command_result *(*success)
+					      (struct command *,
+					       const struct opt_table *,
+					       const char *));
 #endif /* LIGHTNING_LIGHTNINGD_PLUGIN_H */

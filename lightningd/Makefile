@@ -1,6 +1,7 @@
 #! /usr/bin/make
 
 LIGHTNINGD_SRC :=				\
+	lightningd/anchorspend.c		\
 	lightningd/bitcoind.c			\
 	lightningd/chaintopology.c		\
 	lightningd/channel.c			\
@@ -40,6 +41,7 @@ LIGHTNINGD_SRC :=				\
 	lightningd/watch.c
 
 LIGHTNINGD_SRC_NOHDR :=				\
+	lightningd/configs.c			\
 	lightningd/datastore.c			\
 	lightningd/ping.c			\
 	lightningd/offer.c			\

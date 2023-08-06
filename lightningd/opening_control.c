@@ -76,6 +76,12 @@ void json_add_uncommitted_channel(struct json_stream *response,
 			       uc->peer->their_features,
 			       OPT_ANCHOR_OUTPUTS))
 		json_add_string(response, NULL, "option_anchor_outputs");
+
+	if (feature_negotiated(uc->peer->ld->our_features,
+			       uc->peer->their_features,
+			       OPT_ANCHORS_ZERO_FEE_HTLC_TX))
+		json_add_string(response, NULL, "option_anchors_zero_fee_htlc_tx");
+
 	json_array_end(response);
 	json_object_end(response);
 }
@@ -1276,6 +1282,7 @@ static struct command_result *json_fundchannel_start(struct command *cmd,
 			fc->our_upfront_shutdown_script,
 			upfront_shutdown_script_wallet_index,
 			*feerate_per_kw,
+			unilateral_feerate(cmd->ld->topology, true),
 			&tmp_channel_id,
 			fc->channel_flags,
 			fc->uc->reserve);
