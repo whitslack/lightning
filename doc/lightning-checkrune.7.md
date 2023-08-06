@@ -4,7 +4,7 @@ lightning-checkrune -- Command to Validate Rune
 SYNOPSIS
 --------
 
-**checkrune** [*rune*], [*nodeid*], [*method*] [*params*]
+**checkrune** [*nodeid*], [*rune*], [*method*] [*params*]
 
 DESCRIPTION
 -----------
