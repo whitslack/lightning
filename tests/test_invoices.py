@@ -708,8 +708,7 @@ def test_listinvoices_filter(node_factory):
 
 
 def test_wait_invoices(node_factory, executor):
-    # We use delexpiredinvoice
-    l1, l2 = node_factory.line_graph(2, opts={'allow-deprecated-apis': True})
+    l1, l2 = node_factory.line_graph(2)
 
     # Asking for 0 gives us current index.
     waitres = l2.rpc.call('wait', {'subsystem': 'invoices', 'indexname': 'created', 'nextvalue': 0})
@@ -754,7 +753,7 @@ def test_wait_invoices(node_factory, executor):
                        'updated': 1}
 
     # Now check expiry works.
-    inv2 = l2.rpc.invoice(42, 'invlabel2', 'invdesc2', expiry=2)
+    l2.rpc.invoice(42, 'invlabel2', 'invdesc2', expiry=2)
     waitres = l2.rpc.call('wait', {'subsystem': 'invoices', 'indexname': 'updated', 'nextvalue': 2})
 
     assert waitres == {'subsystem': 'invoices',
@@ -763,40 +762,9 @@ def test_wait_invoices(node_factory, executor):
                        #  {'label': 'invlabel2', 'bolt11': inv2['bolt11'], 'status': 'expired'}
                        'details': {'status': 'expired'}}
 
-    # Now for deletions
-    waitres = l2.rpc.call('wait', {'subsystem': 'invoices', 'indexname': 'deleted', 'nextvalue': 0})
-    assert waitres == {'subsystem': 'invoices',
-                       'deleted': 0}
+    # Deleting correctly produces 3, not another 2!
+    l2.rpc.delinvoice('invlabel2', 'expired')
 
-    waitfut = executor.submit(l2.rpc.call, 'wait', {'subsystem': 'invoices', 'indexname': 'deleted', 'nextvalue': 1})
-    time.sleep(1)
-    l2.rpc.delinvoice('invlabel', 'paid')
-    waitres = waitfut.result(TIMEOUT)
-
-    assert waitres == {'subsystem': 'invoices',
-                       'deleted': 1,
-                       'details': {'label': 'invlabel',
-                                   'bolt11': inv['bolt11'],
-                                   'status': 'paid'}}
-
-    # Second returns instantly, without any details.
-    waitres = l2.rpc.call('wait', {'subsystem': 'invoices', 'indexname': 'deleted', 'nextvalue': 1})
-    assert waitres == {'subsystem': 'invoices',
-                       'deleted': 1}
-
-    # Now check delexpiredinvoice works.
-    waitfut = executor.submit(l2.rpc.call, 'wait', {'subsystem': 'invoices', 'indexname': 'deleted', 'nextvalue': 2})
-    time.sleep(1)
-    l2.rpc.delexpiredinvoice()
-    waitres = waitfut.result(TIMEOUT)
-
-    assert waitres == {'subsystem': 'invoices',
-                       'deleted': 2,
-                       'details': {'label': 'invlabel2',
-                                   'bolt11': inv2['bolt11'],
-                                   'status': 'expired'}}
-
-    # Creating a new on gives us 3, not another 2!
     waitfut = executor.submit(l2.rpc.call, 'wait', {'subsystem': 'invoices', 'indexname': 'created', 'nextvalue': 3})
     time.sleep(1)
     inv = l2.rpc.invoice(42, 'invlabel2', 'invdesc2')
