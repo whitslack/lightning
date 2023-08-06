@@ -115,7 +115,20 @@ static struct invoice_details *wallet_stmt2invoice_details(const tal_t *ctx,
 	return dtl;
 }
 
-static void trigger_expiration(struct invoices *invoices);
+/* Update expirations. */
+static void update_db_expirations(struct invoices *invoices, u64 now)
+{
+	struct db_stmt *stmt;
+	stmt = db_prepare_v2(invoices->wallet->db, SQL("UPDATE invoices"
+					       "   SET state = ?"
+					       " WHERE state = ?"
+					       "   AND expiry_time <= ?;"));
+	db_bind_int(stmt, EXPIRED);
+	db_bind_int(stmt, UNPAID);
+	db_bind_u64(stmt, now);
+	db_exec_prepared_v2(take(stmt));
+}
+
 static void install_expiration_timer(struct invoices *invoices);
 
 struct invoices *invoices_new(const tal_t *ctx,
@@ -131,7 +144,8 @@ struct invoices *invoices_new(const tal_t *ctx,
 
 	invs->expiration_timer = NULL;
 
-	trigger_expiration(invs);
+	update_db_expirations(invs, time_now().ts.tv_sec);
+	install_expiration_timer(invs);
 	return invs;
 }
 
@@ -167,20 +181,11 @@ static void trigger_expiration(struct invoices *invoices)
 	}
 	tal_free(stmt);
 
+	/* Expire all those invoices */
+	update_db_expirations(invoices, now);
+
 	/* Trigger expirations */
 	list_for_each(&idlist, idn, list) {
-		stmt = db_prepare_v2(invoices->wallet->db, SQL("UPDATE invoices"
-							       "   SET state = ?"
-							       "      , updated_index = ?"
-							       " WHERE id = ?"));
-		db_bind_int(stmt, EXPIRED);
-		db_bind_u64(stmt,
-			    /* FIXME: details! */
-			    invoice_index_update_status(invoices->wallet->ld,
-							NULL, EXPIRED));
-		db_bind_u64(stmt, idn->inv_dbid);
-		db_exec_prepared_v2(take(stmt));
-
 		/* Trigger expiration */
 		trigger_invoice_waiter_expire_or_delete(invoices, idn->inv_dbid, false);
 	}
@@ -535,16 +540,11 @@ bool invoices_resolve(struct invoices *invoices,
 					       "     , pay_index=?"
 					       "     , msatoshi_received=?"
 					       "     , paid_timestamp=?"
-					       "     , updated_index=?"
 					       " WHERE id=?;"));
 	db_bind_int(stmt, PAID);
 	db_bind_u64(stmt, pay_index);
 	db_bind_amount_msat(stmt, &received);
 	db_bind_u64(stmt, paid_timestamp);
-	/* FIXME: populate label */
-	db_bind_u64(stmt,
-		    invoice_index_update_status(invoices->wallet->ld,
-						NULL, PAID));
 	db_bind_u64(stmt, inv_dbid);
 	db_exec_prepared_v2(take(stmt));
 
