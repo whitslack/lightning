@@ -317,10 +317,7 @@ static struct node_map *local_connected(const tal_t *ctx,
 		/* Must also have a channel in CHANNELD_NORMAL */
 		normal_chan = json_tok_streq(buf,
 				   json_get_member(buf, channel, "state"),
-					     "CHANNELD_NORMAL")
-			   || json_tok_streq(buf,
-				   json_get_member(buf, channel, "state"),
-					     "CHANNELD_AWAITING_SPLICE");
+					     "CHANNELD_NORMAL");
 
 		if (normal_chan)
 			node_map_add(connected,
