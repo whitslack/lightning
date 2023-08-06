@@ -1409,6 +1409,8 @@ pub mod requests {
 	    pub htlcmax: Option<Amount>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub enforcedelay: Option<u32>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub ignorefeelimits: Option<bool>,
 	}
 
 	impl From<SetchannelRequest> for Request {
@@ -3701,6 +3703,8 @@ pub mod responses {
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub scratch_txid: Option<String>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub ignore_fee_limits: Option<bool>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub feerate: Option<ListpeerchannelsChannelsFeerate>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub owner: Option<String>,
@@ -4649,6 +4653,8 @@ pub mod responses {
 	    pub short_channel_id: Option<ShortChannelId>,
 	    pub fee_base_msat: Amount,
 	    pub fee_proportional_millionths: u32,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub ignore_fee_limits: Option<bool>,
 	    pub minimum_htlc_out_msat: Amount,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub warning_htlcmin_too_low: Option<String>,
