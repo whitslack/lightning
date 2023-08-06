@@ -100,7 +100,6 @@ start_nodes() {
 			dev-fast-gossip
 			dev-bitcoind-poll=5
 			experimental-dual-fund
-			experimental-splicing
 			experimental-offers
 			funder-policy=match
 			funder-policy-mod=100

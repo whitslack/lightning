@@ -1186,9 +1186,7 @@ wallet_update_channel(struct lightningd *ld,
 				channel->lease_chan_max_ppt,
 				lease_blockheight_start,
 				channel->push,
-				lease_amt,
-				0,
-				false);
+				lease_amt);
 	wallet_inflight_add(ld->wallet, inflight);
 
 	return inflight;
@@ -1340,9 +1338,7 @@ wallet_commit_channel(struct lightningd *ld,
 				channel->lease_chan_max_ppt,
 				lease_blockheight_start,
 				channel->push,
-				lease_amt,
-				0,
-				false);
+				lease_amt);
 	wallet_inflight_add(ld->wallet, inflight);
 
 	/* We might have disconnected and decided we didn't need to

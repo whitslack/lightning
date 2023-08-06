@@ -760,14 +760,14 @@ static char *check_balances(const tal_t *ctx,
 			assert(ok);
 
 			initiator_weight +=
-				psbt_input_get_weight(psbt, i);
+				psbt_input_weight(psbt, i);
 		} else {
 			ok = amount_sat_add(&accepter_inputs,
 					    accepter_inputs, amt);
 			assert(ok);
 
 			accepter_weight +=
-				psbt_input_get_weight(psbt, i);
+				psbt_input_weight(psbt, i);
 		}
 	}
 	tot_output_amt = AMOUNT_SAT(0);
@@ -826,13 +826,13 @@ static char *check_balances(const tal_t *ctx,
 			}
 
 			initiator_weight +=
-				psbt_output_get_weight(psbt, i);
+				psbt_output_weight(psbt, i);
 		} else {
 			ok = amount_sat_add(&accepter_outs,
 					    accepter_outs, amt);
 			assert(ok);
 			accepter_weight +=
-				psbt_output_get_weight(psbt, i);
+				psbt_output_weight(psbt, i);
 		}
 	}
 
@@ -997,8 +997,7 @@ static u8 *psbt_to_tx_sigs_msg(const tal_t *ctx,
 
 	return towire_tx_signatures(ctx, &state->channel_id,
 				    &state->tx_state->funding.txid,
-				    ws,
-				    NULL);
+				    ws);
 }
 
 static void handle_tx_sigs(struct state *state, const u8 *msg)
@@ -1010,12 +1009,10 @@ static void handle_tx_sigs(struct state *state, const u8 *msg)
 	enum tx_role their_role = state->our_role == TX_INITIATOR ?
 		TX_ACCEPTER : TX_INITIATOR;
 
-	struct tlv_txsigs_tlvs *txsig_tlvs = tlv_txsigs_tlvs_new(tmpctx);
 	if (!fromwire_tx_signatures(tmpctx, msg, &cid, &txid,
 				    cast_const3(
 					 struct witness ***,
-					 &witnesses),
-				    &txsig_tlvs))
+					 &witnesses)))
 		open_err_fatal(state, "Bad tx_signatures %s",
 			       tal_hex(msg, msg));
 
@@ -1421,9 +1418,6 @@ static u8 *opening_negotiate_msg(const tal_t *ctx, struct state *state)
 		case WIRE_PEER_STORAGE:
 		case WIRE_YOUR_PEER_STORAGE:
 		case WIRE_STFU:
-		case WIRE_SPLICE:
-		case WIRE_SPLICE_ACK:
-		case WIRE_SPLICE_LOCKED:
 			break;
 		}
 
@@ -1798,9 +1792,6 @@ static bool run_tx_interactive(struct state *state,
 		case WIRE_PEER_STORAGE:
 		case WIRE_YOUR_PEER_STORAGE:
 		case WIRE_STFU:
-		case WIRE_SPLICE:
-		case WIRE_SPLICE_ACK:
-		case WIRE_SPLICE_LOCKED:
 			open_abort(state, "Unexpected wire message %s",
 				   tal_hex(tmpctx, msg));
 			return false;
@@ -1882,7 +1873,7 @@ static u8 *accepter_commits(struct state *state,
 	struct amount_msat our_msats;
 	struct channel_id cid;
 	const u8 *wscript;
-	u8 *msg, *commit_msg;
+	u8 *msg;
 	char *error;
 
 	/* Find the funding transaction txid */
@@ -1920,12 +1911,9 @@ static u8 *accepter_commits(struct state *state,
 	}
 
 	remote_sig.sighash_type = SIGHASH_ALL;
-
-	struct tlv_commitment_signed_tlvs *cs_tlv
-		= tlv_commitment_signed_tlvs_new(tmpctx);
 	if (!fromwire_commitment_signed(tmpctx, msg, &cid,
 					&remote_sig.s,
-					&htlc_sigs, &cs_tlv))
+					&htlc_sigs))
 		open_err_fatal(state, "Parsing commitment signed %s",
 			       tal_hex(tmpctx, msg));
 
@@ -2123,10 +2111,10 @@ static u8 *accepter_commits(struct state *state,
 		master_badmsg(WIRE_DUALOPEND_SEND_TX_SIGS, msg);
 
 	/* Send our commitment sigs over now */
-	commit_msg = towire_commitment_signed(NULL, &state->channel_id,
-					      &local_sig.s, NULL, NULL);
-
-	peer_write(state->pps, take(commit_msg));
+	peer_write(state->pps,
+		   take(towire_commitment_signed(NULL,
+						 &state->channel_id,
+						 &local_sig.s, NULL)));
 	tal_free(local_commit);
 	return msg;
 }
@@ -2769,7 +2757,7 @@ static u8 *opener_commits(struct state *state,
 	assert(local_sig.sighash_type == SIGHASH_ALL);
 	msg = towire_commitment_signed(tmpctx, &state->channel_id,
 				       &local_sig.s,
-				       NULL, NULL);
+				       NULL);
 	peer_write(state->pps, msg);
 	peer_billboard(false, "channel open: commitment sent, waiting for reply");
 
@@ -2782,12 +2770,9 @@ static u8 *opener_commits(struct state *state,
 	}
 
 	remote_sig.sighash_type = SIGHASH_ALL;
-
-	struct tlv_commitment_signed_tlvs *cs_tlv
-		= tlv_commitment_signed_tlvs_new(tmpctx);
 	if (!fromwire_commitment_signed(tmpctx, msg, &cid,
 					&remote_sig.s,
-					&htlc_sigs, &cs_tlv))
+					&htlc_sigs))
 		open_err_fatal(state, "Parsing commitment signed %s",
 			       tal_hex(tmpctx, msg));
 
@@ -4199,9 +4184,6 @@ static u8 *handle_peer_in(struct state *state)
 	case WIRE_PEER_STORAGE:
 	case WIRE_YOUR_PEER_STORAGE:
 	case WIRE_STFU:
-	case WIRE_SPLICE:
-	case WIRE_SPLICE_ACK:
-	case WIRE_SPLICE_LOCKED:
 		break;
 	}
 

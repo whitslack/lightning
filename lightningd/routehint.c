@@ -104,14 +104,14 @@ routehint_candidates(const tal_t *ctx,
 			continue;
 		}
 
-		/* Check channel is in CHANNELD_NORMAL or CHANNELD_AWAITING_SPLICE */
+		/* Check channel is in CHANNELD_NORMAL */
 		candidate.c = find_channel_by_scid(peer, &r->short_channel_id);
 
 		/* Try seeing if we should be using a remote alias
 		 * instead. The `listpeers` result may have returned
 		 * the REMOTE alias, because it is the only scid we
 		 * have, and it is mandatory once the channel is in
-		 * CHANNELD_NORMAL or CHANNELD_AWAITING_SPLICE. */
+		 * CHANNELD_NORMAL. */
 		if (!candidate.c)
 			candidate.c = find_channel_by_alias(peer, &r->short_channel_id, REMOTE);
 
@@ -126,8 +126,7 @@ routehint_candidates(const tal_t *ctx,
 			continue;
 		}
 
-		if (candidate.c->state != CHANNELD_NORMAL
-		    && candidate.c->state != CHANNELD_AWAITING_SPLICE) {
+		if (candidate.c->state != CHANNELD_NORMAL) {
 			log_debug(ld->log, "%s: abnormal channel",
 				  type_to_string(tmpctx,
 						 struct short_channel_id,

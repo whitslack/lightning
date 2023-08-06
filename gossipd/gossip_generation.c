@@ -534,7 +534,7 @@ static u8 *create_unsigned_update(const tal_t *ctx,
 	/* So valgrind doesn't complain */
 	memset(&dummy_sig, 0, sizeof(dummy_sig));
 
-	/* BOLT-f3a9f7f4e9e7a5a2997f3129e13d94090091846a #7:
+	/* BOLT #7:
 	 *
 	 * The `channel_flags` bitfield is used to indicate the direction of
 	 * the channel: it identifies the node that this update originated
@@ -760,7 +760,7 @@ void refresh_local_channel(struct daemon *daemon,
 		return;
 	}
 
-	/* BOLT-f3a9f7f4e9e7a5a2997f3129e13d94090091846a #7:
+	/* BOLT #7:
 	 *
 	 * The `channel_flags` bitfield is used to indicate the direction of
 	 * the channel: it identifies the node that this update originated

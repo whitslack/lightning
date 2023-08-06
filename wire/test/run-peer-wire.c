@@ -40,11 +40,6 @@ static void set_scid(struct short_channel_id *scid)
 	memset(scid, 2, sizeof(struct short_channel_id));
 }
 
-static void set_cid(struct channel_id *cid)
-{
-	memset(cid, 2, sizeof(struct channel_id));
-}
-
 /* Size up to field. */
 #define upto_field(p, field)				\
 	((char *)&(p)->field - (char *)(p))
@@ -165,7 +160,6 @@ struct msg_commitment_signed {
 	struct channel_id channel_id;
 	secp256k1_ecdsa_signature signature;
 	secp256k1_ecdsa_signature *htlc_signature;
-	struct tlv_commitment_signed_tlvs *tlvs;
 };
 struct msg_node_announcement {
 	secp256k1_ecdsa_signature signature;
@@ -531,20 +525,17 @@ static void *towire_struct_commitment_signed(const tal_t *ctx,
 	return towire_commitment_signed(ctx,
 					&s->channel_id,
 					&s->signature,
-					s->htlc_signature,
-					s->tlvs);
+					s->htlc_signature);
 }
 
 static struct msg_commitment_signed *fromwire_struct_commitment_signed(const tal_t *ctx, const void *p)
 {
 	struct msg_commitment_signed *s = tal(ctx, struct msg_commitment_signed);
-	s->tlvs = tlv_commitment_signed_tlvs_new(ctx);
 
 	if (!fromwire_commitment_signed(s, p,
 				&s->channel_id,
 				&s->signature,
-				&s->htlc_signature,
-				&s->tlvs))
+				&s->htlc_signature))
 		return tal_free(s);
 	return s;
 }
@@ -790,8 +781,7 @@ static bool commitment_signed_eq(const struct msg_commitment_signed *a,
 			  const struct msg_commitment_signed *b)
 {
 	return eq_upto(a, b, htlc_signature)
-		&& eq_var(a, b, htlc_signature)
-		&& eq_tlv(a, b, splice_info, channel_id_eq);
+		&& eq_var(a, b, htlc_signature);
 }
 
 static bool funding_signed_eq(const struct msg_funding_signed *a,
@@ -1017,14 +1007,11 @@ int main(int argc, char *argv[])
 	memset(&cs, 2, sizeof(cs));
 	cs.htlc_signature = tal_arr(ctx, secp256k1_ecdsa_signature, 2);
 	memset(cs.htlc_signature, 2, sizeof(secp256k1_ecdsa_signature)*2);
-	cs.tlvs = tlv_commitment_signed_tlvs_new(tmpctx);
-	cs.tlvs->splice_info = tal(ctx, struct channel_id);
-	set_cid(cs.tlvs->splice_info);
 
 	msg = towire_struct_commitment_signed(ctx, &cs);
 	cs2 = fromwire_struct_commitment_signed(ctx, msg);
 	assert(commitment_signed_eq(&cs, cs2));
-	test_corruption_tlv(&cs, cs2, commitment_signed);
+	test_corruption(&cs, cs2, commitment_signed);
 
 	memset(&fs, 2, sizeof(fs));
 
