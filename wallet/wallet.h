@@ -11,7 +11,6 @@
 #include <lightningd/bitcoind.h>
 #include <lightningd/log.h>
 #include <lightningd/peer_htlcs.h>
-#include <lightningd/wait.h>
 
 struct amount_msat;
 struct invoices;
