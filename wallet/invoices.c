@@ -421,21 +421,14 @@ bool invoices_delete(struct invoices *invoices, u64 inv_dbid,
 	return true;
 }
 
-bool invoices_delete_description(struct invoices *invoices, u64 inv_dbid,
-				 const struct json_escape *label,
-				 const char *description)
+bool invoices_delete_description(struct invoices *invoices, u64 inv_dbid)
 {
 	struct db_stmt *stmt;
 	int changes;
 
-	stmt = db_prepare_v2(invoices->wallet->db,
-			     SQL("UPDATE invoices"
-				 "   SET description = NULL,"
-				 "       updated_index = ?"
-				 " WHERE ID = ?;"));
-	db_bind_u64(stmt,
-		    invoice_index_update_deldesc(invoices->wallet->ld,
-						 label, description));
+	stmt = db_prepare_v2(invoices->wallet->db, SQL("UPDATE invoices"
+					       "   SET description = NULL"
+					       " WHERE ID = ?;"));
 	db_bind_u64(stmt, inv_dbid);
 	db_exec_prepared_v2(stmt);
 
@@ -751,14 +744,5 @@ u64 invoice_index_update_status(struct lightningd *ld,
 				enum invoice_status state)
 {
 	return invoice_index_inc(ld, &state, label, NULL, NULL,
-				 WAIT_INDEX_UPDATED);
-}
-
-u64 invoice_index_update_deldesc(struct lightningd *ld,
-				 const struct json_escape *label,
-				 const char *description)
-{
-	assert(description);
-	return invoice_index_inc(ld, NULL, label, NULL, description,
 				 WAIT_INDEX_UPDATED);
 }
