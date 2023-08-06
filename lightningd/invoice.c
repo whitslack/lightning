@@ -26,15 +26,20 @@
 #include <lightningd/plugin_hook.h>
 #include <lightningd/routehint.h>
 #include <sodium/randombytes.h>
+#include <wallet/invoices.h>
 #include <wire/wire_sync.h>
 
-static const char *invoice_status_str(const struct invoice_details *inv)
+const char *invoice_status_str(enum invoice_status state)
 {
-	if (inv->state == PAID)
+	switch (state) {
+	case PAID:
 		return "paid";
-	if (inv->state == EXPIRED)
+	case EXPIRED:
 		return "expired";
-	return "unpaid";
+	case UNPAID:
+		return "unpaid";
+	}
+	abort();
 }
 
 static void json_add_invoice_fields(struct json_stream *response,
@@ -46,7 +51,7 @@ static void json_add_invoice_fields(struct json_stream *response,
 	json_add_sha256(response, "payment_hash", &inv->rhash);
 	if (inv->msat)
 		json_add_amount_msat(response, "amount_msat", *inv->msat);
-	json_add_string(response, "status", invoice_status_str(inv));
+	json_add_string(response, "status", invoice_status_str(inv->state));
 	if (inv->state == PAID) {
 		json_add_u64(response, "pay_index", inv->pay_index);
 		json_add_amount_msat(response,
@@ -85,13 +90,12 @@ static void json_add_invoice(struct json_stream *response,
 	json_object_end(response);
 }
 
-static struct command_result *tell_waiter(struct command *cmd,
-					  const struct invoice *inv)
+static struct command_result *tell_waiter(struct command *cmd, u64 inv_dbid)
 {
 	struct json_stream *response;
 	const struct invoice_details *details;
 
-	details = wallet_invoice_details(cmd, cmd->ld->wallet, *inv);
+	details = invoices_get_details(cmd, cmd->ld->wallet->invoices, inv_dbid);
 	if (details->state == PAID) {
 		response = json_stream_success(cmd);
 		json_add_invoice_fields(response, details);
@@ -110,10 +114,10 @@ static void tell_waiter_deleted(struct command *cmd)
 	was_pending(command_fail(cmd, LIGHTNINGD,
 				 "Invoice deleted during wait"));
 }
-static void wait_on_invoice(const struct invoice *invoice, void *cmd)
+static void wait_on_invoice(const u64 *inv_dbid, void *cmd)
 {
-	if (invoice)
-		tell_waiter((struct command *) cmd, invoice);
+	if (inv_dbid)
+		tell_waiter((struct command *) cmd, *inv_dbid);
 	else
 		tell_waiter_deleted((struct command *) cmd);
 }
@@ -295,7 +299,7 @@ static const u8 *hook_gives_failmsg(const tal_t *ctx,
 static void
 invoice_payment_hooks_done(struct invoice_payment_hook_payload *payload STEALS)
 {
-	struct invoice invoice;
+	u64 inv_dbid;
 	struct lightningd *ld = payload->ld;
 
 	tal_del_destructor2(payload->set, invoice_payload_remove_set, payload);
@@ -304,14 +308,14 @@ invoice_payment_hooks_done(struct invoice_payment_hook_payload *payload STEALS)
 
 	/* If invoice gets paid meanwhile (plugin responds out-of-order?) then
 	 * we can also fail */
-	if (!wallet_invoice_find_by_label(ld->wallet, &invoice, payload->label)) {
+	if (!invoices_find_by_label(ld->wallet->invoices, &inv_dbid, payload->label)) {
 		htlc_set_fail(payload->set, take(failmsg_incorrect_or_unknown(
 							 NULL, ld, payload->set->htlcs[0])));
 		return;
 	}
 
 	/* Paid or expired in the meantime. */
-	if (!wallet_invoice_resolve(ld->wallet, invoice, payload->msat)) {
+	if (!invoices_resolve(ld->wallet->invoices, inv_dbid, payload->msat)) {
 		htlc_set_fail(payload->set, take(failmsg_incorrect_or_unknown(
 							 NULL, ld, payload->set->htlcs[0])));
 		return;
@@ -365,7 +369,7 @@ invoice_check_payment(const tal_t *ctx,
 		      const struct amount_msat msat,
 		      const struct secret *payment_secret)
 {
-	struct invoice invoice;
+	u64 inv_dbid;
 	const struct invoice_details *details;
 
 	/* BOLT #4:
@@ -377,17 +381,17 @@ invoice_check_payment(const tal_t *ctx,
 	 *    - MUST fail the HTLC.
 	 *    - MUST return an `incorrect_or_unknown_payment_details` error.
 	 */
-	if (!wallet_invoice_find_unpaid(ld->wallet, &invoice, payment_hash)) {
+	if (!invoices_find_unpaid(ld->wallet->invoices, &inv_dbid, payment_hash)) {
 		log_debug(ld->log, "Unknown paid invoice %s",
 			  type_to_string(tmpctx, struct sha256, payment_hash));
-		if (wallet_invoice_find_by_rhash(ld->wallet, &invoice, payment_hash)) {
+		if (invoices_find_by_rhash(ld->wallet->invoices, &inv_dbid, payment_hash)) {
 			log_debug(ld->log, "ALREADY paid invoice %s",
 				  type_to_string(tmpctx, struct sha256, payment_hash));
 		}
 		return NULL;
 	}
 
-	details = wallet_invoice_details(ctx, ld->wallet, invoice);
+	details = invoices_get_details(ctx, ld->wallet->invoices, inv_dbid);
 
 	/* BOLT #4:
 	 *  - if the `payment_secret` doesn't match the expected value for that
@@ -835,7 +839,7 @@ invoice_complete(struct invoice_info *info,
 		 bool warning_private_unused)
 {
 	struct json_stream *response;
-	struct invoice invoice;
+	u64 inv_dbid;
 	char *b11enc;
 	const struct invoice_details *details;
 	struct secret payment_secret;
@@ -845,31 +849,31 @@ invoice_complete(struct invoice_info *info,
 			       hsm_sign_b11, info->cmd->ld);
 
 	/* Check duplicate preimage (unlikely unless they specified it!) */
-	if (wallet_invoice_find_by_rhash(wallet,
-					 &invoice, &info->b11->payment_hash)) {
+	if (invoices_find_by_rhash(wallet->invoices,
+				   &inv_dbid, &info->b11->payment_hash)) {
 		return command_fail(info->cmd,
 				    INVOICE_PREIMAGE_ALREADY_EXISTS,
 				    "preimage already used");
 	}
 
-	if (!wallet_invoice_create(wallet,
-				   &invoice,
-				   info->b11->msat,
-				   info->label,
-				   info->b11->expiry,
-				   b11enc,
-				   info->b11->description,
-				   info->b11->features,
-				   &info->payment_preimage,
-				   &info->b11->payment_hash,
-				   NULL)) {
+	if (!invoices_create(wallet->invoices,
+			     &inv_dbid,
+			     info->b11->msat,
+			     info->label,
+			     info->b11->expiry,
+			     b11enc,
+			     info->b11->description,
+			     info->b11->features,
+			     &info->payment_preimage,
+			     &info->b11->payment_hash,
+			     NULL)) {
 		return command_fail(info->cmd, INVOICE_LABEL_ALREADY_EXISTS,
 				    "Duplicate label '%s'",
 				    info->label->s);
 	}
 
 	/* Get details */
-	details = wallet_invoice_details(info, wallet, invoice);
+	details = invoices_get_details(info, wallet->invoices, inv_dbid);
 
 	response = json_stream_success(info->cmd);
 	json_add_sha256(response, "payment_hash", &details->rhash);
@@ -1086,6 +1090,7 @@ static struct command_result *json_invoice(struct command *cmd,
 	struct jsonrpc_request *req;
 	struct plugin *plugin;
 	bool *hashonly;
+	const size_t inv_max_label_len = 128;
 #if DEVELOPER
 	const jsmntok_t *routes;
 #endif
@@ -1111,10 +1116,9 @@ static struct command_result *json_invoice(struct command *cmd,
 		   NULL))
 		return command_param_failed();
 
-	if (strlen(info->label->s) > INVOICE_MAX_LABEL_LEN) {
+	if (strlen(info->label->s) > inv_max_label_len) {
 		return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
-				    "Label '%s' over %u bytes", info->label->s,
-				    INVOICE_MAX_LABEL_LEN);
+				    "Label '%s' over %zu bytes", info->label->s, inv_max_label_len);
 	}
 
 	if (strlen(desc_val) > BOLT11_FIELD_BYTE_LIMIT && !*hashonly) {
@@ -1219,29 +1223,31 @@ static void json_add_invoices(struct json_stream *response,
 			      const struct sha256 *payment_hash,
 			      const struct sha256 *local_offer_id)
 {
-	struct invoice_iterator it;
 	const struct invoice_details *details;
-	struct invoice invoice;
+	u64 inv_dbid;
 
 	/* Don't iterate entire db if we're just after one. */
 	if (label) {
-		if (wallet_invoice_find_by_label(wallet, &invoice, label)) {
+		if (invoices_find_by_label(wallet->invoices, &inv_dbid, label)) {
 			details =
-			    wallet_invoice_details(tmpctx, wallet, invoice);
+			    invoices_get_details(tmpctx, wallet->invoices, inv_dbid);
 			json_add_invoice(response, NULL, details);
 		}
 	} else if (payment_hash != NULL) {
-		if (wallet_invoice_find_by_rhash(wallet, &invoice,
+		if (invoices_find_by_rhash(wallet->invoices, &inv_dbid,
 						 payment_hash)) {
 			details =
-			    wallet_invoice_details(tmpctx, wallet, invoice);
+			    invoices_get_details(tmpctx, wallet->invoices, inv_dbid);
 			json_add_invoice(response, NULL, details);
 		}
 	} else {
-		memset(&it, 0, sizeof(it));
-		while (wallet_invoice_iterate(wallet, &it)) {
-			details = wallet_invoice_iterator_deref(response,
-								wallet, &it);
+		struct db_stmt *stmt;
+
+		for (stmt = invoices_first(wallet->invoices, &inv_dbid);
+		     stmt;
+		     stmt = invoices_next(wallet->invoices, stmt, &inv_dbid)) {
+			details = invoices_get_details(tmpctx,
+						       wallet->invoices, inv_dbid);
 			/* FIXME: db can filter this better! */
 			if (local_offer_id) {
 				if (!details->local_offer_id
@@ -1324,7 +1330,7 @@ static struct command_result *json_delinvoice(struct command *cmd,
 					      const jsmntok_t *obj UNNEEDED,
 					      const jsmntok_t *params)
 {
-	struct invoice i;
+	u64 inv_dbid;
 	struct invoice_details *details;
 	struct json_stream *response;
 	const char *status, *actual_status;
@@ -1339,15 +1345,15 @@ static struct command_result *json_delinvoice(struct command *cmd,
 		   NULL))
 		return command_param_failed();
 
-	if (!wallet_invoice_find_by_label(wallet, &i, label)) {
+	if (!invoices_find_by_label(wallet->invoices, &inv_dbid, label)) {
 		return command_fail(cmd, INVOICE_NOT_FOUND, "Unknown invoice");
 	}
 
-	details = wallet_invoice_details(cmd, cmd->ld->wallet, i);
+	details = invoices_get_details(cmd, cmd->ld->wallet->invoices, inv_dbid);
 
 	/* This is time-sensitive, so only call once; otherwise error msg
 	 * might not make sense if it changed! */
-	actual_status = invoice_status_str(details);
+	actual_status = invoice_status_str(details->state);
 	if (!streq(actual_status, status)) {
 		struct json_stream *js;
 		js = json_stream_fail(cmd, INVOICE_STATUS_UNEXPECTED,
@@ -1365,19 +1371,19 @@ static struct command_result *json_delinvoice(struct command *cmd,
 			return command_fail(cmd, INVOICE_NO_DESCRIPTION,
 					    "Invoice description already removed");
 
-		if (!wallet_invoice_delete_description(wallet, i)) {
+		if (!invoices_delete_description(wallet->invoices, inv_dbid)) {
 			log_broken(cmd->ld->log,
 				   "Error attempting to delete description of invoice %"PRIu64,
-				   i.id);
+				   inv_dbid);
 			/* FIXME: allocate a generic DATABASE_ERROR code.  */
 			return command_fail(cmd, LIGHTNINGD, "Database error");
 		}
 		details->description = tal_free(details->description);
 	} else {
-		if (!wallet_invoice_delete(wallet, i)) {
+		if (!invoices_delete(wallet->invoices, inv_dbid)) {
 			log_broken(cmd->ld->log,
 				   "Error attempting to remove invoice %"PRIu64,
-				   i.id);
+				   inv_dbid);
 			/* FIXME: allocate a generic DATABASE_ERROR code.  */
 			return command_fail(cmd, LIGHTNINGD, "Database error");
 		}
@@ -1409,7 +1415,7 @@ static struct command_result *json_delexpiredinvoice(struct command *cmd,
 		   NULL))
 		return command_param_failed();
 
-	wallet_invoice_delete_expired(cmd->ld->wallet, *maxexpirytime);
+	invoices_delete_expired(cmd->ld->wallet->invoices, *maxexpirytime);
 
 	return command_success(cmd, json_stream_success(cmd));
 }
@@ -1453,8 +1459,8 @@ static struct command_result *json_waitanyinvoice(struct command *cmd,
 	fixme_ignore(command_still_pending(cmd));
 
 	/* Find next paid invoice. */
-	wallet_invoice_waitany(cmd, wallet, *pay_index,
-			       &wait_on_invoice, (void*) cmd);
+	invoices_waitany(cmd, wallet->invoices, *pay_index,
+			 &wait_on_invoice, (void*) cmd);
 
 	return command_its_complicated("wallet_invoice_waitany might complete"
 				       " immediately, but we also call it as a"
@@ -1482,7 +1488,7 @@ static struct command_result *json_waitinvoice(struct command *cmd,
 					       const jsmntok_t *obj UNNEEDED,
 					       const jsmntok_t *params)
 {
-	struct invoice i;
+	u64 inv_dbid;
 	const struct invoice_details *details;
 	struct wallet *wallet = cmd->ld->wallet;
 	struct json_escape *label;
@@ -1492,19 +1498,19 @@ static struct command_result *json_waitinvoice(struct command *cmd,
 		   NULL))
 		return command_param_failed();
 
-	if (!wallet_invoice_find_by_label(wallet, &i, label)) {
+	if (!invoices_find_by_label(wallet->invoices, &inv_dbid, label)) {
 		return command_fail(cmd, LIGHTNINGD, "Label not found");
 	}
-	details = wallet_invoice_details(cmd, cmd->ld->wallet, i);
+	details = invoices_get_details(cmd, cmd->ld->wallet->invoices, inv_dbid);
 
 	/* If paid or expired return immediately */
 	if (details->state == PAID || details->state == EXPIRED) {
-		return tell_waiter(cmd, &i);
+		return tell_waiter(cmd, inv_dbid);
 	} else {
 		/* There is an unpaid one matching, let's wait... */
 		fixme_ignore(command_still_pending(cmd));
-		wallet_invoice_waitone(cmd, wallet, i,
-				       &wait_on_invoice, (void *) cmd);
+		invoices_waitone(cmd, wallet->invoices, inv_dbid,
+				 &wait_on_invoice, (void *) cmd);
 		return command_its_complicated("wallet_invoice_waitone might"
 					       " complete immediately");
 	}
@@ -1559,17 +1565,17 @@ static struct command_result *fail_exists(struct command *cmd,
 					  const struct json_escape *label)
 {
 	struct json_stream *data;
-	struct invoice invoice;
+	u64 inv_dbid;
 	struct wallet *wallet = cmd->ld->wallet;
 
 	data = json_stream_fail(cmd, INVOICE_LABEL_ALREADY_EXISTS,
 				"Duplicate label");
-	if (!wallet_invoice_find_by_label(wallet, &invoice, label))
+	if (!invoices_find_by_label(wallet->invoices, &inv_dbid, label))
 		fatal("Duplicate invoice %s not found any more?",
 		      label->s);
 
 	json_add_invoice_fields(data,
-				wallet_invoice_details(cmd, wallet, invoice));
+				invoices_get_details(cmd, wallet->invoices, inv_dbid));
 	json_object_end(data);
 
 	return command_failed(cmd, data);
@@ -1640,7 +1646,7 @@ static struct command_result *json_createinvoice(struct command *cmd,
 	const char *invstring;
 	struct json_escape *label;
 	struct preimage *preimage;
-	struct invoice invoice;
+	u64 inv_dbid;
 	struct sha256 payment_hash;
 	struct json_stream *response;
 	struct bolt11 *b11;
@@ -1677,17 +1683,17 @@ static struct command_result *json_createinvoice(struct command *cmd,
 			return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
 					    "Incorrect preimage");
 
-		if (!wallet_invoice_create(cmd->ld->wallet,
-					   &invoice,
-					   b11->msat,
-					   label,
-					   b11->expiry,
-					   b11enc,
-					   b11->description,
-					   b11->features,
-					   preimage,
-					   &payment_hash,
-					   NULL))
+		if (!invoices_create(cmd->ld->wallet->invoices,
+				     &inv_dbid,
+				     b11->msat,
+				     label,
+				     b11->expiry,
+				     b11enc,
+				     b11->description,
+				     b11->features,
+				     preimage,
+				     &payment_hash,
+				     NULL))
 			return fail_exists(cmd, label);
 
 		notify_invoice_creation(cmd->ld, b11->msat, *preimage, label);
@@ -1771,17 +1777,17 @@ static struct command_result *json_createinvoice(struct command *cmd,
 				   inv->offer_description,
 				   tal_bytelen(inv->offer_description));
 
-		if (!wallet_invoice_create(cmd->ld->wallet,
-					   &invoice,
-					   &msat,
-					   label,
-					   expiry,
-					   b12enc,
-					   desc,
-					   inv->invoice_features,
-					   preimage,
-					   &payment_hash,
-					   local_offer_id))
+		if (!invoices_create(cmd->ld->wallet->invoices,
+				     &inv_dbid,
+				     &msat,
+				     label,
+				     expiry,
+				     b12enc,
+				     desc,
+				     inv->invoice_features,
+				     preimage,
+				     &payment_hash,
+				     local_offer_id))
 			return fail_exists(cmd, label);
 
 		notify_invoice_creation(cmd->ld, &msat,	*preimage, label);
@@ -1789,8 +1795,8 @@ static struct command_result *json_createinvoice(struct command *cmd,
 
 	response = json_stream_success(cmd);
 	json_add_invoice_fields(response,
-				wallet_invoice_details(cmd, cmd->ld->wallet,
-						       invoice));
+				invoices_get_details(cmd, cmd->ld->wallet->invoices,
+						     inv_dbid));
 	return command_success(cmd, response);
 }
 
