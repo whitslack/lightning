@@ -1,15 +1,15 @@
-lightning-showrunes -- Command to list previously generated runes
+lightning-listrunes -- Command to list previously generated runes
 ==================================================================
 
 SYNOPSIS
 --------
 
-**showrunes** [*rune*]
+**listrunes** [*rune*]
 
 DESCRIPTION
 -----------
 
-The **showrunes** RPC command either lists runes that we stored as we generate them (see lightning-createrune(7)) or decodes the rune given on the command line. 
+The **listrunes** RPC command either lists runes that we stored as we generate them (see lightning-createrune(7)) or decodes the rune given on the command line. 
 
 RETURN VALUE
 ------------
@@ -41,7 +41,7 @@ Shahana Farooqui <<sfarooqui@blockstream.com>> is mainly responsible.
 SEE ALSO
 --------
 
-lightning-commando-showrunes(7), lightning-blacklistrune(7)
+lightning-commando-listrunes(7), lightning-blacklistrune(7)
 
 RESOURCES
 ---------
