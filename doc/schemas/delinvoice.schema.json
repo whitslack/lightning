@@ -5,7 +5,6 @@
     "label",
     "payment_hash",
     "status",
-    "created_index",
     "expires_at"
   ],
   "additionalProperties": true,
@@ -33,16 +32,6 @@
     "payment_hash": {
       "type": "hash",
       "description": "the hash of the *payment_preimage* which will prove payment"
-    },
-    "created_index": {
-      "type": "u64",
-      "added": "v23.08",
-      "description": "1-based index indicating order this invoice was created in"
-    },
-    "updated_index": {
-      "type": "u64",
-      "added": "v23.08",
-      "description": "1-based index indicating order this invoice was changed (only present if it has changed since creation)"
     },
     "status": {
       "type": "string",
@@ -78,8 +67,6 @@
           "description": {},
           "payment_hash": {},
           "pay_index": {},
-          "created_index": {},
-          "updated_index": {},
           "amount_received_msat": {},
           "paid_at": {},
           "payment_preimage": {},
@@ -108,8 +95,6 @@
           "description": {},
           "payment_hash": {},
           "pay_index": {},
-          "created_index": {},
-          "updated_index": {},
           "amount_received_msat": {},
           "msatoshi_received": {},
           "paid_at": {},
@@ -148,8 +133,6 @@
           "payment_hash": {},
           "invreq_payer_note": {},
           "local_offer_id": {},
-          "created_index": {},
-          "updated_index": {},
           "pay_index": {
             "type": "u64",
             "description": "unique index for this invoice payment"
@@ -180,8 +163,6 @@
           "description": {},
           "payment_hash": {},
           "expires_at": {},
-          "created_index": {},
-          "updated_index": {},
           "pay_index": {},
           "invreq_payer_note": {},
           "local_offer_id": {}

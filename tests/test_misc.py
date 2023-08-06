@@ -1017,7 +1017,6 @@ def test_cli(node_factory):
                      '         "amount_msat": 123000,',
                      '         "status": "unpaid",',
                      r'         "description": "d\"[]{}",',
-                     '         "created_index": 1',
                      '      }',
                      '   ]',
                      '}']
