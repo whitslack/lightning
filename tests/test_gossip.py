@@ -1383,9 +1383,10 @@ def test_gossipwith(node_factory):
                          check=True,
                          timeout=TIMEOUT, stdout=subprocess.PIPE).stdout
 
-    num_msgs = 0
+    msgs = set()
     while len(out):
         l, t = struct.unpack('>HH', out[0:4])
+        msg = out[2:2 + l]
         out = out[2 + l:]
 
         # Ignore pings, timestamp_filter
@@ -1393,10 +1394,11 @@ def test_gossipwith(node_factory):
             continue
         # channel_announcement node_announcement or channel_update
         assert t == 256 or t == 257 or t == 258
-        num_msgs += 1
+        msgs.add(msg)
 
     # one channel announcement, two channel_updates, two node announcements.
-    assert num_msgs == 7
+    # due to initial blast, we can have duplicates!
+    assert len(msgs) == 5
 
 
 def test_gossip_notices_close(node_factory, bitcoind):
@@ -2226,6 +2228,50 @@ def test_gossip_private_updates(node_factory, bitcoind):
     wait_for(lambda: l1.daemon.is_in_log(r'gossip_store_compact_offline: 5 deleted, 3 copied'))
 
 
+def test_gossip_not_dying(node_factory, bitcoind):
+    l1 = node_factory.get_node()
+    l2, l3 = node_factory.line_graph(2, wait_for_announce=True)
+
+    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
+    # Wait until it sees all the updates, node announcments.
+    wait_for(lambda: len([n for n in l1.rpc.listnodes()['nodes'] if 'alias' in n])
+             + len(l1.rpc.listchannels()['channels']) == 4)
+
+    def get_gossip(node):
+        out = subprocess.run(['devtools/gossipwith',
+                              '--initial-sync',
+                              '--timeout-after=2',
+                              '{}@localhost:{}'.format(node.info['id'], node.port)],
+                             check=True,
+                             timeout=TIMEOUT, stdout=subprocess.PIPE).stdout
+
+        msgs = []
+        while len(out):
+            l, t = struct.unpack('>HH', out[0:4])
+            msg = out[2:2 + l]
+            out = out[2 + l:]
+
+            # Ignore pings, timestamp_filter
+            if t == 265 or t == 18:
+                continue
+            # channel_announcement node_announcement or channel_update
+            assert t == 256 or t == 257 or t == 258
+            msgs.append(msg)
+
+        return msgs
+
+    assert len(get_gossip(l1)) == 5
+
+    # Close l2->l3, mine block.
+    l2.rpc.close(l3.info['id'])
+    bitcoind.generate_block(1, wait_for_mempool=1)
+
+    l1.daemon.wait_for_log("closing soon due to the funding outpoint being spent")
+
+    # We won't gossip the dead channel any more (but we still propagate node_announcement)
+    assert len(get_gossip(l1)) == 2
+
+
 @pytest.mark.skip("Zombie research had unexpected side effects")
 @pytest.mark.developer("Needs --dev-fast-gossip, --dev-fast-gossip-prune")
 def test_channel_resurrection(node_factory, bitcoind):
@@ -2293,3 +2339,40 @@ def test_channel_resurrection(node_factory, bitcoind):
     for l in gs.stdout.decode().splitlines():
         if "ZOMBIE" in l:
             assert ("DELETED" in l)
+
+
+def test_dump_own_gossip(node_factory):
+    """We *should* send all self-related gossip unsolicited, if we have any"""
+    l1, l2 = node_factory.line_graph(2, wait_for_announce=True)
+
+    # Make sure l1 has updates in both directions, and node_announcements
+    wait_for(lambda: len(l1.rpc.listchannels()['channels']) == 2)
+    wait_for(lambda: len(l1.rpc.listnodes()['nodes']) == 2)
+
+    # We should get channel_announcement, channel_update, node_announcement.
+    # (Plus random pings, timestamp_filter)
+    out = subprocess.run(['devtools/gossipwith',
+                          '--timeout-after={}'.format(int(math.sqrt(TIMEOUT) + 1)),
+                          '{}@localhost:{}'.format(l1.info['id'], l1.port)],
+                         check=True,
+                         timeout=TIMEOUT, stdout=subprocess.PIPE).stdout
+
+    # In theory, we could do the node_announcement any time after channel_announcement, but we don't.
+    expect = [256,  # channel_announcement
+              258,  # channel_update
+              258,  # channel_update
+              257]  # node_announcement
+
+    while len(out):
+        l, t = struct.unpack('>HH', out[0:4])
+        out = out[2 + l:]
+
+        # Ignore pings, timestamp_filter
+        if t == 265 or t == 18:
+            continue
+
+        assert t == expect[0]
+        expect = expect[1:]
+
+    # We should get exactly what we expected.
+    assert expect == []

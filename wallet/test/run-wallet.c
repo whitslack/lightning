@@ -5,7 +5,7 @@
 #include <ccan/tal/str/str.h>
 #include <db/common.h>
 
-static void db_log_(struct log *log UNUSED, enum log_level level UNUSED, const struct node_id *node_id UNUSED, bool call_notifier UNUSED, const char *fmt UNUSED, ...)
+static void db_log_(struct logger *log UNUSED, enum log_level level UNUSED, const struct node_id *node_id UNUSED, bool call_notifier UNUSED, const char *fmt UNUSED, ...)
 {
 }
 #define log_ db_log_
@@ -280,7 +280,7 @@ void json_add_hex_talarr(struct json_stream *result UNNEEDED,
 { fprintf(stderr, "json_add_hex_talarr called!\n"); abort(); }
 /* Generated stub for json_add_log */
 void json_add_log(struct json_stream *result UNNEEDED,
-		  const struct log_book *lr UNNEEDED,
+		  const struct log_book *log_book UNNEEDED,
 		  const struct node_id *node_id UNNEEDED,
 		  enum log_level minlevel UNNEEDED)
 { fprintf(stderr, "json_add_log called!\n"); abort(); }
@@ -421,7 +421,7 @@ void kill_uncommitted_channel(struct uncommitted_channel *uc UNNEEDED,
 			      const char *why UNNEEDED)
 { fprintf(stderr, "kill_uncommitted_channel called!\n"); abort(); }
 /* Generated stub for logv */
-void logv(struct log *log UNNEEDED, enum log_level level UNNEEDED, const struct node_id *node_id UNNEEDED,
+void logv(struct logger *logger UNNEEDED, enum log_level level UNNEEDED, const struct node_id *node_id UNNEEDED,
 	  bool call_notifier UNNEEDED, const char *fmt UNNEEDED, va_list ap UNNEEDED)
 { fprintf(stderr, "logv called!\n"); abort(); }
 /* Generated stub for new_channel_mvt_invoice_hin */
@@ -702,6 +702,9 @@ void subkey_from_hmac(const char *prefix UNNEEDED,
 		      const struct secret *base UNNEEDED,
 		      struct secret *key UNNEEDED)
 { fprintf(stderr, "subkey_from_hmac called!\n"); abort(); }
+/* Generated stub for to_canonical_invstr */
+const char *to_canonical_invstr(const tal_t *ctx UNNEEDED, const char *invstring UNNEEDED)
+{ fprintf(stderr, "to_canonical_invstr called!\n"); abort(); }
 /* Generated stub for topology_add_sync_waiter_ */
 void topology_add_sync_waiter_(const tal_t *ctx UNNEEDED,
 			       struct chain_topology *topo UNNEEDED,
@@ -920,7 +923,7 @@ bool fromwire_hsmd_get_channel_basepoints_reply(const void *p UNNEEDED,
 #define transaction_wrap(db, ...)					\
 	(db_begin_transaction(db), __VA_ARGS__, db_commit_transaction(db), wallet_err == NULL)
 
-struct log *new_log(const tal_t *ctx UNNEEDED, struct log_book *record UNNEEDED, const struct node_id *default_node_id UNNEEDED, const char *fmt UNNEEDED, ...)
+struct logger *new_logger(const tal_t *ctx UNNEEDED, struct log_book *record UNNEEDED, const struct node_id *default_node_id UNNEEDED, const char *fmt UNNEEDED, ...)
 {
 	return NULL;
 }
