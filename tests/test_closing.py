@@ -3354,13 +3354,15 @@ Try a range of future segwit versions as shutdown scripts.  We create many nodes
 
 
 @pytest.mark.developer("needs to set dev-disconnect")
-def test_closing_higherfee(node_factory, bitcoind, executor):
-    """With anchor outputs we can ask for a *higher* fee than the last commit tx"""
+@pytest.mark.parametrize("anchors", [False, True])
+def test_closing_higherfee(node_factory, bitcoind, executor, anchors):
+    """We can ask for a *higher* fee than the last commit tx"""
 
     opts = {'may_reconnect': True,
             'dev-no-reconnect': None,
-            'experimental-anchors': None,
             'feerates': (7500, 7500, 7500, 7500)}
+    if anchors:
+        opts['experimental-anchors'] = None
 
     # We change the feerate before it starts negotiating close, so it aims
     # for *higher* than last commit tx.
@@ -3379,7 +3381,7 @@ def test_closing_higherfee(node_factory, bitcoind, executor):
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
 
     # This causes us to *exceed* previous requirements!
-    l1.daemon.wait_for_log(r'deriving max fee from rate 30000 -> .*sat \(not 1000000sat\)')
+    l1.daemon.wait_for_log(r'deriving max fee from rate 30000 -> .*sat')
 
     # This will fail because l1 restarted!
     with pytest.raises(RpcError, match=r'Connection to RPC server lost.'):
@@ -3902,3 +3904,16 @@ def test_closing_tx_valid(node_factory, bitcoind):
     wait_for(lambda: len(bitcoind.rpc.getrawmempool()) == 1)
     assert only_one(bitcoind.rpc.getrawmempool()) == close['txid']
     assert bitcoind.rpc.getrawtransaction(close['txid']) == close['tx']
+
+
+@pytest.mark.developer("needs dev-no-reconnect")
+@unittest.skipIf(TEST_NETWORK != 'regtest', 'elementsd does not provide feerates on regtest')
+def test_closing_minfee(node_factory, bitcoind):
+    l1, l2 = node_factory.line_graph(2, opts={'feerates': None})
+
+    l1.rpc.pay(l2.rpc.invoice(10000000, 'test', 'test')['bolt11'])
+
+    wait_for(lambda: only_one(l1.rpc.listpeerchannels()['channels'])['htlcs'] == [])
+
+    txid = l1.rpc.close(l2.info['id'])['txid']
+    bitcoind.generate_block(1, wait_for_mempool=txid)

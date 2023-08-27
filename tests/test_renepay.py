@@ -1,10 +1,11 @@
 from fixtures import *  # noqa: F401,F403
 from pyln.client import RpcError, Millisatoshi
-from utils import only_one, wait_for, mine_funding_to_announce, sync_blockheight
+from utils import only_one, wait_for, mine_funding_to_announce, sync_blockheight, TEST_NETWORK
 import pytest
 import random
 import time
 import json
+import subprocess
 
 
 def test_simple(node_factory):
@@ -48,6 +49,8 @@ def test_errors(node_factory, bitcoind):
     l1, l2, l3, l4, l5, l6 = node_factory.get_nodes(6, opts=opts * 6)
     send_amount = Millisatoshi('21sat')
     inv = l6.rpc.invoice(send_amount, 'test_renepay', 'description')['bolt11']
+    inv_deleted = l6.rpc.invoice(send_amount, 'test_renepay2', 'description2')['bolt11']
+    l6.rpc.delinvoice('test_renepay2', 'unpaid')
 
     failmsg = r'We don\'t have any channels'
     with pytest.raises(RpcError, match=failmsg):
@@ -57,7 +60,7 @@ def test_errors(node_factory, bitcoind):
     node_factory.join_nodes([l1, l3, l5],
                             wait_for_announce=True, fundamount=1000000)
 
-    failmsg = r'Destination is unreacheable in the network gossip.'
+    failmsg = r'Destination is unknown in the network gossip.'
     with pytest.raises(RpcError, match=failmsg):
         l1.rpc.call('renepay', {'invstring': inv})
 
@@ -80,6 +83,14 @@ def test_errors(node_factory, bitcoind):
     assert details['status'] == 'complete'
     assert details['amount_msat'] == send_amount
     assert details['destination'] == l6.info['id']
+
+    # Test error from final node.
+    with pytest.raises(RpcError) as err:
+        l1.rpc.call('renepay', {'invstring': inv_deleted})
+
+    PAY_DESTINATION_PERM_FAIL = 203
+    assert err.value.error['code'] == PAY_DESTINATION_PERM_FAIL
+    assert 'WIRE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS' in err.value.error['message']
 
 
 @pytest.mark.developer("needs to deactivate shadow routing")
@@ -198,7 +209,7 @@ def test_limits(node_factory):
 
     # FIXME: pylightning should define these!
     # PAY_STOPPED_RETRYING = 210
-    PAY_ROUTE_NOT_FOUND = 205
+    PAY_ROUTE_TOO_EXPENSIVE = 206
 
     inv = l6.rpc.invoice("any", "any", 'description')
 
@@ -207,7 +218,7 @@ def test_limits(node_factory):
     with pytest.raises(RpcError, match=failmsg) as err:
         l1.rpc.call(
             'renepay', {'invstring': inv['bolt11'], 'amount_msat': 1000000, 'maxfee': 1})
-    assert err.value.error['code'] == PAY_ROUTE_NOT_FOUND
+    assert err.value.error['code'] == PAY_ROUTE_TOO_EXPENSIVE
     # TODO(eduardo): which error code shall we use here?
 
     # TODO(eduardo): shall we list attempts in renepay?
@@ -218,7 +229,7 @@ def test_limits(node_factory):
     with pytest.raises(RpcError, match=failmsg) as err:
         l1.rpc.call(
             'renepay', {'invstring': inv['bolt11'], 'amount_msat': 1000000, 'maxdelay': 0})
-    assert err.value.error['code'] == PAY_ROUTE_NOT_FOUND
+    assert err.value.error['code'] == PAY_ROUTE_TOO_EXPENSIVE
 
     inv2 = l6.rpc.invoice("800000sat", "inv2", 'description')
     l1.rpc.call(
@@ -299,8 +310,19 @@ def test_hardmpp(node_factory):
         print(json.dumps(l3.rpc.listpeerchannels()), file=f)
 
     inv2 = l6.rpc.invoice("1800000sat", "inv2", 'description')
-    l1.rpc.call(
-        'renepay', {'invstring': inv2['bolt11']})
+
+    out = subprocess.check_output(['cli/lightning-cli',
+                                   '--network={}'.format(TEST_NETWORK),
+                                   '--lightning-dir={}'
+                                   .format(l1.daemon.lightning_dir),
+                                   '-k',
+                                   'renepay', 'invstring={}'.format(inv2['bolt11'])]).decode('utf-8')
+    lines = out.split('\n')
+    # First comes commentry
+    assert any([l.startswith('#') for l in lines])
+
+    # Now comes JSON
+    json.loads("".join([l for l in lines if not l.startswith('#')]))
     l1.wait_for_htlcs()
     invoice = only_one(l6.rpc.listinvoices('inv2')['invoices'])
     assert isinstance(invoice['amount_received_msat'], Millisatoshi)

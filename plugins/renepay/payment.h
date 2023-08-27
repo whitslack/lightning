@@ -8,9 +8,30 @@ enum payment_status {
         PAYMENT_PENDING, PAYMENT_SUCCESS, PAYMENT_FAIL
 };
 
-
 struct payment {
-	struct renepay * renepay;
+	/* Inside pay_plugin->payments list */
+	struct list_node list;
+
+	/* Overall, how are we going? */
+	enum payment_status status;
+
+	/* The flows we are managing. */
+	struct list_head flows;
+
+	/* Deadline for flow status collection. */
+	struct timemono *progress_deadline;
+
+	/* The command if still running */
+	struct command *cmd;
+
+	/* Localmods to apply to gossip_map for our own use. */
+	struct gossmap_localmods *local_gossmods;
+
+	/* Channels we decided to disable for various reasons. */
+	struct short_channel_id *disabled;
+
+	/* Used in get_payflows to set ids to each pay_flow. */
+	u64 next_partid;
 
 	/* Chatty description of attempts. */
 	const char **paynotes;
@@ -28,7 +49,6 @@ struct payment {
 	struct amount_msat amount;
 	struct node_id destination;
 	struct sha256 payment_hash;
-
 
 	/* Limits on what routes we'll accept. */
 	struct amount_msat maxspend;
@@ -51,13 +71,7 @@ struct payment {
 	/* Payment metadata, if specified by invoice. */
 	const u8 *payment_metadata;
 
-	/* To know if the last attempt failed, succeeded or is it pending. */
-	enum payment_status status;
-
 	u32 final_cltv;
-
-	/* Inside pay_plugin->payments list */
-	struct list_node list;
 
 	/* Description and labels, if any. */
 	const char *description, *label;
@@ -96,47 +110,31 @@ struct payment {
 
 	/* Groupid, so listpays() can group them back together */
 	u64 groupid;
-
-	struct command_result * result;
 };
 
-/* Data only kept while the payment is being processed. */
-struct renepay
-{
-	/* The command, and our owner (needed for timer func) */
-	struct command *cmd;
 
-	/* Payment information that will eventually outlive renepay and be
-	 * registered. */
-	struct payment * payment;
+struct payment *payment_new(const tal_t *ctx,
+			    struct command *cmd,
+			    const char *invstr TAKES,
+			    const char *label TAKES,
+			    const char *description TAKES,
+			    const struct sha256 *local_offer_id TAKES,
+			    const struct secret *payment_secret TAKES,
+			    const u8 *payment_metadata TAKES,
+			    const struct node_id *destination,
+			    const struct sha256 *payment_hash,
+			    struct amount_msat amount,
+			    struct amount_msat maxfee,
+			    unsigned int maxdelay,
+			    u64 retryfor,
+			    u16 final_cltv,
+			    /* Tweakable in DEVELOPER mode */
+			    u64 base_fee_penalty,
+			    u64 prob_cost_factor,
+			    u64 riskfactor_millionths,
+			    u64 min_prob_success_millionths,
+			    bool use_shadow);
 
-	/* Localmods to apply to gossip_map for our own use. */
-	bool localmods_applied;
-	struct gossmap_localmods *local_gossmods;
-
-	/* Channels we decided to disable for various reasons. */
-	struct short_channel_id *disabled;
-
-	/* Timers. */
-	struct plugin_timer *rexmit_timer;
-
-	/* Keep track of the number of attempts. */
-	int next_attempt;
-	/* Used in get_payflows to set ids to each pay_flow. */
-	u64 next_partid;
-
-	/* Root to destroy pending flows */
-	tal_t *all_flows;
-};
-
-struct payment * payment_new(struct renepay *renepay);
-struct renepay * renepay_new(struct command *cmd);
-void renepay_cleanup(
-		struct renepay * renepay,
-		struct gossmap * gossmap);
-
-void payment_fail(struct payment * p);
-void payment_success(struct payment * p);
 struct amount_msat payment_sent(const struct payment *p);
 struct amount_msat payment_delivered(const struct payment *p);
 struct amount_msat payment_amount(const struct payment *p);
@@ -146,18 +144,14 @@ void payment_note(struct payment *p, const char *fmt, ...);
 void payment_assert_delivering_incomplete(const struct payment *p);
 void payment_assert_delivering_all(const struct payment *p);
 
+/* A flow has changed state, or we've hit a timeout: do something! */
+void payment_reconsider(struct payment *p);
 
-int renepay_current_attempt(const struct renepay *renepay);
-int renepay_attempt_count(const struct renepay *renepay);
-void renepay_new_attempt(struct renepay *renepay);
+u64 payment_parts(const struct payment *payment);
 
-struct command_result *renepay_success(struct renepay *renepay);
-
-struct command_result *renepay_fail(
-	struct renepay * renepay,
+struct command_result *payment_fail(
+	struct payment *payment,
 	enum jsonrpc_errcode code,
 	const char *fmt, ...);
-
-u64 renepay_parts(const struct renepay *renepay);
 
 #endif /* LIGHTNING_PLUGINS_RENEPAY_PAYMENT_H */

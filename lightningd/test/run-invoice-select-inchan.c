@@ -489,6 +489,10 @@ void json_add_num(struct json_stream *result UNNEEDED, const char *fieldname UNN
 void json_add_preimage(struct json_stream *result UNNEEDED, const char *fieldname UNNEEDED,
 		     const struct preimage *preimage UNNEEDED)
 { fprintf(stderr, "json_add_preimage called!\n"); abort(); }
+/* Generated stub for json_add_s64 */
+void json_add_s64(struct json_stream *result UNNEEDED, const char *fieldname UNNEEDED,
+		  int64_t value UNNEEDED)
+{ fprintf(stderr, "json_add_s64 called!\n"); abort(); }
 /* Generated stub for json_add_secret */
 void json_add_secret(struct json_stream *response UNNEEDED,
 		     const char *fieldname UNNEEDED,

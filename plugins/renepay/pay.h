@@ -69,15 +69,12 @@ struct pay_plugin {
 	/* Per-channel metadata: some persists between payments */
 	struct chan_extra_map *chan_extra_map;
 
-	/* Pending senpays. */
+	/* Pending sendpays (to match notifications to). */
 	struct payflow_map * payflow_map;
 
 	bool debug_mcf;
 	bool debug_payflow;
 
-	/* I'll allocate all global (controlled by pay_plugin) variables tied to
-	 * this tal_t. */
-	tal_t *ctx;
 	/* Pending flows have HTLCs (in-flight) liquidity
 	 * attached that is reflected in the uncertainty network.
 	 * When sendpay_fail or sendpay_success notifications arrive
@@ -96,7 +93,7 @@ struct pay_plugin {
 };
 
 /* Set in init */
-extern struct pay_plugin * const pay_plugin;
+extern struct pay_plugin *pay_plugin;
 
 /* Accumulate or panic on overflow */
 #define amount_msat_accumulate(dst, src) \
@@ -113,4 +110,8 @@ void amount_msat_reduce_(struct amount_msat *dst,
 			 const char *dstname,
 			 const char *srcname);
 
+/* Returns NULL if OK, otherwise an error msg and sets *ecode */
+const char *try_paying(const tal_t *ctx,
+		       struct payment *payment,
+		       enum jsonrpc_errcode *ecode);
 #endif /* LIGHTNING_PLUGINS_RENEPAY_PAY_H */
