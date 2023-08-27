@@ -4830,9 +4830,17 @@ def test_self_pay(node_factory):
     l1, l2 = node_factory.line_graph(2, wait_for_announce=True)
 
     inv = l1.rpc.invoice(10000, 'test', 'test')['bolt11']
+    l1.rpc.pay(inv)
 
-    with pytest.raises(RpcError):
-        l1.rpc.pay(inv)
+    # We can pay twice, no problem!
+    l1.rpc.pay(inv)
+
+    inv2 = l1.rpc.invoice(10000, 'test2', 'test2')['bolt11']
+    l1.rpc.delinvoice('test2', 'unpaid')
+
+    with pytest.raises(RpcError, match=r'Unknown invoice') as excinfo:
+        l1.rpc.pay(inv2)
+    assert excinfo.value.error['code'] == 203
 
 
 @unittest.skipIf(TEST_NETWORK != 'regtest', "Canned invoice is network specific")
@@ -5287,6 +5295,51 @@ def test_invoice_pay_desc_with_quotes(node_factory):
 
     # pay an invoice
     l1.rpc.pay(invoice, description=description)
+
+
+def test_self_sendpay(node_factory):
+    """We get much more descriptive errors from a self-payment than a remote payment, since we're not relying on a single WIRE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS but can share more useful information"""
+    l1 = node_factory.get_node()
+
+    inv = l1.rpc.invoice('100000sat', 'test_selfpay', "Test of payment to self")
+    assert only_one(l1.rpc.listinvoices()['invoices'])['status'] == 'unpaid'
+    inv_expires = l1.rpc.invoice('1btc', 'test_selfpay-expires', "Test of payment to self", expiry=1)
+
+    # Requires amount.
+    with pytest.raises(RpcError, match="Self-payment requires amount_msat"):
+        l1.rpc.sendpay([], inv['payment_hash'], label='selfpay', bolt11=inv['bolt11'], payment_secret=inv['payment_secret'])
+
+    # Requires non-zero partid.
+    with pytest.raises(RpcError, match=r"Self-payment does not allow \(non-zero\) partid"):
+        l1.rpc.sendpay([], inv['payment_hash'], label='selfpay', bolt11=inv['bolt11'], payment_secret=inv['payment_secret'], amount_msat='100000sat', partid=1)
+
+    # Bad payment_hash.
+    with pytest.raises(RpcError, match="Unknown invoice"):
+        l1.rpc.sendpay([], '00' * 32, label='selfpay-badimage', bolt11=inv['bolt11'], payment_secret=inv['payment_secret'], amount_msat='100000sat')
+
+    # Missing payment_secret
+    with pytest.raises(RpcError, match="Attempt to pay .* without secret"):
+        l1.rpc.sendpay([], inv['payment_hash'], label='selfpay-badimage', bolt11=inv['bolt11'], amount_msat='100000sat')
+
+    # Bad payment_secret
+    with pytest.raises(RpcError, match="Attempt to pay .* with wrong secret"):
+        l1.rpc.sendpay([], inv['payment_hash'], label='selfpay-badimage', bolt11=inv['bolt11'], payment_secret='00' * 32, amount_msat='100000sat')
+
+    # Expired
+    time.sleep(2)
+    with pytest.raises(RpcError, match="Already paid or expired invoice"):
+        l1.rpc.sendpay([], inv_expires['payment_hash'], label='selfpay-badimage', bolt11=inv_expires['bolt11'], payment_secret=inv['payment_secret'], amount_msat='1btc')
+
+    # This one works!
+    l1.rpc.sendpay([], inv['payment_hash'], label='selfpay', bolt11=inv['bolt11'], payment_secret=inv['payment_secret'], amount_msat='100000sat')
+
+    assert only_one(l1.rpc.listinvoices(payment_hash=inv['payment_hash'])['invoices'])['status'] == 'paid'
+    # Only one is complete.
+    assert [p['status'] for p in l1.rpc.listsendpays()['payments'] if p['status'] != 'failed'] == ['complete']
+
+    # Can't pay paid one already paid!
+    with pytest.raises(RpcError, match="Already paid or expired invoice"):
+        l1.rpc.sendpay([], inv['payment_hash'], label='selfpay', bolt11=inv['bolt11'], payment_secret=inv['payment_secret'], amount_msat='100000sat')
 
 
 def test_strip_lightning_suffix_from_inv(node_factory):
