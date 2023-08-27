@@ -3677,6 +3677,10 @@ We send an HTLC, and peer unilaterally closes: do we close upstream?
     with pytest.raises(RpcError, match=r'WIRE_TEMPORARY_CHANNEL_FAILURE \(reply from remote\)'):
         l1.rpc.waitsendpay(ph2, timeout=TIMEOUT)
 
+    # An important response to the timeout is to force a reconnect,
+    # since the problem may be TCP connectivity.
+    assert only_one(l2.rpc.listpeerchannels(l3.info['id'])['channels'])['peer_connected'] is False
+
     # Make close unilaterally.
     l3.rpc.close(l2.info['id'], 1)
 
