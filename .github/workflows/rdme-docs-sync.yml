@@ -1,15 +1,14 @@
 name: ReadMe Sync
 
 on:
-  pull_request:
-    types:
-      - closed
+  push:
+    branches:
+      - 'master'
     paths:
-      - 'doc/*'
+      - 'doc/**'
 
 jobs:
-  if_merged:
-    if: github.event.pull_request.merged == true
+  rdme-docs-sync:  
     runs-on: ubuntu-latest
     steps:
       - name: Check out repo 📚
@@ -17,25 +16,35 @@ jobs:
 
       - name: Sync doc/getting-started/ 🚀
         uses: readmeio/rdme@v8
+        env:
+          README_API_KEY: ${{ secrets.README_API_KEY }}
         with:
-          rdme: docs doc/getting-started --key=${{ secrets.README_API_KEY }} --version=1
+          rdme: docs doc/getting-started --key=${{ env.README_API_KEY }} --version=1
             
       - name: Sync doc/beginners-guide/ 🚀
         uses: readmeio/rdme@v8
+        env:
+          README_API_KEY: ${{ secrets.README_API_KEY }}
         with:
-          rdme: docs doc/beginners-guide --key=${{ secrets.README_API_KEY }} --version=1
+          rdme: docs doc/beginners-guide --key=${{ env.README_API_KEY }} --version=1
       
       - name: Sync doc/node-operators-guide/ 🚀
         uses: readmeio/rdme@v8
+        env:
+          README_API_KEY: ${{ secrets.README_API_KEY }}
         with:
-          rdme: docs doc/node-operators-guide --key=${{ secrets.README_API_KEY }} --version=1
+          rdme: docs doc/node-operators-guide --key=${{ env.README_API_KEY }} --version=1
       
       - name: Sync doc/developers-guide/ 🚀
         uses: readmeio/rdme@v8
+        env:
+          README_API_KEY: ${{ secrets.README_API_KEY }}
         with:
-          rdme: docs doc/developers-guide --key=${{ secrets.README_API_KEY }} --version=1
+          rdme: docs doc/developers-guide --key=${{ env.README_API_KEY }} --version=1
       
       - name: Sync doc/contributing-to-core-lightning/ 🚀
         uses: readmeio/rdme@v8
+        env:
+          README_API_KEY: ${{ secrets.README_API_KEY }}
         with:
-          rdme: docs doc/contributing-to-core-lightning --key=${{ secrets.README_API_KEY }} --version=1
+          rdme: docs doc/contribute-to-core-lightning --key=${{ env.README_API_KEY }} --version=1

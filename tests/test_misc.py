@@ -1349,10 +1349,32 @@ def test_recover(node_factory, bitcoind):
     """
     # Start the node with --recovery with valid codex32 secret
     l1 = node_factory.get_node(start=False,
-                               options={"recover": "ms10leetsllhdmn9m42vcsamx24zrxgs3qrl7ahwvhw4fnzrhve25gvezzyqqtum9pgv99ycma"})
+                               options={"recover": "cl10leetsllhdmn9m42vcsamx24zrxgs3qrl7ahwvhw4fnzrhve25gvezzyqqjdsjnzedu43ns"})
 
     os.unlink(os.path.join(l1.daemon.lightning_dir, TEST_NETWORK, "hsm_secret"))
     l1.daemon.start()
+
+    cmd_line = ["tools/hsmtool", "getcodexsecret", os.path.join(l1.daemon.lightning_dir, TEST_NETWORK, "hsm_secret")]
+    out = subprocess.check_output(cmd_line + ["leet", "0"]).decode('utf-8')
+    assert out == "cl10leetsllhdmn9m42vcsamx24zrxgs3qrl7ahwvhw4fnzrhve25gvezzyqqjdsjnzedu43ns\n"
+
+    # Check bad ids.
+    out = subprocess.run(cmd_line + ["lee", "0"], stderr=subprocess.PIPE, timeout=TIMEOUT)
+    assert 'Invalid id: must be 4 characters' in out.stderr.decode('utf-8')
+    assert out.returncode == 2
+
+    out = subprocess.run(cmd_line + ["Leet", "0"], stderr=subprocess.PIPE, timeout=TIMEOUT)
+    assert 'Invalid id: must be lower-case' in out.stderr.decode('utf-8')
+    assert out.returncode == 2
+
+    out = subprocess.run(cmd_line + ["💔", "0"], stderr=subprocess.PIPE, timeout=TIMEOUT)
+    assert 'Invalid id: must be ASCII' in out.stderr.decode('utf-8')
+    assert out.returncode == 2
+
+    for bad_bech32 in ['b', 'o', 'i', '1']:
+        out = subprocess.run(cmd_line + [bad_bech32 + "eet", "0"], stderr=subprocess.PIPE, timeout=TIMEOUT)
+        assert 'Invalid id: must be valid bech32 string' in out.stderr.decode('utf-8')
+        assert out.returncode == 2
 
     basedir = l1.daemon.opts.get("lightning-dir")
     with open(os.path.join(basedir, TEST_NETWORK, 'hsm_secret'), 'rb') as f:
@@ -1365,13 +1387,8 @@ def test_recover(node_factory, bitcoind):
     os.unlink(os.path.join(l1.daemon.lightning_dir, TEST_NETWORK, "lightningd.sqlite3"))
 
     # Node should throw error to recover flag if HSM already exists.
-    l1.daemon.opts['recover'] = "ms10leetsllhdmn9m42vcsamx24zrxgs3qrl7ahwvhw4fnzrhve25gvezzyqqtum9pgv99ycma"
+    l1.daemon.opts['recover'] = "cl10leetsllhdmn9m42vcsamx24zrxgs3qrl7ahwvhw4fnzrhve25gvezzyqqjdsjnzedu43ns"
     l1.daemon.start(wait_for_initialized=False, stderr_redir=True)
-
-    cmd_line = ["tools/hsmtool", "getcodexsecret", os.path.join(l1.daemon.lightning_dir, TEST_NETWORK, "hsm_secret"), "leet", "0"]
-    lines = subprocess.check_output(cmd_line).decode('utf-8').splitlines()
-    expected_output = "Codex32 Secret of your hsm_secret is: ms10leetsllhdmn9m42vcsamx24zrxgs3qrl7ahwvhw4fnzrhve25gvezzyqqtum9pgv99ycma"
-    assert [expected_output] == lines
 
     # Will exit with failure code.
     assert l1.daemon.wait() == 1
@@ -1379,10 +1396,10 @@ def test_recover(node_factory, bitcoind):
 
     os.unlink(os.path.join(l1.daemon.lightning_dir, TEST_NETWORK, "hsm_secret"))
 
-    l1.daemon.opts.update({"recover": "MS12NAMES6XQGUZTTXKEQNJSJZV4JV3NZ5K3KWGSPHUH6EVW"})
+    l1.daemon.opts.update({"recover": "CL10LEETSLLHDMN9M42VCSAMX24ZRXGS3QQAT3LTDVAKMT73"})
     l1.daemon.start(wait_for_initialized=False, stderr_redir=True)
     assert l1.daemon.wait() == 1
-    assert l1.daemon.is_in_stderr(r"Expected 32 Byte secret: d1808e096b35b209ca12132b264662a5")
+    assert l1.daemon.is_in_stderr(r"Expected 32 Byte secret: ffeeddccbbaa99887766554433221100")
 
     l1.daemon.opts.pop("recover")
     l1.start()
