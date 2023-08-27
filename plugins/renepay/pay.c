@@ -166,8 +166,9 @@ static struct command_result *addgossip_done(struct command *cmd,
 {
 	plugin_log(pay_plugin->plugin,LOG_DBG,"calling %s",__PRETTY_FUNCTION__);
 
+	/* This may free adg (pf is the parent), or otherwise it'll
+	 * happen later. */
 	pay_flow_finished_adding_gossip(adg->pf);
-	tal_free(adg);
 
 	return command_still_pending(cmd);
 }
@@ -1285,11 +1286,12 @@ static struct pf_result *sendpay_failure(struct pay_flow *pf,
 	}
 
 	/* Extract remaining fields for feedback */
+	raw = NULL;
  	err = json_scan(tmpctx, buf, sub,
 			"{message:%"
 			",data:{erring_index:%"
 			",failcode:%"
-			",raw_message:%}}",
+			",raw_message?:%}}",
 			JSON_SCAN_TAL(tmpctx, json_strdup, &msg),
 			JSON_SCAN(json_to_u32, &erridx),
 			JSON_SCAN(json_to_u32, &onionerr),
