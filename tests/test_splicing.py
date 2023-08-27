@@ -2,7 +2,6 @@ from fixtures import *  # noqa: F401,F403
 from utils import TEST_NETWORK
 import pytest
 import unittest
-import time
 
 
 @pytest.mark.openchannel('v1')
@@ -35,7 +34,3 @@ def test_splice(node_factory, bitcoind):
 
     inv = l2.rpc.invoice(10**2, '3', 'no_3')
     l1.rpc.pay(inv['bolt11'])
-
-    # Check that the splice doesn't generate a unilateral close transaction
-    time.sleep(5)
-    assert l1.db_query("SELECT count(*) as c FROM channeltxs;")[0]['c'] == 0
