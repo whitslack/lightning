@@ -100,6 +100,7 @@ C_PLUGINS :=					\
 	plugins/offers				\
 	plugins/pay				\
 	plugins/txprepare			\
+	plugins/cln-renepay			\
 	plugins/spenderp
 
 PY_PLUGINS :=					\
@@ -177,6 +178,7 @@ PLUGIN_COMMON_OBJS :=				\
 	wire/towire.o
 
 include plugins/bkpr/Makefile
+include plugins/renepay/Makefile
 
 # Make sure these depend on everything.
 ALL_C_SOURCES += $(PLUGIN_ALL_SRC)
@@ -232,9 +234,6 @@ plugins/sql: $(PLUGIN_SQL_OBJS) $(PLUGIN_LIB_OBJS) $(PLUGIN_COMMON_OBJS) $(JSMN_
 # Generated from PLUGINS definition in plugins/Makefile
 ALL_C_HEADERS += plugins/list_of_builtin_plugins_gen.h
 PLUGIN_BASES := $(PLUGINS:plugins/%=%) $(PY_PLUGINS:plugins/%=%)
-
-$(info PLUGIN_BASES)
-$(info $(PLUGIN_BASES))
 
 plugins/list_of_builtin_plugins_gen.h: plugins/Makefile Makefile config.vars
 	@$(call VERBOSE,GEN $@,echo "static const char *list_of_builtin_plugins[] = { $(PLUGIN_BASES:%=\"%\",) NULL };" > $@)

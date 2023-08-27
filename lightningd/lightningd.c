@@ -50,8 +50,10 @@
 #include <common/daemon.h>
 #include <common/ecdh_hsmd.h>
 #include <common/hsm_encryption.h>
+#include <common/json_stream.h>
 #include <common/memleak.h>
 #include <common/timeout.h>
+#include <common/trace.h>
 #include <common/type_to_string.h>
 #include <common/version.h>
 #include <db/exec.h>
@@ -71,6 +73,7 @@
 #include <lightningd/lightningd.h>
 #include <lightningd/onchain_control.h>
 #include <lightningd/plugin.h>
+#include <lightningd/plugin_hook.h>
 #include <lightningd/subd.h>
 #include <sys/resource.h>
 #include <wallet/txfilter.h>
@@ -205,6 +208,7 @@ static struct lightningd *new_lightningd(const tal_t *ctx)
 	 * parsing, we know they're to be set to the defaults. */
 	ld->alias = NULL;
 	ld->rgb = NULL;
+	ld->recover = NULL;
 	list_head_init(&ld->connects);
 	list_head_init(&ld->waitsendpay_commands);
 	list_head_init(&ld->sendpay_commands);
@@ -907,6 +911,49 @@ void lightningd_exit(struct lightningd *ld, int exit_code)
 	io_break(ld);
 }
 
+struct recover_payload {
+	const char *codex32secret;
+};
+
+static bool
+recover_hook_deserialize(struct recover_payload *payload,
+			 const char *buffer, const jsmntok_t *toks)
+{
+	const jsmntok_t *t_res;
+
+	if (!toks || !buffer)
+		return true;
+
+	t_res = json_get_member(buffer, toks, "result");
+
+	/* fail */
+	if (!t_res || !json_tok_streq(buffer, t_res, "continue"))
+		fatal("Plugin returned an invalid response to the "
+		      "recover hook: %s", buffer);
+
+	/* call next hook */
+	return true;
+}
+
+static void recover_hook_final(struct recover_payload *payload STEALS)
+{
+	tal_steal(tmpctx, payload);
+}
+
+static void recover_hook_serialize(struct recover_payload *payload,
+					struct json_stream *stream,
+					struct plugin *plugin)
+{
+	json_add_string(stream, "codex32", payload->codex32secret);
+}
+
+
+REGISTER_PLUGIN_HOOK(recover,
+		     recover_hook_deserialize,
+		     recover_hook_final,
+		     recover_hook_serialize,
+		     struct recover_payload *);
+
 int main(int argc, char *argv[])
 {
 	struct lightningd *ld;
@@ -921,6 +968,8 @@ int main(int argc, char *argv[])
 	int exit_code = 0;
 	char **orig_argv;
 	bool try_reexec;
+
+	trace_span_start("lightningd/startup", argv);
 
 	/*~ We fork out new processes very very often; every channel gets its
 	 * own process, for example, and we have `hsmd` and `gossipd` and
@@ -996,6 +1045,7 @@ int main(int argc, char *argv[])
 	orig_argv = notleak(tal_arr(ld, char *, argc + 1));
 	for (size_t i = 1; i < argc; i++)
 		orig_argv[i] = tal_strdup(orig_argv, argv[i]);
+
 	/*~ Turn argv[0] into an absolute path (if not already) */
 	orig_argv[0] = path_join(orig_argv, take(path_cwd(NULL)), argv[0]);
 	orig_argv[argc] = NULL;
@@ -1021,7 +1071,9 @@ int main(int argc, char *argv[])
 	/*~ Initialize all the plugins we just registered, so they can
 	 *  do their thing and tell us about themselves (including
 	 *  options registration). */
+	trace_span_start("plugins/init", ld->plugins);
 	plugins_init(ld->plugins);
+	trace_span_end(ld->plugins);
 
 	/*~ If the plugis are misconfigured we don't want to proceed. A
 	 * misconfiguration could for example be a plugin marked as important
@@ -1045,8 +1097,10 @@ int main(int argc, char *argv[])
 	 * but the `dev_no_version_checks` field of `ld` doesn't even exist
 	 * if DEVELOPER isn't defined, so we use IFDEV(devoption,non-devoption):
 	 */
+	trace_span_start("test_subdaemons", ld);
 	if (IFDEV(!ld->dev_no_version_checks, 1))
 		test_subdaemons(ld);
+	trace_span_end(ld);
 
 	/*~ Set up the HSM daemon, which knows our node secret key, so tells
 	 *  us who we are.
@@ -1055,12 +1109,16 @@ int main(int argc, char *argv[])
 	 * standard of key storage; ours is in software for now, so the name
 	 * doesn't really make sense, but we can't call it the Badly-named
 	 * Daemon Software Module. */
+	trace_span_start("hsmd_init", ld);
 	ld->bip32_base = hsm_init(ld);
+	trace_span_end(ld);
 
 	/*~ Our "wallet" code really wraps the db, which is more than a simple
 	 * bitcoin wallet (though it's that too).  It also stores channel
 	 * states, invoices, payments, blocks and bitcoin transactions. */
+	trace_span_start("wallet_new", ld);
 	ld->wallet = wallet_new(ld, ld->timers);
+	trace_span_end(ld);
 
 	/*~ We keep a filter of scriptpubkeys we're interested in. */
 	ld->owned_txfilter = txfilter_new(ld);
@@ -1082,7 +1140,9 @@ int main(int argc, char *argv[])
 	 * which knows (via node_announcement messages) the public
 	 * addresses of nodes, so connectd_init hands it one end of a
 	 * socket pair, and gives us the other */
+	trace_span_start("connectd_init", ld);
 	connectd_gossipd_fd = connectd_init(ld);
+	trace_span_end(ld);
 
 	/*~ We do every database operation within a transaction; usually this
 	 * is covered by the infrastructure (eg. opening a transaction before
@@ -1100,7 +1160,9 @@ int main(int argc, char *argv[])
 		errx(EXITCODE_WALLET_DB_MISMATCH, "Wallet sanity check failed.");
 
 	/*~ Initialize the transaction filter with our pubkeys. */
+	trace_span_start("init_txfilter", ld->wallet);
 	init_txfilter(ld->wallet, ld->bip32_base, ld->owned_txfilter);
+	trace_span_end(ld->wallet);
 
 	/*~ Get the blockheight we are currently at, UINT32_MAX is used to signal
 	 * an uninitialized wallet and that we should start off of bitcoind's
@@ -1123,7 +1185,9 @@ int main(int argc, char *argv[])
 
 	/*~ Initialize block topology.  This does its own io_loop to
 	 * talk to bitcoind, so does its own db transactions. */
+	trace_span_start("setup_topology", ld->topology);
 	setup_topology(ld->topology, min_blockheight, max_blockheight);
+	trace_span_end(ld->topology);
 
 	db_begin_transaction(ld->wallet->db);
 
@@ -1174,6 +1238,8 @@ int main(int argc, char *argv[])
 	/*~ Now handle sigchld, so we can clean up appropriately. */
 	sigchld_conn = notleak(io_new_conn(ld, sigchld_rfd, sigchld_rfd_in, ld));
 
+	trace_span_end(argv);
+
 	/*~ Mark ourselves live.
 	 *
 	 * Note the use of type_to_string() here: it's a typesafe formatter,
@@ -1189,6 +1255,12 @@ int main(int argc, char *argv[])
 		 tal_hex(tmpctx, ld->rgb), version());
 	ld->state = LD_STATE_RUNNING;
 
+	if (ld->recover) {
+		struct recover_payload *payload = tal(NULL, struct recover_payload);
+		payload->codex32secret = tal_strdup(payload,
+						    ld->recover);
+		plugin_hook_call_recover(ld, NULL, payload);
+	}
 	/*~ If `closefrom_may_be_slow`, we limit ourselves to 4096 file
 	 * descriptors; tell the user about it as that limits the number
 	 * of channels they can have.

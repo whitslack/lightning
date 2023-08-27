@@ -21,6 +21,7 @@ COMMON_SRC_NOGEN :=				\
 	common/channel_id.c			\
 	common/channel_type.c			\
 	common/close_tx.c			\
+	common/codex32.c			\
 	common/coin_mvt.c			\
 	common/configdir.c			\
 	common/configvar.c			\
@@ -88,6 +89,7 @@ COMMON_SRC_NOGEN :=				\
 	common/status_wire.c			\
 	common/subdaemon.c			\
 	common/timeout.c			\
+	common/trace.c				\
 	common/tx_roles.c			\
 	common/type_to_string.c			\
 	common/utils.c				\

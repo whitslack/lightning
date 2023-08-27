@@ -629,7 +629,8 @@ void payment_succeeded(struct lightningd *ld UNNEEDED,
 /* Generated stub for peer_restart_dualopend */
 bool peer_restart_dualopend(struct peer *peer UNNEEDED,
 			    struct peer_fd *peer_fd UNNEEDED,
-			    struct channel *channel UNNEEDED)
+			    struct channel *channel UNNEEDED,
+			    bool from_abort UNNEEDED)
 { fprintf(stderr, "peer_restart_dualopend called!\n"); abort(); }
 /* Generated stub for peer_start_channeld */
 bool peer_start_channeld(struct channel *channel UNNEEDED,
@@ -853,6 +854,12 @@ u8 *towire_warningfmt(const tal_t *ctx UNNEEDED,
 		      const struct channel_id *channel UNNEEDED,
 		      const char *fmt UNNEEDED, ...)
 { fprintf(stderr, "towire_warningfmt called!\n"); abort(); }
+/* Generated stub for trace_span_end */
+void trace_span_end(const void *key UNNEEDED)
+{ fprintf(stderr, "trace_span_end called!\n"); abort(); }
+/* Generated stub for trace_span_start */
+void trace_span_start(const char *name UNNEEDED, const void *key UNNEEDED)
+{ fprintf(stderr, "trace_span_start called!\n"); abort(); }
 /* Generated stub for try_reconnect */
 void try_reconnect(const tal_t *ctx UNNEEDED,
 		   struct peer *peer UNNEEDED,
