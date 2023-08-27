@@ -6,6 +6,7 @@
 #include <db/exec.h>
 #include <db/utils.h>
 #include <lightningd/invoice.h>
+#include <lightningd/lightningd.h>
 #include <wallet/invoices.h>
 #include <wallet/wallet.h>
 
@@ -671,4 +672,9 @@ struct invoice_details *invoices_get_details(const tal_t *ctx,
 	details = wallet_stmt2invoice_details(ctx, stmt);
 	tal_free(stmt);
 	return details;
+}
+
+void invoices_start_expiration(struct lightningd *ld)
+{
+	trigger_expiration(ld->wallet->invoices);
 }

@@ -76,6 +76,7 @@
 #include <lightningd/plugin_hook.h>
 #include <lightningd/subd.h>
 #include <sys/resource.h>
+#include <wallet/invoices.h>
 #include <wallet/txfilter.h>
 #include <wally_bip32.h>
 
@@ -1179,6 +1180,9 @@ int main(int argc, char *argv[])
 		max_blockheight = 0;
 	else if (max_blockheight != UINT32_MAX)
 		max_blockheight -= ld->config.rescan;
+
+	/*~ Start expiring old invoices now ld->wallet is set.*/
+	invoices_start_expiration(ld);
 
 	/*~ That's all of the wallet db operations for now. */
 	db_commit_transaction(ld->wallet->db);
