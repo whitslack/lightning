@@ -69,15 +69,13 @@ void txfilter_add_scriptpubkey(struct txfilter *filter, const u8 *script TAKES)
 void txfilter_add_derkey(struct txfilter *filter,
 			 const u8 derkey[PUBKEY_CMPR_LEN])
 {
-	u8 *skp, *p2sh, *p2tr;
+	u8 *skp, *p2sh;
 
 	skp = scriptpubkey_p2wpkh_derkey(tmpctx, derkey);
 	p2sh = scriptpubkey_p2sh(tmpctx, skp);
-	p2tr = scriptpubkey_p2tr_derkey(tmpctx, derkey);
 
 	txfilter_add_scriptpubkey(filter, take(skp));
 	txfilter_add_scriptpubkey(filter, take(p2sh));
-	txfilter_add_scriptpubkey(filter, take(p2tr));
 }
 
 
