@@ -1,14 +1,13 @@
 from fixtures import *  # noqa: F401,F403
-from utils import TEST_NETWORK
+import os
 import pytest
 import unittest
 
 
-@pytest.mark.openchannel('v1')
+@unittest.skipIf(os.environ.get("EXPERIMENTAL_SPLICING", '0') != '1', "Need experimental splicing turned on")
 @pytest.mark.openchannel('v2')
-@unittest.skipIf(TEST_NETWORK != 'regtest', 'elementsd doesnt yet support PSBT features we need')
 def test_splice(node_factory, bitcoind):
-    l1, l2 = node_factory.line_graph(2, fundamount=1000000, wait_for_announce=True, opts={'experimental-splicing': None})
+    l1, l2 = node_factory.line_graph(2, fundamount=1000000, wait_for_announce=True)
 
     chan_id = l1.get_channel_id(l2)
 
