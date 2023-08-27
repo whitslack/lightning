@@ -109,7 +109,6 @@ jobs:
     env:
       COMPAT: 1
       DEVELOPER: 1
-      EXPERIMENTAL_FEATURES: 1
       ASAN: 1
       UBSAN: 1
       VALGRIND: 0
@@ -151,26 +150,15 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - CFG: gcc-dev1-exp1
+          - CFG: gcc-dev1
             DEVELOPER: 1
-            EXPERIMENTAL_FEATURES: 1
             COMPILER: gcc
-          - CFG: gcc-dev1-exp0
-            DEVELOPER: 1
-            EXPERIMENTAL_FEATURES: 0
-            COMPILER: gcc
-          - CFG: gcc-dev0-exp1
+          - CFG: gcc-dev0
             DEVELOPER: 0
-            EXPERIMENTAL_FEATURES: 1
-            COMPILER: gcc
-          - CFG: gcc-dev0-exp0
-            DEVELOPER: 0
-            EXPERIMENTAL_FEATURES: 0
             COMPILER: gcc
           # While we're at it let's try to compile with clang
-          - CFG: clang-dev1-exp1
+          - CFG: clang-dev1
             DEVELOPER: 1
-            EXPERIMENTAL_FEATURES: 1
             COMPILER: clang
     steps:
       - name: Checkout
@@ -191,7 +179,6 @@ jobs:
         env:
           VALGRIND: ${{ matrix.VALGRIND }}
           DEVELOPER: ${{ matrix.DEVELOPER }}
-          EXPERIMENTAL_FEATURES: ${{ matrix.EXPERIMENTAL_FEATURES }}
           COMPILER: ${{ matrix.COMPILER }}
           COMPAT: 1
           CFG: ${{ matrix.CFG }}
@@ -219,7 +206,7 @@ jobs:
     timeout-minutes: 120
     env:
       COMPAT: 1
-      BITCOIN_VERSION: 24.0.1
+      BITCOIN_VERSION: 24.1
       ELEMENTS_VERSION: 22.0.2
       RUST_PROFILE: release  # Has to match the one in the compile step
       PYTEST_OPTS: --timeout=1200
@@ -229,56 +216,37 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - NAME: gcc-dev1-exp1
-            CFG: gcc-dev1-exp1
+          - NAME:  gcc-dev1
+            CFG: gcc-dev1
             DEVELOPER: 1
-            EXPERIMENTAL_FEATURES: 1
             TEST_DB_PROVIDER: sqlite3
             COMPILER: gcc
             TEST_NETWORK: regtest
-          - NAME:  gcc-dev1-exp0
-            CFG: gcc-dev1-exp0
-            DEVELOPER: 1
-            EXPERIMENTAL_FEATURES: 0
-            TEST_DB_PROVIDER: sqlite3
-            COMPILER: gcc
-            TEST_NETWORK: regtest
-          - NAME: gcc-dev0-exp1
-            CFG: gcc-dev0-exp1
+          - NAME: gcc-dev0
+            CFG: gcc-dev0
             DEVELOPER: 0
-            EXPERIMENTAL_FEATURES: 1
-            TEST_DB_PROVIDER: sqlite3
-            COMPILER: gcc
-            TEST_NETWORK: regtest
-          - NAME: gcc-dev0-exp0
-            CFG: gcc-dev0-exp0
-            DEVELOPER: 0
-            EXPERIMENTAL_FEATURES: 0
             TEST_DB_PROVIDER: sqlite3
             COMPILER: gcc
             TEST_NETWORK: regtest
           # While we're at it let's try to compile with clang
-          - NAME: clang-dev1-exp1
-            CFG: clang-dev1-exp1
+          - NAME: clang-dev1
+            CFG: clang-dev1
             DEVELOPER: 1
-            EXPERIMENTAL_FEATURES: 1
             TEST_DB_PROVIDER: sqlite3
             COMPILER: clang
             TEST_NETWORK: regtest
           # And of course we want to test postgres too
           - NAME: postgres
-            CFG: gcc-dev1-exp1
+            CFG: gcc-dev1
             DEVELOPER: 1
-            EXPERIMENTAL_FEATURES: 1
             COMPILER: gcc
             TEST_DB_PROVIDER: postgres
             TEST_NETWORK: regtest
           # And don't forget about elements (like cdecker did when
           # reworking the CI...)
           - NAME: liquid
-            CFG: gcc-dev1-exp1
+            CFG: gcc-dev1
             DEVELOPER: 1
-            EXPERIMENTAL_FEATURES: 1
             COMPILER: gcc
             TEST_NETWORK: liquid-regtest
             TEST_DB_PROVIDER: sqlite3
@@ -310,7 +278,6 @@ jobs:
         env:
           VALGRIND: ${{ matrix.VALGRIND }}
           DEVELOPER: ${{ matrix.DEVELOPER }}
-          EXPERIMENTAL_FEATURES: ${{ matrix.EXPERIMENTAL_FEATURES }}
           COMPILER: ${{ matrix.COMPILER }}
           COMPAT: 1
           CFG: ${{ matrix.CFG }}
@@ -329,13 +296,12 @@ jobs:
     timeout-minutes: 120
     env:
       COMPAT: 1
-      BITCOIN_VERSION: 24.0.1
+      BITCOIN_VERSION: 24.1
       ELEMENTS_VERSION: 22.0.2
       RUST_PROFILE: release  # Has to match the one in the compile step
       VALGRIND: 1
-      CFG: gcc-dev1-exp1
+      CFG: gcc-dev1
       DEVELOPER: 1
-      EXPERIMENTAL_FEATURES: 1
       PYTEST_OPTS: --test-group-random-seed=42 --timeout=1800
     needs:
       - compile
@@ -386,10 +352,10 @@ jobs:
       - name: Download build
         uses: actions/download-artifact@v3
         with:
-          name: cln-gcc-dev1-exp1.tar.bz2
+          name: cln-gcc-dev1.tar.bz2
 
       - name: Unpack build
-        run: tar -xvjf cln-gcc-dev1-exp1.tar.bz2
+        run: tar -xvjf cln-gcc-dev1.tar.bz2
 
       - name: Test
         env:
