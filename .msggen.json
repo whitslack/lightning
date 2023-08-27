@@ -3757,6 +3757,14 @@
             "added": "pre-v0.10.1",
             "deprecated": null
         },
+        "ListPays.amount_msat": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "ListPays.amount_sent_msat": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
         "ListPays.bolt11": {
             "added": "pre-v0.10.1",
             "deprecated": false
@@ -3766,6 +3774,14 @@
             "deprecated": false
         },
         "ListPays.pays[]": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "ListPays.pays[].amount_msat": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "ListPays.pays[].amount_sent_msat": {
             "added": "pre-v0.10.1",
             "deprecated": false
         },
