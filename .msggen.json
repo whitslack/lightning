@@ -1484,6 +1484,9 @@
         "SignpsbtResponse": {
             "SignPsbt.signed_psbt": 1
         },
+        "StaticbackupResponse": {
+            "StaticBackup.scb[]": 1
+        },
         "TxdiscardRequest": {
             "TxDiscard.txid": 1
         },
@@ -5218,6 +5221,14 @@
             "deprecated": false
         },
         "SignPsbt.signonly[]": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "StaticBackup": {
+            "added": "pre-v0.10.1",
+            "deprecated": null
+        },
+        "StaticBackup.scb[]": {
             "added": "pre-v0.10.1",
             "deprecated": false
         },
