@@ -273,8 +273,7 @@
         "NewaddrAddresstype": {
             "all": 2,
             "bech32": 0,
-            "p2sh-segwit": 1,
-            "p2tr": 3
+            "p2sh-segwit": 1
         },
         "PayStatus": {
             "complete": 0,
@@ -1264,8 +1263,7 @@
         },
         "NewaddrResponse": {
             "NewAddr.bech32": 1,
-            "NewAddr.p2sh-segwit": 2,
-            "NewAddr.p2tr": 3
+            "NewAddr.p2sh-segwit": 2
         },
         "PayRequest": {
             "Pay.amount_msat": 13,
@@ -4644,10 +4642,6 @@
         "NewAddr.p2sh-segwit": {
             "added": "pre-v0.10.1",
             "deprecated": "v23.02"
-        },
-        "NewAddr.p2tr": {
-            "added": "v23.08",
-            "deprecated": false
         },
         "Pay": {
             "added": "pre-v0.10.1",

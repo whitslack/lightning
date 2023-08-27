@@ -1,6 +1,5 @@
 #include "config.h"
 #include <bitcoin/psbt.h>
-#include <bitcoin/script.h>
 #include <ccan/array_size/array_size.h>
 #include <common/addr.h>
 #include <common/json_param.h>
@@ -574,8 +573,7 @@ static struct command_result *newaddr_sweep_done(struct command *cmd,
 						 struct listfunds_info *info)
 {
 	struct out_req *req;
-	const jsmntok_t *addr = json_get_member(buf, result, chainparams->is_elements ? "bech32" : "p2tr");
-	assert(addr);
+	const jsmntok_t *addr = json_get_member(buf, result, "bech32");
 
 	info->txp = tal(info, struct txprepare);
 	info->txp->is_upgrade = true;
@@ -629,7 +627,6 @@ static struct command_result *json_upgradewallet(struct command *cmd,
 				    newaddr_sweep_done,
 				    forward_error,
 				    info);
-	json_add_string(req->js, "addresstype", "all");
 	return send_outreq(cmd->plugin, req);
 }
 

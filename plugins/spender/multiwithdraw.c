@@ -1,7 +1,6 @@
 #include "config.h"
 #include <bitcoin/chainparams.h>
 #include <bitcoin/psbt.h>
-#include <bitcoin/script.h>
 #include <ccan/array_size/array_size.h>
 #include <ccan/json_out/json_out.h>
 #include <ccan/tal/str/str.h>
@@ -512,7 +511,7 @@ mw_get_change_addr(struct multiwithdraw_command *mw)
 	req = jsonrpc_request_start(mw->cmd->plugin, mw->cmd,
 				    "newaddr",
 				    &mw_after_newaddr, &mw_forward_error, mw);
-	json_add_string(req->js, "addresstype", chainparams->is_elements ? "bech32" : "p2tr");
+	json_add_string(req->js, "addresstype", "bech32");
 	return send_outreq(mw->cmd->plugin, req);
 }
 
@@ -525,7 +524,7 @@ mw_after_newaddr(struct command *cmd,
 	const jsmntok_t *bech32tok;
 	const u8 *script;
 
-	bech32tok = json_get_member(buf, result, chainparams->is_elements ? "bech32" : "p2tr");
+	bech32tok = json_get_member(buf, result, "bech32");
 	if (!bech32tok
 	 || json_to_address_scriptpubkey(mw, chainparams, buf, bech32tok,
 					 &script) != ADDRESS_PARSE_SUCCESS)

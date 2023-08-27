@@ -3,8 +3,9 @@
 #include <common/psbt_keypath.h>
 #include <common/utils.h>
 #include <wally_bip32.h>
+#include <wally_psbt.h>
 
-void psbt_output_set_keypath(u32 index, const struct ext_key *ext, bool is_taproot, struct wally_psbt_output *output) {
+void psbt_set_keypath(u32 index, const struct ext_key *ext, struct wally_map *map_in) {
 	u8 fingerprint[BIP32_KEY_FINGERPRINT_LEN];
 	if (bip32_key_get_fingerprint(
 		    (struct ext_key *) ext, fingerprint, sizeof(fingerprint)) != WALLY_OK)
@@ -13,30 +14,20 @@ void psbt_output_set_keypath(u32 index, const struct ext_key *ext, bool is_tapro
 	u32 path[1];
 	path[0] = index;
 
-	if (is_taproot) {
-		if (wally_psbt_output_taproot_keypath_add(output,
-							  ext->pub_key + 1, sizeof(ext->pub_key) - 1,
-							  NULL, 0,
-							  fingerprint, sizeof(fingerprint),
-							  path, 1) != WALLY_OK)
-			abort();
-	} else {
-		if (wally_psbt_output_keypath_add(output,
-						  ext->pub_key, sizeof(ext->pub_key),
-						  fingerprint, sizeof(fingerprint),
-						  path, 1) != WALLY_OK)
-			abort();
-	}
-
+	if (wally_map_keypath_add(map_in,
+				       ext->pub_key, sizeof(ext->pub_key),
+				       fingerprint, sizeof(fingerprint),
+				       path, 1) != WALLY_OK)
+		abort();
 }
 
 void psbt_add_keypath_to_last_output(struct bitcoin_tx *tx,
 				     u32 key_index,
-					 const struct ext_key *ext,
-					 bool is_taproot) {
+				     const struct ext_key *ext) {
 	size_t outndx = tx->psbt->num_outputs - 1;
+	struct wally_map *map_in = &tx->psbt->outputs[outndx].keypaths;
 
 	tal_wally_start();
-	psbt_output_set_keypath(key_index, ext, is_taproot, &tx->psbt->outputs[outndx]);
+	psbt_set_keypath(key_index, ext, map_in);
 	tal_wally_end(tx->psbt);
 }
