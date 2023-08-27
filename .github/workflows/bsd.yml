@@ -37,7 +37,6 @@ jobs:
             autoconf \
             automake \
             libtool \
-            gmp \
             bash \
             gettext \
             sqlite3 \
