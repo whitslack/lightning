@@ -510,6 +510,7 @@ class LightningRpc(UnixDomainSocketRpc):
                         # FIXME: Deprecated "listconfigs" gives two 'null' fields:
                         #            "lease-fee-base-msat": null,
                         #            "channel-fee-max-base-msat": null,
+                        # FIXME: Removed for v23.08, delete this code in 24.08?
                         elif v is None:
                             obj[k] = None
                         else:

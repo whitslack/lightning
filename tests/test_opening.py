@@ -1812,6 +1812,7 @@ def test_zeroconf_multichan_forward(node_factory):
                                .format(normal_scid, zeroconf_scid))
 
 
+@pytest.mark.developer("dev-allowdustreserve")
 def test_zeroreserve(node_factory, bitcoind):
     """Ensure we can set the reserves.
 
@@ -1891,6 +1892,7 @@ def test_zeroreserve(node_factory, bitcoind):
     assert len(decoded['vout']) == 1 if TEST_NETWORK == 'regtest' else 2
 
 
+@pytest.mark.developer("dev-allowdustreserve")
 def test_zeroreserve_mixed(node_factory, bitcoind):
     """l1 runs with zeroreserve, l2 and l3 without, should still work
 
@@ -1921,6 +1923,7 @@ def test_zeroreserve_mixed(node_factory, bitcoind):
     l3.rpc.fundchannel(l1.info['id'], 10**6)
 
 
+@pytest.mark.developer("dev-allowdustreserve")
 def test_zeroreserve_alldust(node_factory):
     """If we allow dust reserves we need larger fundings
 
@@ -2022,7 +2025,7 @@ def test_openchannel_no_confirmed_inputs_opener(node_factory, bitcoind):
     l2_opts = l1_opts.copy()
     l1_opts['require-confirmed-inputs'] = True
     l1, l2 = node_factory.get_nodes(2, opts=[l1_opts, l2_opts])
-    assert l1.rpc.listconfigs()['require-confirmed-inputs']
+    assert l1.rpc.listconfigs()['configs']['require-confirmed-inputs']['value_bool'] is True
 
     amount = 500000
     l1.fundwallet(20000000)
@@ -2063,7 +2066,7 @@ def test_openchannel_no_unconfirmed_inputs_accepter(node_factory, bitcoind):
     l2_opts = l1_opts.copy()
     l2_opts['require-confirmed-inputs'] = True
     l1, l2 = node_factory.get_nodes(2, opts=[l1_opts, l2_opts])
-    assert l2.rpc.listconfigs()['require-confirmed-inputs']
+    assert l2.rpc.listconfigs()['configs']['require-confirmed-inputs']['value_bool'] is True
 
     amount = 500000
     l1.fundwallet(20000000)
@@ -2114,7 +2117,7 @@ def test_openchannel_no_unconfirmed_inputs_accepter(node_factory, bitcoind):
     l2.stop()
     del l2.daemon.opts['require-confirmed-inputs']
     l2.start()
-    assert not l2.rpc.listconfigs()['require-confirmed-inputs']
+    assert l2.rpc.listconfigs()['configs']['require-confirmed-inputs']['value_bool'] is False
 
     # Turn the mock back on so we pretend everything l1 sends is unconf
     l2.daemon.rpcproxy.mock_rpc('gettxout', _no_utxo_response)

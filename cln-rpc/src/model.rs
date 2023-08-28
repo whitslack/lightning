@@ -1433,7 +1433,7 @@ pub mod responses {
 	    pub invoice: String,
 	}
 
-	/// Type of connection
+	/// Type of connection (until 23.08, `websocket` was also allowed)
 	#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 	pub enum GetinfoAddressType {
 	    #[serde(rename = "dns")]
@@ -1446,8 +1446,6 @@ pub mod responses {
 	    TORV2,
 	    #[serde(rename = "torv3")]
 	    TORV3,
-	    #[serde(rename = "websocket")]
-	    WEBSOCKET,
 	}
 
 	impl TryFrom<i32> for GetinfoAddressType {
@@ -1459,7 +1457,6 @@ pub mod responses {
 	    2 => Ok(GetinfoAddressType::IPV6),
 	    3 => Ok(GetinfoAddressType::TORV2),
 	    4 => Ok(GetinfoAddressType::TORV3),
-	    5 => Ok(GetinfoAddressType::WEBSOCKET),
 	            o => Err(anyhow::anyhow!("Unknown variant {} for enum GetinfoAddressType", o)),
 	        }
 	    }
@@ -1479,6 +1476,8 @@ pub mod responses {
 	pub enum GetinfoBindingType {
 	    #[serde(rename = "local socket")]
 	    LOCAL_SOCKET,
+	    #[serde(rename = "websocket")]
+	    WEBSOCKET,
 	    #[serde(rename = "ipv4")]
 	    IPV4,
 	    #[serde(rename = "ipv6")]
@@ -1494,10 +1493,11 @@ pub mod responses {
 	    fn try_from(c: i32) -> Result<GetinfoBindingType, anyhow::Error> {
 	        match c {
 	    0 => Ok(GetinfoBindingType::LOCAL_SOCKET),
-	    1 => Ok(GetinfoBindingType::IPV4),
-	    2 => Ok(GetinfoBindingType::IPV6),
-	    3 => Ok(GetinfoBindingType::TORV2),
-	    4 => Ok(GetinfoBindingType::TORV3),
+	    1 => Ok(GetinfoBindingType::WEBSOCKET),
+	    2 => Ok(GetinfoBindingType::IPV4),
+	    3 => Ok(GetinfoBindingType::IPV6),
+	    4 => Ok(GetinfoBindingType::TORV2),
+	    5 => Ok(GetinfoBindingType::TORV3),
 	            o => Err(anyhow::anyhow!("Unknown variant {} for enum GetinfoBindingType", o)),
 	        }
 	    }
@@ -1518,7 +1518,8 @@ pub mod responses {
 	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct GetinfoResponse {
 	    pub id: PublicKey,
-	    pub alias: String,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub alias: Option<String>,
 	    pub color: String,
 	    pub num_peers: u32,
 	    pub num_pending_channels: u32,
@@ -1532,7 +1533,8 @@ pub mod responses {
 	    pub blockheight: u32,
 	    pub network: String,
 	    pub fees_collected_msat: Amount,
-	    pub address: Vec<GetinfoAddress>,
+	    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
+	    pub address: Option<Vec<GetinfoAddress>>,
 	    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
 	    pub binding: Option<Vec<GetinfoBinding>>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
@@ -2733,7 +2735,7 @@ pub mod responses {
 	    }
 	}
 
-	/// Type of connection
+	/// Type of connection (until 23.08, `websocket` was also allowed)
 	#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 	pub enum ListnodesNodesAddressesType {
 	    #[serde(rename = "dns")]
@@ -2746,8 +2748,6 @@ pub mod responses {
 	    TORV2,
 	    #[serde(rename = "torv3")]
 	    TORV3,
-	    #[serde(rename = "websocket")]
-	    WEBSOCKET,
 	}
 
 	impl TryFrom<i32> for ListnodesNodesAddressesType {
@@ -2759,7 +2759,6 @@ pub mod responses {
 	    2 => Ok(ListnodesNodesAddressesType::IPV6),
 	    3 => Ok(ListnodesNodesAddressesType::TORV2),
 	    4 => Ok(ListnodesNodesAddressesType::TORV3),
-	    5 => Ok(ListnodesNodesAddressesType::WEBSOCKET),
 	            o => Err(anyhow::anyhow!("Unknown variant {} for enum ListnodesNodesAddressesType", o)),
 	        }
 	    }
