@@ -297,7 +297,8 @@ struct wally_psbt *psbt_using_utxos(const tal_t *ctx,
 				  this_nsequence, scriptSig,
 				  NULL, redeemscript);
 
-		psbt_input_set_wit_utxo(psbt, i, scriptPubkey, utxos[i]->amount);
+		psbt_input_set_wit_utxo(psbt, psbt->num_inputs-1,
+					scriptPubkey, utxos[i]->amount);
 		if (is_elements(chainparams)) {
 			struct amount_asset asset;
 			/* FIXME: persist asset tags */
@@ -321,7 +322,7 @@ struct wally_psbt *psbt_using_utxos(const tal_t *ctx,
 			tx = wallet_transaction_get(ctx, wallet,
 						    &utxos[i]->outpoint.txid);
 			if (tx)
-				psbt_input_set_utxo(psbt, i, tx->wtx);
+				psbt_input_set_utxo(psbt, psbt->num_inputs-1, tx->wtx);
 		}
 	}
 

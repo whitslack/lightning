@@ -240,6 +240,9 @@ DEFAULT_TARGETS :=
 ifeq ("$(OS)-$(ARCH)", "Darwin-arm64")
 CPATH := /opt/homebrew/include
 LIBRARY_PATH := /opt/homebrew/lib
+LDFLAGS := -L/opt/homebrew/opt/sqlite/lib
+CPPFLAGS := -I/opt/homebrew/opt/sqlite/include
+PKG_CONFIG_PATH=/opt/homebrew/opt/sqlite/lib/pkgconfig
 else
 CPATH := /usr/local/include
 LIBRARY_PATH := /usr/local/lib
@@ -274,7 +277,7 @@ ifeq ($(HAVE_POSTGRES),1)
 LDLIBS += $(POSTGRES_LDLIBS)
 endif
 
-default: show-flags all-programs all-test-programs doc-all default-targets
+default: show-flags all-programs all-test-programs doc-all default-targets $(PYTHON_GENERATED)
 
 ifneq ($(SUPPRESS_GENERATION),1)
 FORCE = FORCE
@@ -363,13 +366,16 @@ ifneq ($(RUST),0)
 	include cln-rpc/Makefile
 	include cln-grpc/Makefile
 
+$(MSGGEN_GENALL)&: doc/schemas/*.request.json doc/schemas/*.schema.json
+	PYTHONPATH=contrib/msggen python3 contrib/msggen/msggen/__main__.py
+
 GRPC_GEN = contrib/pyln-testing/pyln/testing/node_pb2.py \
 	contrib/pyln-testing/pyln/testing/node_pb2_grpc.py \
 	contrib/pyln-testing/pyln/testing/primitives_pb2.py
 
 ALL_TEST_GEN += $(GRPC_GEN)
 
-$(GRPC_GEN): cln-grpc/proto/node.proto cln-grpc/proto/primitives.proto
+$(GRPC_GEN)&: cln-grpc/proto/node.proto cln-grpc/proto/primitives.proto
 	python -m grpc_tools.protoc -I cln-grpc/proto cln-grpc/proto/node.proto --python_out=contrib/pyln-testing/pyln/testing/ --grpc_python_out=contrib/pyln-testing/pyln/testing/ --experimental_allow_proto3_optional
 	python -m grpc_tools.protoc -I cln-grpc/proto cln-grpc/proto/primitives.proto --python_out=contrib/pyln-testing/pyln/testing/ --experimental_allow_proto3_optional
 	# The compiler assumes that the proto files are in the same
@@ -416,7 +422,7 @@ mkdocs.yml: $(MANPAGES:=.md)
 
 
 # Don't delete these intermediaries.
-.PRECIOUS: $(ALL_GEN_HEADERS) $(ALL_GEN_SOURCES)
+.PRECIOUS: $(ALL_GEN_HEADERS) $(ALL_GEN_SOURCES) $(PYTHON_GENERATED)
 
 # Every single object file.
 ALL_OBJS := $(ALL_C_SOURCES:.c=.o)
@@ -686,6 +692,7 @@ default-targets: $(DEFAULT_TARGETS)
 
 distclean: clean
 	$(RM) ccan/config.h config.vars
+	$(RM) $(PYTHON_GENERATED)
 
 maintainer-clean: distclean
 	@echo 'This command is intended for maintainers to use; it'

@@ -2694,7 +2694,13 @@ def test_restorefrompeer(node_factory, bitcoind):
     l1.start()
     assert l1.daemon.is_in_log('Server started with public key')
 
-    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
+    # If this happens fast enough, connect fails with "disconnected
+    # during connection"
+    try:
+        l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
+    except RpcError as err:
+        assert "disconnected during connection" in err.error
+
     l1.daemon.wait_for_log('peer_in WIRE_YOUR_PEER_STORAGE')
 
     assert l1.rpc.restorefrompeer()['stubs'][0] == _['channel_id']
@@ -3396,3 +3402,98 @@ def test_fast_shutdown(node_factory):
         except ConnectionRefusedError:
             continue
         break
+
+
+def test_setconfig(node_factory, bitcoind):
+    l1, l2 = node_factory.line_graph(2, fundchannel=False)
+    configfile = os.path.join(l2.daemon.opts.get("lightning-dir"), TEST_NETWORK, 'config')
+
+    assert (l2.rpc.listconfigs('min-capacity-sat')['configs']
+            == {'min-capacity-sat':
+                {'source': 'default',
+                 'value_int': 10000,
+                 'dynamic': True}})
+
+    with pytest.raises(RpcError, match='requires a value'):
+        l2.rpc.setconfig('min-capacity-sat')
+
+    with pytest.raises(RpcError, match='requires a value'):
+        l2.rpc.setconfig(config='min-capacity-sat')
+
+    with pytest.raises(RpcError, match='is not a number'):
+        l2.rpc.setconfig(config='min-capacity-sat', val="abcd")
+
+    ret = l2.rpc.setconfig(config='min-capacity-sat', val=500000)
+    assert ret == {'config':
+                   {'config': 'min-capacity-sat',
+                    'source': '{}:2'.format(configfile),
+                    'value_int': 500000,
+                    'dynamic': True}}
+
+    with open(configfile, 'r') as f:
+        lines = f.read().splitlines()
+        timeline = lines[0]
+        assert lines[0].startswith('# Inserted by setconfig ')
+        assert lines[1] == 'min-capacity-sat=500000'
+        assert len(lines) == 2
+
+    # Now we need to meet minumum
+    with pytest.raises(RpcError, match='which is below 500000sat'):
+        l1.fundchannel(l2, 400000)
+
+    l1.fundchannel(l2, 10**6)
+    txid = l1.rpc.close(l2.info['id'])['txid']
+    # Make sure we're completely closed!
+    bitcoind.generate_block(1, wait_for_mempool=txid)
+    sync_blockheight(bitcoind, [l1, l2])
+
+    # It's persistent!
+    l2.restart()
+
+    assert (l2.rpc.listconfigs('min-capacity-sat')['configs']
+            == {'min-capacity-sat':
+                {'source': '{}:2'.format(configfile),
+                 'value_int': 500000,
+                 'dynamic': True}})
+
+    # Still need to meet minumum
+    l1.connect(l2)
+    with pytest.raises(RpcError, match='which is below 500000sat'):
+        l1.fundchannel(l2, 400000)
+
+    # Now, changing again will comment that one out!
+    ret = l2.rpc.setconfig(config='min-capacity-sat', val=400000)
+    assert ret == {'config':
+                   {'config': 'min-capacity-sat',
+                    'source': '{}:2'.format(configfile),
+                    'value_int': 400000,
+                    'dynamic': True}}
+
+    with open(configfile, 'r') as f:
+        lines = f.read().splitlines()
+        assert lines[0].startswith('# Inserted by setconfig ')
+        # It will have changed timestamp since last time!
+        assert lines[0] != timeline
+        assert lines[1] == 'min-capacity-sat=400000'
+        assert len(lines) == 2
+
+    # If it's not set by setconfig, it will comment it out instead.
+    l2.stop()
+
+    with open(configfile, 'w') as f:
+        f.write('min-capacity-sat=500000\n')
+
+    l2.start()
+    ret = l2.rpc.setconfig(config='min-capacity-sat', val=400000)
+    assert ret == {'config':
+                   {'config': 'min-capacity-sat',
+                    'source': '{}:3'.format(configfile),
+                    'value_int': 400000,
+                    'dynamic': True}}
+
+    with open(configfile, 'r') as f:
+        lines = f.read().splitlines()
+        assert lines[0].startswith('# setconfig commented out: min-capacity-sat=500000')
+        assert lines[1].startswith('# Inserted by setconfig ')
+        assert lines[2] == 'min-capacity-sat=400000'
+        assert len(lines) == 3

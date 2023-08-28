@@ -43,10 +43,10 @@ static char *opt_set_u64(const char *arg, u64 *u)
 	errno = 0;
 	l = strtoull(arg, &endp, 0);
 	if (*endp || !arg[0])
-		return tal_fmt(NULL, "'%s' is not a number", arg);
+		return tal_fmt(tmpctx, "'%s' is not a number", arg);
 	*u = l;
 	if (errno || *u != l)
-		return tal_fmt(NULL, "'%s' is out of range", arg);
+		return tal_fmt(tmpctx, "'%s' is out of range", arg);
 	return NULL;
 }
 static char *opt_set_u32(const char *arg, u32 *u)
@@ -60,10 +60,10 @@ static char *opt_set_u32(const char *arg, u32 *u)
 	errno = 0;
 	l = strtoul(arg, &endp, 0);
 	if (*endp || !arg[0])
-		return tal_fmt(NULL, "'%s' is not a number", arg);
+		return tal_fmt(tmpctx, "'%s' is not a number", arg);
 	*u = l;
 	if (errno || *u != l)
-		return tal_fmt(NULL, "'%s' is out of range", arg);
+		return tal_fmt(tmpctx, "'%s' is out of range", arg);
 	return NULL;
 }
 
@@ -78,10 +78,10 @@ static char *opt_set_s32(const char *arg, s32 *u)
 	errno = 0;
 	l = strtol(arg, &endp, 0);
 	if (*endp || !arg[0])
-		return tal_fmt(NULL, "'%s' is not a number", arg);
+		return tal_fmt(tmpctx, "'%s' is not a number", arg);
 	*u = l;
 	if (errno || *u != l)
-		return tal_fmt(NULL, "'%s' is out of range", arg);
+		return tal_fmt(tmpctx, "'%s' is out of range", arg);
 	return NULL;
 }
 
@@ -130,13 +130,13 @@ static char *opt_set_mode(const char *arg, mode_t *m)
 
 	/* Ensure length, and starts with 0.  */
 	if (strlen(arg) != 4 || arg[0] != '0')
-		return tal_fmt(NULL, "'%s' is not a file mode", arg);
+		return tal_fmt(tmpctx, "'%s' is not a file mode", arg);
 
 	/* strtol, manpage, yech.  */
 	errno = 0;
 	l = strtol(arg, &endp, 8); /* Octal.  */
 	if (errno || *endp)
-		return tal_fmt(NULL, "'%s' is not a file mode", arg);
+		return tal_fmt(tmpctx, "'%s' is not a file mode", arg);
 	*m = l;
 	/* Range check not needed, previous strlen checks ensures only
 	 * 9-bit, which fits mode_t (unless your Unix is seriously borked).
@@ -254,7 +254,7 @@ static char *opt_add_addr_withtype(const char *arg,
 	err_msg = parse_wireaddr_internal(tmpctx, arg, ld->portnum,
 					  dns_lookup_ok, &wi);
 	if (err_msg)
-		return tal_fmt(NULL, "Unable to parse address '%s': %s", arg, err_msg);
+		return tal_fmt(tmpctx, "Unable to parse address '%s': %s", arg, err_msg);
 
 	/* Check they didn't specify some weird type! */
 	switch (wi.itype) {
@@ -263,7 +263,7 @@ static char *opt_add_addr_withtype(const char *arg,
 		case ADDR_TYPE_IPV4:
 		case ADDR_TYPE_IPV6:
 			if ((ala & ADDR_ANNOUNCE) && wi.u.allproto.is_websocket)
-				return tal_fmt(NULL,
+				return tal_fmt(tmpctx,
 					       "Cannot announce websocket address, use --bind-addr=%s", arg);
 			/* These can be either bind or announce */
 			break;
@@ -274,7 +274,7 @@ static char *opt_add_addr_withtype(const char *arg,
 			switch (ala) {
 			case ADDR_LISTEN:
 				if (!deprecated_apis)
-					return tal_fmt(NULL,
+					return tal_fmt(tmpctx,
 						       "Don't use --bind-addr=%s, use --announce-addr=%s",
 						       arg, arg);
 				log_unusual(ld->log,
@@ -286,7 +286,7 @@ static char *opt_add_addr_withtype(const char *arg,
 				return NULL;
 			case ADDR_LISTEN_AND_ANNOUNCE:
 				if (!deprecated_apis)
-					return tal_fmt(NULL,
+					return tal_fmt(tmpctx,
 						       "Don't use --addr=%s, use --announce-addr=%s",
 						       arg, arg);
 				log_unusual(ld->log,
@@ -306,10 +306,10 @@ static char *opt_add_addr_withtype(const char *arg,
 			case ADDR_ANNOUNCE:
 				break;
 			case ADDR_LISTEN:
-				return tal_fmt(NULL,
+				return tal_fmt(tmpctx,
 					       "Cannot use dns: prefix with --bind-addr, use --bind-addr=%s", arg + strlen("dns:"));
 			case ADDR_LISTEN_AND_ANNOUNCE:
-				return tal_fmt(NULL,
+				return tal_fmt(tmpctx,
 					       "Cannot use dns: prefix with --addr, use --bind-addr=%s and --addr=%s",
 					       arg + strlen("dns:"),
 					       arg);
@@ -320,18 +320,18 @@ static char *opt_add_addr_withtype(const char *arg,
 			 *   - MUST NOT announce more than one `type 5` DNS hostname.
 			 */
 			if (num_announced_types(ADDR_TYPE_DNS, ld) > 0)
-				return tal_fmt(NULL, "Only one DNS can be announced");
+				return tal_fmt(tmpctx, "Only one DNS can be announced");
 			break;
 		}
 		break;
 	case ADDR_INTERNAL_SOCKNAME:
 		switch (ala) {
 			case ADDR_ANNOUNCE:
-				return tal_fmt(NULL,
+				return tal_fmt(tmpctx,
 					       "Cannot announce sockets, try --bind-addr=%s", arg);
 			case ADDR_LISTEN_AND_ANNOUNCE:
 				if (!deprecated_apis)
-					return tal_fmt(NULL, "Don't use --addr=%s, use --bind-addr=%s",
+					return tal_fmt(tmpctx, "Don't use --addr=%s, use --bind-addr=%s",
 						       arg, arg);
 				ala = ADDR_LISTEN;
 				/* Fall thru */
@@ -355,10 +355,10 @@ static char *opt_add_addr_withtype(const char *arg,
 		/* You can only bind to wildcard, and optionally announce */
 		switch (ala) {
 			case ADDR_ANNOUNCE:
-				return tal_fmt(NULL, "Cannot use wildcard address '%s'", arg);
+				return tal_fmt(tmpctx, "Cannot use wildcard address '%s'", arg);
 			case ADDR_LISTEN_AND_ANNOUNCE:
 				if (wi.u.allproto.is_websocket)
-				return tal_fmt(NULL,
+				return tal_fmt(tmpctx,
 					       "Cannot announce websocket address, use --bind-addr=%s", arg);
 				/* fall thru */
 			case ADDR_LISTEN:
@@ -368,7 +368,7 @@ static char *opt_add_addr_withtype(const char *arg,
 	case ADDR_INTERNAL_FORPROXY:
 		/* You can't use these addresses here at all: this means we've
 		 * suppressed DNS and given a string-style name */
-		return tal_fmt(NULL, "Cannot resolve address '%s' (not using DNS!)", arg);
+		return tal_fmt(tmpctx, "Cannot resolve address '%s' (not using DNS!)", arg);
 	}
 
 	/* Sanity check for exact duplicates. */
@@ -378,7 +378,7 @@ static char *opt_add_addr_withtype(const char *arg,
 			continue;
 
 		if (wireaddr_internal_eq(&ld->proposed_wireaddr[i], &wi))
-			return tal_fmt(NULL, "Duplicate %s address %s",
+			return tal_fmt(tmpctx, "Duplicate %s address %s",
 				       ala & ADDR_ANNOUNCE ? "announce" : "listen",
 				       type_to_string(tmpctx, struct wireaddr_internal, &wi));
 	}
@@ -413,11 +413,11 @@ static char *opt_subdaemon(const char *arg, struct lightningd *ld)
 
 	size_t colonoff = strcspn(arg, ":");
 	if (!arg[colonoff])
-		return tal_fmt(NULL, "argument must contain ':'");
+		return tal_fmt(tmpctx, "argument must contain ':'");
 
 	subdaemon = tal_strndup(ld, arg, colonoff);
 	if (!is_subdaemon(subdaemon))
-		return tal_fmt(NULL, "\"%s\" is not a subdaemon", subdaemon);
+		return tal_fmt(tmpctx, "\"%s\" is not a subdaemon", subdaemon);
 
 	/* Make the value a tal-child of the subdaemon */
 	sdpath = tal_strdup(subdaemon, arg + colonoff + 1);
@@ -476,7 +476,7 @@ static char *opt_set_rgb(const char *arg, struct lightningd *ld)
 	 */
 	ld->rgb = tal_hexdata(ld, arg, strlen(arg));
 	if (!ld->rgb || tal_count(ld->rgb) != 3)
-		return tal_fmt(NULL, "rgb '%s' is not six hex digits", arg);
+		return tal_fmt(tmpctx, "rgb '%s' is not six hex digits", arg);
 	return NULL;
 }
 
@@ -503,7 +503,7 @@ static char *opt_set_alias(const char *arg, struct lightningd *ld)
 	 *   `alias` trailing-bytes equal to 0.
 	 */
 	if (strlen(arg) > 32)
-		return tal_fmt(NULL, "Alias '%s' is over 32 characters", arg);
+		return tal_fmt(tmpctx, "Alias '%s' is over 32 characters", arg);
 	ld->alias = tal_arrz(ld, u8, 33);
 	strncpy((char*)ld->alias, arg, 32);
 	return NULL;
@@ -542,7 +542,7 @@ static char *opt_add_plugin(const char *arg, struct lightningd *ld)
 	}
 	p = plugin_register(ld->plugins, arg, NULL, false, NULL, NULL);
 	if (!p)
-		return tal_fmt(NULL, "Failed to register %s: %s", arg, strerror(errno));
+		return tal_fmt(tmpctx, "Failed to register %s: %s", arg, strerror(errno));
 	return NULL;
 }
 
@@ -579,7 +579,7 @@ static char *opt_important_plugin(const char *arg, struct lightningd *ld)
 	}
 	p = plugin_register(ld->plugins, arg, NULL, true, NULL, NULL);
 	if (!p)
-		return tal_fmt(NULL, "Failed to register %s: %s", arg, strerror(errno));
+		return tal_fmt(tmpctx, "Failed to register %s: %s", arg, strerror(errno));
 	return NULL;
 }
 
@@ -656,7 +656,7 @@ static char *opt_force_privkey(const char *optarg, struct lightningd *ld)
 	ld->dev_force_privkey = tal(ld, struct privkey);
 	if (!hex_decode(optarg, strlen(optarg),
 			ld->dev_force_privkey, sizeof(*ld->dev_force_privkey)))
-		return tal_fmt(NULL, "Unable to parse privkey '%s'", optarg);
+		return tal_fmt(tmpctx, "Unable to parse privkey '%s'", optarg);
 	return NULL;
 }
 
@@ -667,7 +667,7 @@ static char *opt_force_bip32_seed(const char *optarg, struct lightningd *ld)
 	if (!hex_decode(optarg, strlen(optarg),
 			ld->dev_force_bip32_seed,
 			sizeof(*ld->dev_force_bip32_seed)))
-		return tal_fmt(NULL, "Unable to parse secret '%s'", optarg);
+		return tal_fmt(tmpctx, "Unable to parse secret '%s'", optarg);
 	return NULL;
 }
 
@@ -678,7 +678,7 @@ static char *opt_force_tmp_channel_id(const char *optarg, struct lightningd *ld)
 	if (!hex_decode(optarg, strlen(optarg),
 			ld->dev_force_tmp_channel_id,
 			sizeof(*ld->dev_force_tmp_channel_id)))
-		return tal_fmt(NULL, "Unable to parse channel id '%s'", optarg);
+		return tal_fmt(tmpctx, "Unable to parse channel id '%s'", optarg);
 	return NULL;
 }
 
@@ -1109,7 +1109,7 @@ static bool opt_show_msat(char *buf, size_t len, const struct amount_msat *msat)
 static char *opt_set_msat(const char *arg, struct amount_msat *amt)
 {
 	if (!parse_amount_msat(amt, arg, strlen(arg)))
-		return tal_fmt(NULL, "Unable to parse millisatoshi '%s'", arg);
+		return tal_fmt(tmpctx, "Unable to parse millisatoshi '%s'", arg);
 
 	return NULL;
 }
@@ -1136,7 +1136,7 @@ static char *opt_set_websocket_port(const char *arg, struct lightningd *ld)
 
 	ld->websocket_port = port;
 	if (ld->websocket_port != port)
-		return tal_fmt(NULL, "'%s' is out of range", arg);
+		return tal_fmt(tmpctx, "'%s' is out of range", arg);
 	return NULL;
 }
 
@@ -1352,7 +1352,7 @@ static void register_opts(struct lightningd *ld)
 		       opt_set_msat,
 		       opt_show_msat, &ld->config.max_dust_htlc_exposure_msat,
 		       "Max HTLC amount that can be trimmed");
-	clnopt_witharg("--min-capacity-sat", OPT_SHOWINT, opt_set_u64, opt_show_u64,
+	clnopt_witharg("--min-capacity-sat", OPT_SHOWINT|OPT_DYNAMIC, opt_set_u64, opt_show_u64,
 			 &ld->config.min_capacity_sat,
 			 "Minimum capacity in satoshis for accepting channels");
 	clnopt_witharg("--addr", OPT_MULTI, opt_add_addr, NULL,
@@ -1648,22 +1648,6 @@ void handle_opts(struct lightningd *ld)
 	check_config(ld);
 }
 
-/* FIXME: This is a hack!  Expose somehow in ccan/opt.*/
-/* Returns string after first '-'. */
-static const char *first_name(const char *names, unsigned *len)
-{
-	*len = strcspn(names + 1, "|= ");
-	return names + 1;
-}
-
-static const char *next_name(const char *names, unsigned *len)
-{
-	names += *len;
-	if (names[0] == ' ' || names[0] == '=' || names[0] == '\0')
-		return NULL;
-	return first_name(names + 1, len);
-}
-
 static void json_add_opt_addrs(struct json_stream *response,
 			       const char *name0,
 			       const struct wireaddr_internal *wireaddrs,
@@ -1720,19 +1704,10 @@ bool opt_canon_bool(const char *val)
 	return b;
 }
 
-static void check_literal(const char *name, const char *val)
-{
-	if (streq(val, "true") || streq(val, "false"))
-		return;
-	if (!streq(val, "") && strspn(val, "-0123456789.") == strlen(val))
-		return;
-	errx(1, "Bad literal for %s: %s", name, val);
-}
-
-static void add_config_deprecated(struct lightningd *ld,
-				  struct json_stream *response,
-				  const struct opt_table *opt,
-				  const char *name, size_t len)
+void add_config_deprecated(struct lightningd *ld,
+			   struct json_stream *response,
+			   const struct opt_table *opt,
+			   const char *name, size_t len)
 {
 	char *name0 = tal_strndup(tmpctx, name, len);
 	char *answer = NULL;
@@ -1805,10 +1780,8 @@ static void add_config_deprecated(struct lightningd *ld,
 				      feature_offered(ld->our_features
 						      ->bits[INIT_FEATURE],
 						      OPT_QUIESCE));
-		} else {
-			/* Insert more decodes here! */
-			errx(1, "Unknown nonarg decode for %s", opt->names);
 		}
+		/* We ignore future additions, since these are deprecated anyway! */
 	} else if (opt->type & OPT_HASARG) {
 		if (opt->show == (void *)opt_show_charp) {
 			if (*(char **)opt->u.carg)
@@ -1910,10 +1883,8 @@ static void add_config_deprecated(struct lightningd *ld,
 		} else if (strstarts(name, "dev-")) {
 			/* Ignore dev settings */
 #endif
-		} else {
-			/* Insert more decodes here! */
-			errx(1, "Unknown arg decode for %s", opt->names);
 		}
+		/* We ignore future additions, since these are deprecated anyway! */
 	}
 
 	if (answer) {
@@ -1922,294 +1893,31 @@ static void add_config_deprecated(struct lightningd *ld,
 	}
 }
 
-static void json_add_source(struct json_stream *result,
-			    const char *fieldname,
-			    const struct configvar *cv)
+bool is_known_opt_cb_arg(char *(*cb_arg)(const char *, void *))
 {
-	const char *source;
-
-	if (!cv) {
-		source = "default";
-	} else {
-		source = NULL;
-		switch (cv->src) {
-		case CONFIGVAR_CMDLINE:
-		case CONFIGVAR_CMDLINE_SHORT:
-			source = "cmdline";
-			break;
-		case CONFIGVAR_EXPLICIT_CONF:
-		case CONFIGVAR_BASE_CONF:
-		case CONFIGVAR_NETWORK_CONF:
-			source = tal_fmt(tmpctx, "%s:%u", cv->file, cv->linenum);
-			break;
-		case CONFIGVAR_PLUGIN_START:
-			source = "pluginstart";
-			break;
-		}
-	}
-	json_add_string(result, fieldname, source);
-}
-
-static const char *configval_fieldname(const struct opt_table *ot)
-{
-	bool multi = (ot->type & OPT_MULTI);
-	if (ot->type & OPT_SHOWBOOL)
-		return multi ? "values_bool" : "value_bool";
-	if (ot->type & OPT_SHOWINT)
-		return multi ? "values_int" : "value_int";
-	if (ot->type & OPT_SHOWMSATS)
-		return multi ? "values_msat" : "value_msat";
-	return multi ? "values_str" : "value_str";
-}
-
-#define CONFIG_SHOW_BUFSIZE 4096
-
-static const char *get_opt_val(const struct opt_table *ot,
-			       char buf[],
-			       const struct configvar *cv)
-{
-	if (ot->show == (void *)opt_show_charp) {
-		/* Don't truncate or quote! */
-		return *(char **)ot->u.carg;
-	}
-	if (ot->show) {
-		/* Plugins options' show only shows defaults, so show val if
-		 * we have it */
-		if (is_plugin_opt(ot) && cv)
-			return cv->optarg;
-		strcpy(buf + CONFIG_SHOW_BUFSIZE, "...");
-		if (ot->show(buf, CONFIG_SHOW_BUFSIZE, ot->u.carg))
-			return buf;
-		return NULL;
-	}
-
-	/* For everything else we only display if it's set,
-	 * BUT we check here to make sure you've handled
-	 * everything! */
-	if (ot->cb_arg == (void *)opt_set_talstr
-	    || ot->cb_arg == (void *)opt_add_proxy_addr
-	    || ot->cb_arg == (void *)opt_force_feerates
-	    || ot->cb_arg == (void *)opt_set_accept_extra_tlv_types
-	    || ot->cb_arg == (void *)opt_set_websocket_port
-	    || ot->cb_arg == (void *)opt_add_plugin
-	    || ot->cb_arg == (void *)opt_add_plugin_dir
-	    || ot->cb_arg == (void *)opt_important_plugin
-	    || ot->cb_arg == (void *)opt_disable_plugin
-	    || ot->cb_arg == (void *)opt_add_addr
-	    || ot->cb_arg == (void *)opt_add_bind_addr
-	    || ot->cb_arg == (void *)opt_add_announce_addr
-	    || ot->cb_arg == (void *)opt_subdaemon
-	    || ot->cb_arg == (void *)opt_set_db_upgrade
-	    || ot->cb_arg == (void *)arg_log_to_file
-	    || ot->cb_arg == (void *)opt_add_accept_htlc_tlv
+	return cb_arg == (void *)opt_set_talstr
+		|| cb_arg == (void *)opt_add_proxy_addr
+		|| cb_arg == (void *)opt_force_feerates
+		|| cb_arg == (void *)opt_set_accept_extra_tlv_types
+		|| cb_arg == (void *)opt_set_websocket_port
+		|| cb_arg == (void *)opt_add_plugin
+		|| cb_arg == (void *)opt_add_plugin_dir
+		|| cb_arg == (void *)opt_important_plugin
+		|| cb_arg == (void *)opt_disable_plugin
+		|| cb_arg == (void *)opt_add_addr
+		|| cb_arg == (void *)opt_add_bind_addr
+		|| cb_arg == (void *)opt_add_announce_addr
+		|| cb_arg == (void *)opt_subdaemon
+		|| cb_arg == (void *)opt_set_db_upgrade
+		|| cb_arg == (void *)arg_log_to_file
+		|| cb_arg == (void *)opt_add_accept_htlc_tlv
 #if DEVELOPER
-	    || ot->cb_arg == (void *)opt_subd_dev_disconnect
-	    || ot->cb_arg == (void *)opt_force_featureset
-	    || ot->cb_arg == (void *)opt_force_privkey
-	    || ot->cb_arg == (void *)opt_force_bip32_seed
-	    || ot->cb_arg == (void *)opt_force_channel_secrets
-	    || ot->cb_arg == (void *)opt_force_tmp_channel_id
+		|| cb_arg == (void *)opt_subd_dev_disconnect
+		|| cb_arg == (void *)opt_force_featureset
+		|| cb_arg == (void *)opt_force_privkey
+		|| cb_arg == (void *)opt_force_bip32_seed
+		|| cb_arg == (void *)opt_force_channel_secrets
+		|| cb_arg == (void *)opt_force_tmp_channel_id
 #endif
-	    || is_restricted_print_if_nonnull(ot->cb_arg)) {
-		/* Only if set! */
-		if (cv)
-			return cv->optarg;
-		else
-			return NULL;
-	}
-
-	/* Insert more decodes here! */
-	errx(1, "Unknown decode for %s", ot->names);
+		;
 }
-
-static void json_add_configval(struct json_stream *result,
-			       const char *fieldname,
-			       const struct opt_table *ot,
-			       const char *str)
-{
-	if (ot->type & OPT_SHOWBOOL) {
-		json_add_bool(result, fieldname, opt_canon_bool(str));
-	} else if (ot->type & (OPT_SHOWMSATS|OPT_SHOWINT)) {
-		check_literal(ot->names, str);
-		json_add_primitive(result, fieldname, str);
-	} else
-		json_add_string(result, fieldname, str);
-}
-
-/* Config vars can have multiple names ("--large-channels|--wumbo"), but first
- * is preferred */
-static void json_add_config(struct lightningd *ld,
-			    struct json_stream *response,
-			    bool always_include,
-			    const struct opt_table *ot,
-			    const char **names)
-{
-	char buf[CONFIG_SHOW_BUFSIZE + sizeof("...")];
-	const char *val;
-	struct configvar *cv;
-
-	/* This tells us if they actually set the option */
-	cv = configvar_first(ld->configvars, names);
-
-	/* Ignore dev/hidden options (deprecated) unless they actually used it */
-	if (!cv
-	    && (ot->desc == opt_hidden || (ot->type & OPT_DEV))
-	    && !always_include) {
-		return;
-	}
-
-	/* Ignore options which simply exit */
-	if (ot->type & OPT_EXITS)
-		return;
-
-	if (ot->type & OPT_NOARG) {
-		json_object_start(response, names[0]);
-		json_add_bool(response, "set", cv != NULL);
-		json_add_source(response, "source", cv);
-		json_add_config_plugin(response, ld->plugins, "plugin", ot);
-		json_object_end(response);
-		return;
-	}
-
-	assert(ot->type & OPT_HASARG);
-	if (ot->type & OPT_MULTI) {
-		json_object_start(response, names[0]);
-		json_array_start(response, configval_fieldname(ot));
-		while (cv) {
-			val = get_opt_val(ot, buf, cv);
-			json_add_configval(response, NULL, ot, val);
-			cv = configvar_next(ld->configvars, cv, names);
-		}
-		json_array_end(response);
-
-		/* Iterate again, for sources */
-		json_array_start(response, "sources");
-		for (cv = configvar_first(ld->configvars, names);
-		     cv;
-		     cv = configvar_next(ld->configvars, cv, names)) {
-			json_add_source(response, NULL, cv);
-		}
-		json_array_end(response);
-		json_add_config_plugin(response, ld->plugins, "plugin", ot);
-		json_object_end(response);
-		return;
-	}
-
-	/* Returns NULL if we don't want to print it */
-	val = get_opt_val(ot, buf, cv);
-	if (!val)
-		return;
-
-	json_object_start(response, names[0]);
-	json_add_configval(response, configval_fieldname(ot), ot, val);
-	json_add_source(response, "source", cv);
-	json_add_config_plugin(response, ld->plugins, "plugin", ot);
-	json_object_end(response);
-}
-
-static struct command_result *param_opt_config(struct command *cmd,
-					       const char *name,
-					       const char *buffer,
-					       const jsmntok_t *tok,
-					       const struct opt_table **config)
-{
-	const char *name0 = json_strdup(tmpctx, buffer, tok);
-	*config = opt_find_long(name0, NULL);
-	if (*config)
-		return NULL;
-
-	return command_fail_badparam(cmd, name, buffer, tok,
-				     "Unknown config option");
-}
-
-static struct command_result *json_listconfigs(struct command *cmd,
-					       const char *buffer,
-					       const jsmntok_t *obj UNNEEDED,
-					       const jsmntok_t *params)
-{
-	struct json_stream *response = NULL;
-	const struct opt_table *config;
-
-	if (!param(cmd, buffer, params,
-		   p_opt("config", param_opt_config, &config),
-		   NULL))
-		return command_param_failed();
-
-	response = json_stream_success(cmd);
-
-	if (!deprecated_apis)
-		goto modern;
-
-	if (!config)
-		json_add_string(response, "# version", version());
-
-	for (size_t i = 0; i < opt_count; i++) {
-		unsigned int len;
-		const char *name;
-
-		/* FIXME: Print out comment somehow? */
-		if (opt_table[i].type == OPT_SUBTABLE)
-			continue;
-
-		for (name = first_name(opt_table[i].names, &len);
-		     name;
-		     name = next_name(name, &len)) {
-			/* Skips over first -, so just need to look for one */
-			if (name[0] != '-')
-				continue;
-
-			if (!config || config == &opt_table[i]) {
-				add_config_deprecated(cmd->ld, response, &opt_table[i],
-						      name+1, len-1);
-			}
-			/* If we have more than one long name, first
-			 * is preferred */
-			break;
-		}
-	}
-
-modern:
-	json_object_start(response, "configs");
-	for (size_t i = 0; i < opt_count; i++) {
-		unsigned int len;
-		const char *name;
-		const char **names;
-
-		/* FIXME: Print out comment somehow? */
-		if (opt_table[i].type == OPT_SUBTABLE)
-			continue;
-
-		if (config && config != &opt_table[i])
-			continue;
-
-		names = tal_arr(tmpctx, const char *, 0);
-		for (name = first_name(opt_table[i].names, &len);
-		     name;
-		     name = next_name(name, &len)) {
-			/* Skips over first -, so just need to look for one */
-			if (name[0] != '-')
-				continue;
-			tal_arr_expand(&names,
-				       tal_strndup(names, name+1, len-1));
-		}
-		/* We don't usually print dev or deprecated options, unless
-		 * they explicitly ask, or they're set. */
-		json_add_config(cmd->ld, response, config != NULL,
-				&opt_table[i], names);
-	}
-	json_object_end(response);
-
-	return command_success(cmd, response);
-}
-
-static const struct json_command listconfigs_command = {
-	"listconfigs",
-	"utility",
-	json_listconfigs,
-	"List all configuration options, or with [config], just that one.",
-	.verbose = "listconfigs [config]\n"
-	"Outputs an object, with each field a config options\n"
-	"(Option names which start with # are comments)\n"
-	"With [config], object only has that field"
-};
-AUTODATA(json_command, &listconfigs_command);

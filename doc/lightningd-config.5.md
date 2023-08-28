@@ -14,6 +14,8 @@ file (default: **$HOME/.lightning/config**) then a network-specific
 configuration file (default: **$HOME/.lightning/testnet/config**).  This can
 be changed: see *--conf* and *--lightning-dir*.
 
+Note that some configuration options, marked *dynamic*m can be changed at runtime: see lightning-setconfig(7).
+
 General configuration files are processed first, then network-specific
 ones, then command line options: later options override earlier ones
 except *addr* options and *log-level* with subsystems, which
@@ -316,7 +318,7 @@ millionths, so 10000 is 1%, 1000 is 0.1%. Changing this value will only
 affect new channels and not existing ones. If you want to change fees
 for existing channels, use the RPC call lightning-setchannel(7).
 
-* **min-capacity-sat**=*SATOSHI*
+* **min-capacity-sat**=*SATOSHI* [*dynamic*]
 
   Default: 10000. This value defines the minimal effective channel
 capacity in satoshi to accept for channel opening requests. This will
@@ -440,32 +442,32 @@ accepted, and ignored.
 
 ### Cleanup control options:
 
-* **autoclean-cycle**=*SECONDS* [plugin `autoclean`]
+* **autoclean-cycle**=*SECONDS* [plugin `autoclean`, *dynamic*]
 
   Perform search for things to clean every *SECONDS* seconds (default
 3600, or 1 hour, which is usually sufficient).
 
-* **autoclean-succeededforwards-age**=*SECONDS* [plugin `autoclean`]
+* **autoclean-succeededforwards-age**=*SECONDS* [plugin `autoclean`, *dynamic*]
 
   How old successful forwards (`settled` in listforwards `status`) have to be before deletion (default 0, meaning never).
 
-* **autoclean-failedforwards-age**=*SECONDS* [plugin `autoclean`]
+* **autoclean-failedforwards-age**=*SECONDS* [plugin `autoclean`, *dynamic*]
 
   How old failed forwards (`failed` or `local_failed` in listforwards `status`) have to be before deletion (default 0, meaning never).
 
-* **autoclean-succeededpays-age**=*SECONDS* [plugin `autoclean`]
+* **autoclean-succeededpays-age**=*SECONDS* [plugin `autoclean`, *dynamic*]
 
   How old successful payments (`complete` in listpays `status`) have to be before deletion (default 0, meaning never).
 
-* **autoclean-failedpays-age**=*SECONDS* [plugin `autoclean`]
+* **autoclean-failedpays-age**=*SECONDS* [plugin `autoclean`, *dynamic*]
 
   How old failed payment attempts (`failed` in listpays `status`) have to be before deletion (default 0, meaning never).
 
-* **autoclean-paidinvoices-age**=*SECONDS* [plugin `autoclean`]
+* **autoclean-paidinvoices-age**=*SECONDS* [plugin `autoclean`, *dynamic*]
 
   How old invoices which were paid (`paid` in listinvoices `status`) have to be before deletion (default 0, meaning never).
 
-* **autoclean-expiredinvoices-age**=*SECONDS* [plugin `autoclean`]
+* **autoclean-expiredinvoices-age**=*SECONDS* [plugin `autoclean`, *dynamic*]
 
   How old invoices which were not paid (and cannot be) (`expired` in listinvoices `status`) before deletion (default 0, meaning never).
 
