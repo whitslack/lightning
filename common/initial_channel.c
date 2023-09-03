@@ -134,6 +134,7 @@ struct bitcoin_tx *initial_channel_tx(const tal_t *ctx,
 				    direct_outputs,
 				    side, csv_lock,
 				    channel_has(channel, OPT_ANCHOR_OUTPUTS),
+				    channel_has(channel, OPT_ANCHORS_ZERO_FEE_HTLC_TX),
 				    err_reason);
 
 	if (init_tx) {
@@ -170,6 +171,10 @@ struct channel_type *channel_desired_type(const tal_t *ctx,
 					  const struct channel *channel)
 {
 	/* We don't actually want to downgrade anchors! */
+	if (channel_has(channel, OPT_ANCHORS_ZERO_FEE_HTLC_TX))
+		return channel_type_anchors_zero_fee_htlc(ctx);
+
+	/* We don't actually want to downgrade anchors! */
 	if (channel_has(channel, OPT_ANCHOR_OUTPUTS))
 		return channel_type_anchor_outputs(ctx);
 
@@ -180,6 +185,11 @@ struct channel_type *channel_desired_type(const tal_t *ctx,
 bool channel_has(const struct channel *channel, int feature)
 {
 	return channel_type_has(channel->type, feature);
+}
+
+bool channel_has_anchors(const struct channel *channel)
+{
+	return channel_type_has_anchors(channel->type);
 }
 
 static char *fmt_channel_view(const tal_t *ctx, const struct channel_view *view)

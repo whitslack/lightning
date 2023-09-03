@@ -49,21 +49,6 @@ struct channel_state_param {
 	const enum channel_state_bucket state;
 };
 
-/* Implement db_fatal, as a wrapper around fatal.
- * We use a ifndef block so that it can get be
- * implemented in a test file first, if necessary */
-#ifndef DB_FATAL
-#define DB_FATAL
-void db_fatal(const char *fmt, ...)
-{
-	va_list ap;
-
-	va_start(ap, fmt);
-	fatal_vfmt(fmt, ap);
-	va_end(ap);
-}
-#endif /* DB_FATAL */
-
 /* These go in db, so values cannot change (we can't put this into
  * lightningd/channel_state.h since it confuses cdump!) */
 static enum state_change state_change_in_db(enum state_change s)
@@ -189,7 +174,7 @@ static bool wallet_add_utxo(struct wallet *w, struct utxo *utxo,
 			db_bind_pubkey(stmt, 8, utxo->close_info->commitment_point);
 		else
 			db_bind_null(stmt, 8);
-		db_bind_int(stmt, 9, utxo->close_info->option_anchor_outputs);
+		db_bind_int(stmt, 9, utxo->close_info->option_anchors);
 	} else {
 		db_bind_null(stmt, 6);
 		db_bind_null(stmt, 7);
@@ -239,7 +224,7 @@ static struct utxo *wallet_stmt2output(const tal_t *ctx, struct db_stmt *stmt)
 			= db_col_optional(utxo->close_info, stmt,
 					  "commitment_point",
 					  pubkey);
-		utxo->close_info->option_anchor_outputs
+		utxo->close_info->option_anchors
 			= db_col_int(stmt, "option_anchor_outputs");
 		utxo->close_info->csv = db_col_int(stmt, "csv_lock");
 	} else {
@@ -519,9 +504,11 @@ static bool deep_enough(u32 maxheight, const struct utxo *utxo,
 			u32 current_blockheight)
 {
 	if (utxo->close_info
-	    && utxo->close_info->option_anchor_outputs) {
-		/* All option_anchor_output close_infos
-		 * have a csv of at least 1 */
+	    && utxo->close_info->option_anchors) {
+		/* BOLT #3:
+		 * If `option_anchors` applies to the commitment transaction, the
+		 * `to_remote` output is encumbered by a one block csv lock.
+		 */
 		if (!utxo->blockheight)
 			return false;
 
@@ -602,6 +589,69 @@ struct utxo *wallet_find_utxo(const tal_t *ctx, struct wallet *w,
 	return utxo;
 }
 
+
+bool wallet_has_funds(struct wallet *w,
+		      const struct utxo **excludes,
+		      u32 current_blockheight,
+		      struct amount_sat sats)
+{
+	struct db_stmt *stmt;
+	struct amount_sat total = AMOUNT_SAT(0);
+
+	stmt = db_prepare_v2(w->db, SQL("SELECT"
+					"  prev_out_tx"
+					", prev_out_index"
+					", value"
+					", type"
+					", status"
+					", keyindex"
+					", channel_id"
+					", peer_id"
+					", commitment_point"
+					", option_anchor_outputs"
+					", confirmation_height"
+					", spend_height"
+					", scriptpubkey "
+					", reserved_til"
+					", csv_lock"
+					", is_in_coinbase"
+					" FROM outputs"
+					" WHERE status = ?"
+					" OR (status = ? AND reserved_til <= ?)"));
+	db_bind_int(stmt, 0, output_status_in_db(OUTPUT_STATE_AVAILABLE));
+	db_bind_int(stmt, 1, output_status_in_db(OUTPUT_STATE_RESERVED));
+	db_bind_u64(stmt, 2, current_blockheight);
+
+	db_query_prepared(stmt);
+	while (db_step(stmt)) {
+		struct utxo *utxo = wallet_stmt2output(tmpctx, stmt);
+
+		if (excluded(excludes, utxo)
+ 		    || !deep_enough(-1U, utxo, current_blockheight)) {
+			continue;
+		}
+
+		/* Overflow Should Not Happen */
+		if (!amount_sat_add(&total, total, utxo->amount)) {
+			db_fatal(w->db, "Invalid value for %s: %s",
+				 type_to_string(tmpctx,
+						struct bitcoin_outpoint,
+						&utxo->outpoint),
+				 fmt_amount_sat(tmpctx, utxo->amount));
+		}
+
+		/* If we've found enough, answer is yes. */
+		if (amount_sat_greater_eq(total, sats)) {
+			tal_free(stmt);
+			return true;
+		}
+	}
+
+	/* Insufficient funds! */
+	tal_free(stmt);
+	return false;
+}
+
 bool wallet_add_onchaind_utxo(struct wallet *w,
 			      const struct bitcoin_outpoint *outpoint,
 			      const u8 *scriptpubkey,
@@ -658,7 +708,8 @@ bool wallet_add_onchaind_utxo(struct wallet *w,
 	else
 		db_bind_null(stmt, 8);
 
-	db_bind_int(stmt, 9, channel_has(channel, OPT_ANCHOR_OUTPUTS));
+	db_bind_int(stmt, 9,
+		    channel_type_has_anchors(channel->type));
 	db_bind_int(stmt, 10, blockheight);
 
 	/* spendheight */
@@ -895,7 +946,7 @@ done:
 
 static struct bitcoin_signature *
 wallet_htlc_sigs_load(const tal_t *ctx, struct wallet *w, u64 channelid,
-		      bool option_anchor_outputs)
+		      bool option_anchors)
 {
 	struct db_stmt *stmt;
 	struct bitcoin_signature *htlc_sigs = tal_arr(ctx, struct bitcoin_signature, 0);
@@ -915,7 +966,7 @@ wallet_htlc_sigs_load(const tal_t *ctx, struct wallet *w, u64 channelid,
 		 *   transaction, `SIGHASH_SINGLE|SIGHASH_ANYONECANPAY` is
 		 *   used as described in [BOLT #5]
 		 */
-		if (option_anchor_outputs)
+		if (option_anchors)
 			sig.sighash_type = SIGHASH_SINGLE|SIGHASH_ANYONECANPAY;
 		else
 			sig.sighash_type = SIGHASH_ALL;
@@ -1202,7 +1253,7 @@ wallet_stmt2inflight(struct wallet *w, struct db_stmt *stmt,
 	if (!db_col_is_null(stmt, "last_tx")) {
 		last_tx = db_col_psbt_to_tx(tmpctx, stmt, "last_tx");
 		if (!last_tx)
-			db_fatal("Failed to decode inflight psbt %s",
+			db_fatal(w->db, "Failed to decode inflight psbt %s",
 				 tal_hex(tmpctx, db_col_arr(tmpctx, stmt,
 							    "last_tx", u8)));
 	} else
@@ -1493,7 +1544,7 @@ static struct channel *wallet_stmt2channel(struct wallet *w, struct db_stmt *stm
 	if (!db_col_is_null(stmt, "last_tx")) {
 		last_tx = db_col_psbt_to_tx(tmpctx, stmt, "last_tx");
 		if (!last_tx)
-			db_fatal("Failed to decode channel %s psbt %s",
+			db_fatal(w->db, "Failed to decode channel %s psbt %s",
 				 type_to_string(tmpctx, struct channel_id, &cid),
 				 tal_hex(tmpctx, db_col_arr(tmpctx, stmt,
 							    "last_tx", u8)));
@@ -1530,7 +1581,7 @@ static struct channel *wallet_stmt2channel(struct wallet *w, struct db_stmt *stm
 			   &last_sig,
 			   wallet_htlc_sigs_load(tmpctx, w,
 						 db_col_u64(stmt, "id"),
-						 db_col_int(stmt, "option_anchor_outputs")),
+						 channel_type_has_anchors(type)),
 			   &channel_info,
 			   take(fee_states),
 			   remote_shutdown_scriptpubkey,
@@ -4580,7 +4631,7 @@ struct amount_msat wallet_total_forward_fees(struct wallet *w)
 
 	deleted = amount_msat(db_get_intvar(w->db, "deleted_forward_fees", 0));
 	if (!amount_msat_add(&total, total, deleted))
-		db_fatal("Adding forward fees %s + %s overflowed",
+		db_fatal(w->db, "Adding forward fees %s + %s overflowed",
 			 type_to_string(tmpctx, struct amount_msat, &total),
 			 type_to_string(tmpctx, struct amount_msat, &deleted));
 

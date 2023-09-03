@@ -135,6 +135,9 @@ On success, an object is returned, containing:
   - **experimental-peer-storage** (object, optional) *(added v23.02)*:
     - **set** (boolean): `true` if set in config or cmdline
     - **source** (string): source of configuration setting
+  - **experimental-anchors** (object, optional) *(added v23.08)*:
+    - **set** (boolean): `true` if set in config or cmdline
+    - **source** (string): source of configuration setting
   - **database-upgrade** (object, optional):
     - **value\_bool** (boolean): field from config or cmdline, or default
     - **source** (string): source of configuration setting
@@ -346,6 +349,7 @@ On success, an object is returned, containing:
 - **announce-addr-dns** (boolean, optional): Whether we put DNS entries into node\_announcement **deprecated, removal in v24.05** *(added v22.11.1)*
 - **require-confirmed-inputs** (boolean, optional): Request peers to only send confirmed inputs (dual-fund only) **deprecated, removal in v24.05**
 - **commit-fee** (u64, optional): The percentage of the 6-block fee estimate to use for commitment transactions **deprecated, removal in v24.05** *(added v23.05)*
+- **min-emergency-msat** (msat, optional): field from config or cmdline, or default *(added v23.08)*
 
 [comment]: # (GENERATE-FROM-SCHEMA-END)
 
@@ -463,4 +467,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:0440e4634e4a28681323f891307c7bb61143aacad4824f952f24f027a7543835)
+[comment]: # ( SHA256STAMP:a40882cad0d889aa736a2932250102be43ae7e62b3d2429b26e0961e4c315f7b)

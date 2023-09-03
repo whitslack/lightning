@@ -587,6 +587,7 @@
             "Feerates.onchain_fee_estimates.htlc_timeout_satoshis": 4,
             "Feerates.onchain_fee_estimates.mutual_close_satoshis": 2,
             "Feerates.onchain_fee_estimates.opening_channel_satoshis": 1,
+            "Feerates.onchain_fee_estimates.unilateral_close_nonanchor_satoshis": 6,
             "Feerates.onchain_fee_estimates.unilateral_close_satoshis": 3
         },
         "FeeratesPerkb": {
@@ -599,6 +600,7 @@
             "Feerates.perkb.mutual_close": 4,
             "Feerates.perkb.opening": 3,
             "Feerates.perkb.penalty": 8,
+            "Feerates.perkb.unilateral_anchor_close": 11,
             "Feerates.perkb.unilateral_close": 5
         },
         "FeeratesPerkbEstimates": {
@@ -616,6 +618,7 @@
             "Feerates.perkw.mutual_close": 4,
             "Feerates.perkw.opening": 3,
             "Feerates.perkw.penalty": 8,
+            "Feerates.perkw.unilateral_anchor_close": 11,
             "Feerates.perkw.unilateral_close": 5
         },
         "FeeratesPerkwEstimates": {
@@ -661,6 +664,8 @@
             "FundPsbt.locktime": 6,
             "FundPsbt.min_witness_weight": 7,
             "FundPsbt.minconf": 4,
+            "FundPsbt.nonwrapped": 9,
+            "FundPsbt.opening_anchor_channel": 10,
             "FundPsbt.reserve": 5,
             "FundPsbt.satoshi": 1,
             "FundPsbt.startweight": 3
@@ -1465,6 +1470,7 @@
             "UtxoPsbt.feerate": 2,
             "UtxoPsbt.locktime": 6,
             "UtxoPsbt.min_witness_weight": 7,
+            "UtxoPsbt.opening_anchor_channel": 10,
             "UtxoPsbt.reserve": 5,
             "UtxoPsbt.reservedok": 8,
             "UtxoPsbt.satoshi": 1,
@@ -2533,6 +2539,10 @@
             "added": "pre-v0.10.1",
             "deprecated": false
         },
+        "Feerates.onchain_fee_estimates.unilateral_close_nonanchor_satoshis": {
+            "added": "v23.08",
+            "deprecated": false
+        },
         "Feerates.onchain_fee_estimates.unilateral_close_satoshis": {
             "added": "pre-v0.10.1",
             "deprecated": false
@@ -2589,6 +2599,10 @@
             "added": "pre-v0.10.1",
             "deprecated": false
         },
+        "Feerates.perkb.unilateral_anchor_close": {
+            "added": "v23.08",
+            "deprecated": false
+        },
         "Feerates.perkb.unilateral_close": {
             "added": "pre-v0.10.1",
             "deprecated": false
@@ -2643,6 +2657,10 @@
         },
         "Feerates.perkw.penalty": {
             "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "Feerates.perkw.unilateral_anchor_close": {
+            "added": "v23.08",
             "deprecated": false
         },
         "Feerates.perkw.unilateral_close": {
@@ -2763,6 +2781,14 @@
         },
         "FundPsbt.minconf": {
             "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FundPsbt.nonwrapped": {
+            "added": "v23.02",
+            "deprecated": false
+        },
+        "FundPsbt.opening_anchor_channel": {
+            "added": "v23.08",
             "deprecated": false
         },
         "FundPsbt.psbt": {
@@ -5175,6 +5201,10 @@
         },
         "UtxoPsbt.min_witness_weight": {
             "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "UtxoPsbt.opening_anchor_channel": {
+            "added": "v23.08",
             "deprecated": false
         },
         "UtxoPsbt.psbt": {

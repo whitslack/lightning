@@ -56,11 +56,13 @@ void broadcast_tx_(struct chain_topology *topo UNNEEDED,
 		   struct channel *channel UNNEEDED,
 		   const struct bitcoin_tx *tx TAKES UNNEEDED,
 		   const char *cmd_id UNNEEDED, bool allowhighfees UNNEEDED, u32 minblock UNNEEDED,
-		   void (*finished)(struct channel * UNNEEDED,
+		   bool (*finished)(struct channel * UNNEEDED,
+				    const struct bitcoin_tx * UNNEEDED,
 				    bool success UNNEEDED,
-				    const char *err) UNNEEDED,
+				    const char *err UNNEEDED,
+				    void *) UNNEEDED,
 		   bool (*refresh)(struct channel * UNNEEDED, const struct bitcoin_tx ** UNNEEDED, void *) UNNEEDED,
-		   void *refresh_arg TAKES UNNEEDED)
+		   void *cbarg TAKES UNNEEDED)
 { fprintf(stderr, "broadcast_tx_ called!\n"); abort(); }
 /* Generated stub for channel_change_state_reason_str */
 const char *channel_change_state_reason_str(enum state_change reason UNNEEDED)
@@ -157,6 +159,11 @@ struct command_result *command_success(struct command *cmd UNNEEDED,
 				       struct json_stream *response)
 
 { fprintf(stderr, "command_success called!\n"); abort(); }
+/* Generated stub for commit_tx_boost */
+bool commit_tx_boost(struct channel *channel UNNEEDED,
+		     const struct bitcoin_tx **tx UNNEEDED,
+		     struct anchor_details *adet UNNEEDED)
+{ fprintf(stderr, "commit_tx_boost called!\n"); abort(); }
 /* Generated stub for connect_any_cmd_id */
 const char *connect_any_cmd_id(const tal_t *ctx UNNEEDED,
 			       struct lightningd *ld UNNEEDED, const struct peer *peer UNNEEDED)
@@ -171,6 +178,11 @@ void connect_succeeded(struct lightningd *ld UNNEEDED, const struct peer *peer U
 		       bool incoming UNNEEDED,
 		       const struct wireaddr_internal *addr UNNEEDED)
 { fprintf(stderr, "connect_succeeded called!\n"); abort(); }
+/* Generated stub for create_anchor_details */
+struct anchor_details *create_anchor_details(const tal_t *ctx UNNEEDED,
+					     struct channel *channel UNNEEDED,
+					     const struct bitcoin_tx *tx UNNEEDED)
+{ fprintf(stderr, "create_anchor_details called!\n"); abort(); }
 /* Generated stub for db_begin_transaction_ */
 void db_begin_transaction_(struct db *db UNNEEDED, const char *location UNNEEDED)
 { fprintf(stderr, "db_begin_transaction_ called!\n"); abort(); }
@@ -180,8 +192,6 @@ void db_commit_transaction(struct db *db UNNEEDED)
 /* Generated stub for delete_channel */
 void delete_channel(struct channel *channel STEALS UNNEEDED)
 { fprintf(stderr, "delete_channel called!\n"); abort(); }
-/* Generated stub for deprecated_apis */
-bool deprecated_apis;
 /* Generated stub for encode_scriptpubkey_to_addr */
 char *encode_scriptpubkey_to_addr(const tal_t *ctx UNNEEDED,
 				  const struct chainparams *chainparams UNNEEDED,
@@ -303,7 +313,8 @@ bool htlc_is_trimmed(enum side htlc_owner UNNEEDED,
 		     u32 feerate_per_kw UNNEEDED,
 		     struct amount_sat dust_limit UNNEEDED,
 		     enum side side UNNEEDED,
-		     bool option_anchor_outputs UNNEEDED)
+		     bool option_anchor_outputs UNNEEDED,
+		     bool option_anchors_zero_fee_htlc_tx UNNEEDED)
 { fprintf(stderr, "htlc_is_trimmed called!\n"); abort(); }
 /* Generated stub for htlc_max_possible_send */
 struct amount_msat htlc_max_possible_send(const struct channel *channel UNNEEDED)
