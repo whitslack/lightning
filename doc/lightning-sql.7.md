@@ -178,6 +178,7 @@ The following tables are currently supported:
   - `received_time` (type `number`, sqltype `REAL`)
   - `out_channel` (type `short_channel_id`, sqltype `TEXT`)
   - `out_htlc_id` (type `u64`, sqltype `INTEGER`)
+  - `payment_hash` (type `hex`, sqltype `BLOB`)
   - `style` (type `string`, sqltype `TEXT`)
   - `fee_msat` (type `msat`, sqltype `INTEGER`)
   - `out_msat` (type `msat`, sqltype `INTEGER`)
@@ -505,4 +506,4 @@ RESOURCES
 ---------
 
 Main web site: <https://github.com/ElementsProject/lightning>
-[comment]: # ( SHA256STAMP:3eb4e024a1e1a4b40460b48b835354514456558797b8f8ce3c76dcbb9ca79dab)
+[comment]: # ( SHA256STAMP:3cb366d8ab200731c1254bcb1fae2ff2c0e500852cd1e1c6c3aecc423861af71)
