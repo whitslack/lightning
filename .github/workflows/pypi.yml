@@ -25,6 +25,8 @@ jobs:
             WORKDIR: contrib/pyln-testing
           - PACKAGE: pyln-proto
             WORKDIR: contrib/pyln-proto
+          - PACKAGE: pyln-grpc-proto
+            WORKDIR: contrib/pyln-grpc-proto
           # Bolt packages are handled differently
           #- PACKAGE: pyn-bolt1
           #  WORKDIR: contrib/pyln-spec/bolt1/
@@ -41,10 +43,10 @@ jobs:
         # Need to fetch entire history in order to locate the version tag
         fetch-depth: 0
 
-    - name: Set up Python 3.7
+    - name: Set up Python 3.8
       uses: actions/setup-python@v1
       with:
-        python-version: 3.7
+        python-version: 3.8
 
     - name: Install pypa/build and poetry
       run: >-
@@ -82,5 +84,4 @@ jobs:
         cd ${{ env.WORKDIR}}
         export VERSION=$(git describe --abbrev=0)
         make upgrade-version NEW_VERSION=$VERSION
-        poetry config repositories.testpypi https://test.pypi.org/legacy/
-        poetry publish --repository testpypi --no-interaction
+        poetry publish --no-interaction

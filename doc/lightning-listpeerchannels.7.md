@@ -29,13 +29,14 @@ On success, an object containing **channels** is returned.  It is an array of ob
 - **state** (string): the channel state, in particular "CHANNELD\_NORMAL" means the channel can be used normally (one of "OPENINGD", "CHANNELD\_AWAITING\_LOCKIN", "CHANNELD\_NORMAL", "CHANNELD\_SHUTTING\_DOWN", "CLOSINGD\_SIGEXCHANGE", "CLOSINGD\_COMPLETE", "AWAITING\_UNILATERAL", "FUNDING\_SPEND\_SEEN", "ONCHAIN", "DUALOPEND\_OPEN\_INIT", "DUALOPEND\_AWAITING\_LOCKIN")
 - **opener** (string): Who initiated the channel (one of "local", "remote")
 - **features** (array of strings):
-  - BOLT #9 features which apply to this channel (one of "option\_static\_remotekey", "option\_anchor\_outputs", "option\_scid\_alias", "option\_zeroconf")
+  - BOLT #9 features which apply to this channel (one of "option\_static\_remotekey", "option\_anchor\_outputs", "option\_anchors\_zero\_fee\_htlc\_tx", "option\_scid\_alias", "option\_zeroconf")
 - **scratch\_txid** (txid, optional): The txid we would use if we went onchain now
 - **channel\_type** (object, optional): channel\_type as negotiated with peer *(added v23.05)*:
   - **bits** (array of u32s): Each bit set in this channel\_type:
     - Bit number
   - **names** (array of strings): Feature name for each bit set in this channel\_type:
     - Name of feature bit (one of "static\_remotekey/even", "anchor\_outputs/even", "anchors\_zero\_fee\_htlc\_tx/even", "scid\_alias/even", "zeroconf/even")
+- **ignore\_fee\_limits** (boolean, optional): set if we allow this peer to set fees to anything they want *(added v23.08)*
 - **feerate** (object, optional): Feerates for the current tx:
   - **perkw** (u32): Feerate per 1000 weight (i.e kSipa)
   - **perkb** (u32): Feerate per 1000 virtual bytes
@@ -56,7 +57,7 @@ On success, an object containing **channels** is returned.  It is an array of ob
   - **our\_funding\_msat** (msat): amount we have in the channel
   - **scratch\_txid** (txid): The commitment transaction txid we would use if we went onchain now
 - **close\_to** (hex, optional): scriptPubkey which we have to close to if we mutual close
-- **private** (boolean, optional): if False, we will not announce this channel
+- **private** (boolean, optional): if True, we will not announce this channel
 - **closer** (string, optional): Who initiated the channel close (only present if closing) (one of "local", "remote")
 - **funding** (object, optional):
   - **local\_funds\_msat** (msat): Amount of channel we funded
@@ -194,4 +195,4 @@ Main web site: <https://github.com/ElementsProject/lightning> Lightning
 RFC site (BOLT \#9):
 <https://github.com/lightningnetwork/lightning-rfc/blob/master/09-features.md>
 
-[comment]: # ( SHA256STAMP:005c109a25f91eabf18e2003a4c83e305ca6b4a604999ceeef6ca3f0ee4b0006)
+[comment]: # ( SHA256STAMP:1f434471983a8224f18c5f5c27f534ea1f01b7e585bee76afb10c039570e4e4b)

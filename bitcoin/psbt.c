@@ -4,6 +4,7 @@
 #include <bitcoin/psbt.h>
 #include <bitcoin/pubkey.h>
 #include <bitcoin/script.h>
+#include <bitcoin/varint.h>
 #include <ccan/ccan/array_size/array_size.h>
 #include <ccan/ccan/mem/mem.h>
 #include <ccan/tal/str/str.h>
@@ -214,13 +215,9 @@ struct wally_psbt_output *psbt_append_output(struct wally_psbt *psbt,
 					     const u8 *script,
 					     struct amount_sat amount)
 {
-	struct wally_psbt_output *out;
-	struct wally_tx_output *tx_out = wally_tx_output(NULL, script, amount);
-
-	out = psbt_add_output(psbt, tx_out, psbt->tx->num_outputs);
-	wally_tx_output_free(tx_out);
-	return out;
+	return psbt_insert_output(psbt, script, amount, psbt->tx->num_outputs);
 }
+
 struct wally_psbt_output *psbt_insert_output(struct wally_psbt *psbt,
 					     const u8 *script,
 					     struct amount_sat amount,
@@ -483,12 +480,12 @@ static void add_type(u8 **key, const u8 num)
 	add(key, &num, 1);
 }
 
-static void add_varint(u8 **key, size_t val)
+void add_varint(u8 **arr, size_t val)
 {
 	u8 vt[VARINT_MAX_LEN];
 	size_t vtlen;
 	vtlen = varint_put(vt, val);
-	add(key, vt, vtlen);
+	tal_expand(arr, vt, vtlen);
 }
 
 #define LIGHTNING_PROPRIETARY_PREFIX "lightning"
@@ -611,15 +608,18 @@ bool psbt_finalize(struct wally_psbt *psbt)
 	tal_wally_start();
 
 	/* Wally doesn't know how to finalize P2WSH; this happens with
-	 * option_anchor_outputs, and finalizing is trivial. */
+	 * option_anchor_outputs, and finalizing those two cases is trivial. */
 	/* FIXME: miniscript! miniscript! miniscript! */
 	for (size_t i = 0; i < psbt->num_inputs; i++) {
 		struct wally_psbt_input *input = &psbt->inputs[i];
 		struct wally_tx_witness_stack *stack;
 
 		if (!is_to_remote_anchored_witness_script(input->witness_script,
-					      input->witness_script_len))
+					      input->witness_script_len)
+		    && !is_anchor_witness_script(input->witness_script,
+						 input->witness_script_len)) {
 			continue;
+		}
 
 		if (input->signatures.num_items != 1)
 			continue;
@@ -638,6 +638,19 @@ bool psbt_finalize(struct wally_psbt *psbt)
 		 *
 		 *    <remote_sig>
 		 */
+		/* BOLT #3:
+		 * #### `to_local_anchor` and `to_remote_anchor` Output (option_anchors)
+		 *...
+		 *    <local_funding_pubkey/remote_funding_pubkey> OP_CHECKSIG OP_IFDUP
+		 *    OP_NOTIF
+		 *        OP_16 OP_CHECKSEQUENCEVERIFY
+		 *    OP_ENDIF
+		 *...
+		 * Spending of the output requires the following witness:
+		 *     <local_sig/remote_sig>
+		 */
+
+		/* i.e. in both cases, this is the same thing */
 		wally_tx_witness_stack_init_alloc(2, &stack);
 		wally_tx_witness_stack_add(stack,
 					   input->signatures.items[0].value,
@@ -646,6 +659,7 @@ bool psbt_finalize(struct wally_psbt *psbt)
 					   input->witness_script,
 					   input->witness_script_len);
 		wally_psbt_input_set_final_witness(input, stack);
+		wally_tx_witness_stack_free(stack);
 	}
 
 	ok = (wally_psbt_finalize(psbt) == WALLY_OK);

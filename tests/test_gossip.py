@@ -14,6 +14,7 @@ import logging
 import math
 import os
 import pytest
+import re
 import struct
 import subprocess
 import time
@@ -117,11 +118,10 @@ def test_announce_address(node_factory, bitcoind):
     """Make sure our announcements are well formed."""
 
     # We do not allow announcement of duplicates.
-    opts = {'announce-addr-dns': True,
-            'announce-addr':
+    opts = {'announce-addr':
             ['4acth47i6kxnvkewtm6q7ib2s3ufpo5sqbsnzjpbi7utijcltosqemad.onion',
              '1.2.3.4:1234',
-             'example.com:1236',
+             'dns:example.com:1236',
              '::'],
             'log-level': 'io',
             'dev-allow-localhost': None}
@@ -202,8 +202,7 @@ def test_announce_and_connect_via_dns(node_factory, bitcoind):
         - 'dev-allow-localhost' must not be set, so it does not resolve localhost anyway.
     """
     opts1 = {'disable-dns': None,
-             'announce-addr-dns': True,
-             'announce-addr': ['localhost.localdomain:12345'],  # announce dns
+             'announce-addr': ['dns:localhost.localdomain:12345'],  # announce dns
              'bind-addr': ['127.0.0.1:12345', '[::1]:12345']}   # and bind local IPs
     opts3 = {'may_reconnect': True}
     opts4 = {'disable-dns': None}
@@ -252,8 +251,7 @@ def test_announce_and_connect_via_dns(node_factory, bitcoind):
 def test_only_announce_one_dns(node_factory, bitcoind):
     # and test that we can't announce more than one DNS address
     l1 = node_factory.get_node(expect_fail=True, start=False,
-                               options={'announce-addr-dns': True,
-                                        'announce-addr': ['localhost.localdomain:12345', 'example.com:12345']})
+                               options={'announce-addr': ['dns:localhost.localdomain:12345', 'dns:example.com:12345']})
     l1.daemon.start(wait_for_initialized=False, stderr_redir=True)
     wait_for(lambda: l1.daemon.is_in_stderr("Only one DNS can be announced"))
 
@@ -262,7 +260,7 @@ def test_announce_dns_without_port(node_factory, bitcoind):
     """ Checks that the port of a DNS announcement is set to the corresponding
         network port. In this case regtest 19846
     """
-    opts = {'announce-addr-dns': True, 'announce-addr': ['example.com']}
+    opts = {'announce-addr': ['dns:example.com']}
     l1 = node_factory.get_node(options=opts)
 
     # 'address': [{'type': 'dns', 'address': 'example.com', 'port': 0}]
@@ -699,8 +697,10 @@ def test_routing_gossip(node_factory, bitcoind):
     # openchannel calls fundwallet which mines a block; so first channel
     # is 4 deep, last is unconfirmed.
 
-    # Allow announce messages.
-    mine_funding_to_announce(bitcoind, nodes, num_blocks=6, wait_for_mempool=1)
+    # Allow announce messages, but don't run too fast, otherwise gossip can be in the future for nodes.
+    sync_blockheight(bitcoind, nodes)
+    bitcoind.generate_block(wait_for_mempool=1)
+    mine_funding_to_announce(bitcoind, nodes)
 
     # Deep check that all channels are in there
     comb = []
@@ -1384,9 +1384,10 @@ def test_gossipwith(node_factory):
                          check=True,
                          timeout=TIMEOUT, stdout=subprocess.PIPE).stdout
 
-    num_msgs = 0
+    msgs = set()
     while len(out):
         l, t = struct.unpack('>HH', out[0:4])
+        msg = out[2:2 + l]
         out = out[2 + l:]
 
         # Ignore pings, timestamp_filter
@@ -1394,10 +1395,11 @@ def test_gossipwith(node_factory):
             continue
         # channel_announcement node_announcement or channel_update
         assert t == 256 or t == 257 or t == 258
-        num_msgs += 1
+        msgs.add(msg)
 
     # one channel announcement, two channel_updates, two node announcements.
-    assert num_msgs == 7
+    # due to initial blast, we can have duplicates!
+    assert len(msgs) == 5
 
 
 def test_gossip_notices_close(node_factory, bitcoind):
@@ -1772,9 +1774,14 @@ def test_gossip_store_compact_on_load(node_factory, bitcoind):
 
     l2.restart()
 
-    wait_for(lambda: l2.daemon.is_in_log(r'gossip_store_compact_offline: [5-8] deleted, 9 copied'))
+    # These appear before we're fully started, so will already in log:
+    line = l2.daemon.is_in_log(r'gossip_store_compact_offline: .* deleted, 9 copied')
+    m = re.search(r'gossip_store_compact_offline: (.*) deleted', line)
+    # We can have private re-tranmissions, but at minumum we had a deleted private
+    # channel message and two private updates, then two deleted updates.
+    assert int(m.group(1)) >= 5
 
-    wait_for(lambda: l2.daemon.is_in_log(r'gossip_store: Read 2/4/2/0 cannounce/cupdate/nannounce/cdelete from store \(0 deleted\) in [0-9]* bytes'))
+    assert l2.daemon.is_in_log(r'gossip_store: Read 2/4/2/0 cannounce/cupdate/nannounce/cdelete from store \(0 deleted\) in [0-9]* bytes')
 
 
 def test_gossip_announce_invalid_block(node_factory, bitcoind):
@@ -1998,7 +2005,7 @@ def check_socket(ip_addr, port):
 
 
 @pytest.mark.developer("needs a running Tor service instance at port 9151 or 9051")
-def test_statictor_onions(node_factory):
+def test_static_tor_onions(node_factory):
     """First basic tests ;-)
 
     Assume that tor is configured and just test
@@ -2033,7 +2040,7 @@ def test_statictor_onions(node_factory):
 
 
 @pytest.mark.developer("needs a running Tor service instance at port 9151 or 9051")
-def test_torport_onions(node_factory):
+def test_tor_port_onions(node_factory):
     """First basic tests for torport ;-)
 
     Assume that tor is configured and just test
@@ -2227,6 +2234,51 @@ def test_gossip_private_updates(node_factory, bitcoind):
     wait_for(lambda: l1.daemon.is_in_log(r'gossip_store_compact_offline: 5 deleted, 3 copied'))
 
 
+def test_gossip_not_dying(node_factory, bitcoind):
+    l1 = node_factory.get_node()
+    l2, l3 = node_factory.line_graph(2, wait_for_announce=True)
+
+    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
+    # Wait until it sees all the updates, node announcments.
+    wait_for(lambda: len([n for n in l1.rpc.listnodes()['nodes'] if 'alias' in n])
+             + len(l1.rpc.listchannels()['channels']) == 4)
+
+    def get_gossip(node):
+        out = subprocess.run(['devtools/gossipwith',
+                              '--initial-sync',
+                              '--timeout-after=2',
+                              '{}@localhost:{}'.format(node.info['id'], node.port)],
+                             check=True,
+                             timeout=TIMEOUT, stdout=subprocess.PIPE).stdout
+
+        msgs = []
+        while len(out):
+            l, t = struct.unpack('>HH', out[0:4])
+            msg = out[2:2 + l]
+            out = out[2 + l:]
+
+            # Ignore pings, timestamp_filter
+            if t == 265 or t == 18:
+                continue
+            # channel_announcement node_announcement or channel_update
+            assert t == 256 or t == 257 or t == 258
+            msgs.append(msg)
+
+        return msgs
+
+    assert len(get_gossip(l1)) == 5
+
+    # Close l2->l3, mine block.
+    l2.rpc.close(l3.info['id'])
+    bitcoind.generate_block(1, wait_for_mempool=1)
+
+    l1.daemon.wait_for_log("closing soon due to the funding outpoint being spent")
+
+    # We won't gossip the dead channel any more (but we still propagate node_announcement).  But connectd is not explicitly synced, so wait for "a bit".
+    time.sleep(1)
+    assert len(get_gossip(l1)) == 2
+
+
 @pytest.mark.skip("Zombie research had unexpected side effects")
 @pytest.mark.developer("Needs --dev-fast-gossip, --dev-fast-gossip-prune")
 def test_channel_resurrection(node_factory, bitcoind):
@@ -2294,3 +2346,133 @@ def test_channel_resurrection(node_factory, bitcoind):
     for l in gs.stdout.decode().splitlines():
         if "ZOMBIE" in l:
             assert ("DELETED" in l)
+
+
+def test_dump_own_gossip(node_factory):
+    """We *should* send all self-related gossip unsolicited, if we have any"""
+    l1, l2 = node_factory.line_graph(2, wait_for_announce=True)
+
+    # Make sure l1 has updates in both directions, and node_announcements
+    wait_for(lambda: len(l1.rpc.listchannels()['channels']) == 2)
+    wait_for(lambda: len(l1.rpc.listnodes()['nodes']) == 2)
+
+    # We should get channel_announcement, channel_update, node_announcement.
+    # (Plus random pings, timestamp_filter)
+    out = subprocess.run(['devtools/gossipwith',
+                          '--timeout-after={}'.format(int(math.sqrt(TIMEOUT) + 1)),
+                          '{}@localhost:{}'.format(l1.info['id'], l1.port)],
+                         check=True,
+                         timeout=TIMEOUT, stdout=subprocess.PIPE).stdout
+
+    # In theory, we could do the node_announcement any time after channel_announcement, but we don't.
+    expect = [256,  # channel_announcement
+              258,  # channel_update
+              258,  # channel_update
+              257]  # node_announcement
+
+    while len(out):
+        l, t = struct.unpack('>HH', out[0:4])
+        out = out[2 + l:]
+
+        # Ignore pings, timestamp_filter
+        if t == 265 or t == 18:
+            continue
+
+        assert t == expect[0]
+        expect = expect[1:]
+
+    # We should get exactly what we expected.
+    assert expect == []
+
+
+@pytest.mark.developer("needs --dev-gossip-time")
+@unittest.skipIf(
+    TEST_NETWORK != 'regtest',
+    "Channel announcement contains genesis hash, receiving node discards on mismatch"
+)
+def test_read_spam_nannounce(node_factory, bitcoind):
+    """issue #6531 lead to a node announcement not being deleted from
+    the gossip_store."""
+    """broadcastable and spam node announcements should be loaded properly when
+    reading the gossip_store - even when they are both pending a channel
+    update."""
+    opts = {'dev-gossip-time': 1691773540}
+    l1 = node_factory.get_node(start=False, opts=opts)
+    canned_store = (
+        "0c"        # Gossip store version byte
+        "0000"      # length flags
+        "01b0"      # length
+        "d163af25"  # checksum
+        "64d66a3a"  # timestamp
+        # Channel announcement
+        "010000335733f5942df5d950eb8766dee3a9d6626922844ed6ae7a110dd7e7edc32e3f6f3d9ac5cdea23ce25bb8dbf761fd3d5fc56c05b6856316d12e9d32ca0f08c69ca0306fe716e7b5151317d6440b7373d9fbc646ead48f2163f2b6d511afe6a79c75551c2620fc80974f2f864329d9778a08cdfbc9f2c9c1344c432702c66807cfb4db69b80fae8c33c70143d948b36614d620891bee2df99c86bc62207c17e3b9186214c0ccff2ded5598accc90eb1d5b2f7a83cd7f68d712ea047d8019f343063b0a236356a387146f58fa832ddc13c4714522cbb503f5f3ca8fcec6602be2438ad3f98fa0ceed58fe3a066d385fcacd98c704b2a8e98a3e20bf76b35b736000006226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f0000670000010000022d223620a359a47ff7f7ac447c85c46c923da53389221a0054c11c1e3ca31d59035d2b1192dfba134e10e540875d366ebc8bc353d5aa766b80c090b39c3a5d885d029053521d6ea7a52cdd55f733d0fb2d077c0373b0053b5b810d927244061b757302d6063d022691b2490ab454dee73a57c6ff5d308352b461ece69f3c284f2c2412"
+        # Channel Amount
+        "0000000a911183f600000000"
+        "100500000000000f4240"
+        # broadcastable node announcement (rgb=000001)
+        "0000009533d9cf8c64d66a44"
+        "010108f4e25debdd74d0f52b7f1da5dbd82f429d057f48e3d2ed49fcc65cfe3e185c086c1a83d8f3bb15dc0cc852d80390c24cd1fe6d288b91eb55cf98c4a9baf7c0000788a0000a0269a264d66a44022d223620a359a47ff7f7ac447c85c46c923da53389221a0054c11c1e3ca31d5900000153494c454e544152544953542d3536392d67303030643963302d6d6f646465640000"
+        # Rate-limited node announcment (rgb=000002)
+        "2000009519aa897a64d66a49"
+        "0101685f67556cd0a87e04c6d1e9daa4e31dcf14f881d6f1231b1bee8adf6666977b6b9baa497e91d2b6daae726cde69e3faf924d9c95d0ca6b374d6693d4fc0d648000788a0000a0269a264d66a49022d223620a359a47ff7f7ac447c85c46c923da53389221a0054c11c1e3ca31d5900000253494c454e544152544953542d3536392d67303030643963302d6d6f646465640000"
+        # Channel Update
+        "0000008a0234021c64d66a61"
+        "010242ce9d9e79f939399ea1291c04fffcafdfa911246464a4b48c16b7b816dd57b4168562a6c519eb31c37718b68bdfc6345d7c2db663b8b04a3558ce7736c5b61706226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f000067000001000064d66a6101000006000000000000000000000015000003e8000000003b023380"
+        # Channel Update
+        "0000008acd55fcb264d66a61"
+        "01023f5dd1f69f675a71d2a7a34956b26f12c4fe9ee287a8449a3eb7b756c583e3bb1334a8eb7c3e148d0f43e08b95c50017ba62da9a7843fe4850a3cb3c74dc5e2c06226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f000067000001000064d66a6101010006000000000000000000000015000003e8000000003b023380"
+    )
+    with open(os.path.join(l1.daemon.lightning_dir, TEST_NETWORK, 'gossip_store'), 'wb') as f:
+        f.write(bytearray.fromhex(canned_store))
+
+    bitcoind.generate_block(1)
+    tx = bitcoind.rpc.createrawtransaction(
+        [],
+        [
+            # Fundrawtransaction will fill in the first output with the change
+            {"bcrt1qpd7nwe3jrt07st89uy82nn2xrmqtxyzqpty5ygt6w546lf6n0wcskswjvh": 0.01000000}
+        ]
+    )
+    tx = bitcoind.rpc.fundrawtransaction(tx, {'changePosition': 0})['hex']
+    tx = bitcoind.rpc.signrawtransactionwithwallet(tx)['hex']
+    txid = bitcoind.rpc.sendrawtransaction(tx)
+    wait_for(lambda: txid in bitcoind.rpc.getrawmempool())
+    bitcoind.generate_block(6)
+    l1.start()
+    # retrieves node info originating from the spam announcement
+    node_info = l1.rpc.listnodes('022d223620a359a47ff7f7ac447c85c46c923da53389221a0054c11c1e3ca31d59')
+    assert only_one(node_info['nodes'])['color'] == '000002'
+
+    out = subprocess.run(['devtools/gossipwith',
+                          '--initial-sync',
+                          '--timeout-after={}'.format(int(math.sqrt(TIMEOUT) + 1)),
+                          '--hex',
+                          '{}@localhost:{}'.format(l1.info['id'], l1.port)],
+                         check=True,
+                         timeout=TIMEOUT, stdout=subprocess.PIPE).stdout.decode()
+
+    received_broadcastable = False
+    received_spam = False
+    for message in out.splitlines():
+        gos = subprocess.run(['devtools/decodemsg', message], check=True,
+                             timeout=TIMEOUT,
+                             stdout=subprocess.PIPE).stdout.decode()
+
+        for line in gos.splitlines():
+            if 'rgb_color=[000001]' in line:
+                received_broadcastable = True
+            if 'rgb_color=[000002]' in line:
+                received_spam = True
+
+    assert received_broadcastable
+    assert not received_spam
+    # Send a new node announcement. It should replace both.
+    subprocess.run(['devtools/gossipwith',
+                    '--max-messages=0',
+                    '{}@localhost:{}'.format(l1.info['id'], l1.port),
+                    # color=000003
+                    '0101273fd2c58deb4c3bd98610079657219a5c8291d6a85c3607eae895f25e08babd6e45edd1e62f719b20526ed1c8fc3c7d9e7e3fafa4f24e4cb64872d041a13503000788a0000a0269a264d66a4e022d223620a359a47ff7f7ac447c85c46c923da53389221a0054c11c1e3ca31d5900000353494c454e544152544953542d3536392d67303030643963302d6d6f646465640000'],
+                   check=True, timeout=TIMEOUT)
+    l1.daemon.wait_for_log('Received node_announcement')
+    l1.restart()
+    assert not l1.daemon.is_in_log('BROKEN')

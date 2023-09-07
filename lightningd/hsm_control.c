@@ -24,12 +24,12 @@
 static int hsm_get_fd(struct lightningd *ld,
 		      const struct node_id *id,
 		      u64 dbid,
-		      int capabilities)
+		      u64 permissions)
 {
 	int hsm_fd;
 	const u8 *msg;
 
-	msg = towire_hsmd_client_hsmfd(NULL, id, dbid, capabilities);
+	msg = towire_hsmd_client_hsmfd(NULL, id, dbid, permissions);
 	msg = hsm_sync_req(tmpctx, ld, take(msg));
 	if (!fromwire_hsmd_client_hsmfd_reply(msg))
 		fatal("Bad reply from HSM: %s", tal_hex(tmpctx, msg));
@@ -43,16 +43,16 @@ static int hsm_get_fd(struct lightningd *ld,
 int hsm_get_client_fd(struct lightningd *ld,
 		      const struct node_id *id,
 		      u64 dbid,
-		      int capabilities)
+		      u64 permissions)
 {
 	assert(dbid);
 
-	return hsm_get_fd(ld, id, dbid, capabilities);
+	return hsm_get_fd(ld, id, dbid, permissions);
 }
 
-int hsm_get_global_fd(struct lightningd *ld, int capabilities)
+int hsm_get_global_fd(struct lightningd *ld, u64 permissions)
 {
-	return hsm_get_fd(ld, &ld->id, 0, capabilities);
+	return hsm_get_fd(ld, &ld->id, 0, permissions);
 }
 
 static unsigned int hsm_msg(struct subd *hsmd,
@@ -158,6 +158,12 @@ struct ext_key *hsm_init(struct lightningd *ld)
 	for (size_t i = 0; i < tal_count(ld->hsm_capabilities); i++) {
 		log_debug(ld->hsm->log, "capability +%s",
 			  hsmd_wire_name(ld->hsm_capabilities[i]));
+	}
+
+	if (feature_offered(ld->our_features->bits[INIT_FEATURE],
+			    OPT_ANCHORS_ZERO_FEE_HTLC_TX)
+	    && !hsm_capable(ld, WIRE_HSMD_SIGN_ANCHORSPEND)) {
+		fatal("--experimental-anchors needs HSM capable of signing anchors!");
 	}
 
 	/* This is equivalent to makesecret("bolt12-invoice-base") */

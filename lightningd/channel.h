@@ -108,7 +108,7 @@ struct channel {
 	struct subd *owner;
 
 	/* History */
-	struct log *log;
+	struct logger *log;
 	struct billboard billboard;
 
 	/* Channel flags from opening message. */
@@ -264,6 +264,9 @@ struct channel {
 	/* `Channel-shell` of this channel
 	 * (Minimum information required to backup this channel). */
 	struct scb_chan *scb;
+
+	/* Do we allow the peer to set any fee it wants? */
+	bool ignore_fee_limits;
 };
 
 bool channel_is_connected(const struct channel *channel);
@@ -281,7 +284,7 @@ struct channel *new_channel(struct peer *peer, u64 dbid,
 			    enum channel_state state,
 			    enum side opener,
 			    /* NULL or stolen */
-			    struct log *log STEALS,
+			    struct logger *log STEALS,
 			    const char *transient_billboard TAKES,
 			    u8 channel_flags,
 			    const struct channel_config *our_config,
@@ -338,7 +341,8 @@ struct channel *new_channel(struct peer *peer, u64 dbid,
 			    u32 lease_chan_max_msat,
 			    u16 lease_chan_max_ppt,
 			    struct amount_msat htlc_minimum_msat,
-			    struct amount_msat htlc_maximum_msat);
+			    struct amount_msat htlc_maximum_msat,
+			    bool ignore_fee_limits);
 
 /* new_inflight - Create a new channel_inflight for a channel */
 struct channel_inflight *
@@ -432,6 +436,10 @@ struct channel *find_channel_by_scid(const struct peer *peer,
 struct channel *find_channel_by_alias(const struct peer *peer,
 				      const struct short_channel_id *alias,
 				      enum side side);
+
+/* Do we have any channel with option_anchors_zero_fee_htlc_tx?  (i.e. we
+ * might need to CPFP the fee if it force closes!) */
+bool have_anchor_channel(struct lightningd *ld);
 
 void channel_set_last_tx(struct channel *channel,
 			 struct bitcoin_tx *tx,

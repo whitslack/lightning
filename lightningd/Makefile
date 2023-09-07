@@ -1,6 +1,7 @@
 #! /usr/bin/make
 
 LIGHTNINGD_SRC :=				\
+	lightningd/anchorspend.c		\
 	lightningd/bitcoind.c			\
 	lightningd/chaintopology.c		\
 	lightningd/channel.c			\
@@ -40,6 +41,7 @@ LIGHTNINGD_SRC :=				\
 	lightningd/watch.c
 
 LIGHTNINGD_SRC_NOHDR :=				\
+	lightningd/configs.c			\
 	lightningd/datastore.c			\
 	lightningd/ping.c			\
 	lightningd/offer.c			\
@@ -80,11 +82,13 @@ LIGHTNINGD_COMMON_OBJS :=			\
 	common/bolt11_json.o			\
 	common/bolt12.o				\
 	common/bolt12_merkle.o			\
+	common/codex32.o			\
 	common/channel_config.o			\
 	common/channel_id.o			\
 	common/channel_type.o			\
 	common/coin_mvt.o			\
 	common/configdir.o			\
+	common/configvar.o			\
 	common/daemon.o				\
 	common/derive_basepoints.o		\
 	common/ecdh_hsmd.o			\
@@ -128,6 +132,7 @@ LIGHTNINGD_COMMON_OBJS :=			\
 	common/sphinx.o				\
 	common/status_wire.o			\
 	common/timeout.o			\
+	common/trace.o				\
 	common/tx_roles.o			\
 	common/type_to_string.o			\
 	common/utils.o				\

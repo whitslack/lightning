@@ -83,12 +83,15 @@ MANPAGES := doc/lightning-cli.1 \
 	doc/lightning-preapproveinvoice.7 \
 	doc/lightning-preapprovekeysend.7 \
 	doc/lightning-recoverchannel.7 \
+	doc/lightning-renepay.7 \
+	doc/lightning-renepaystatus.7 \
 	doc/lightning-reserveinputs.7 \
 	doc/lightning-sendinvoice.7 \
 	doc/lightning-sendonion.7 \
 	doc/lightning-sendonionmessage.7 \
 	doc/lightning-sendpay.7 \
 	doc/lightning-setchannel.7 \
+	doc/lightning-setconfig.7 \
 	doc/lightning-sendcustommsg.7 \
 	doc/lightning-signinvoice.7 \
 	doc/lightning-signmessage.7 \

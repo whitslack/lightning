@@ -139,7 +139,6 @@ struct peer {
 	/* If master told us to send wrong_funding */
 	struct bitcoin_outpoint *shutdown_wrong_funding;
 
-#if EXPERIMENTAL_FEATURES
 	/* Do we want quiescence? */
 	bool stfu;
 	/* Which side is considered the initiator? */
@@ -148,7 +147,6 @@ struct peer {
 	bool stfu_sent[NUM_SIDES];
 	/* Updates master asked, which we've deferred while quiescing */
 	struct msg_queue *update_queue;
-#endif
 
 #if DEVELOPER
 	/* If set, don't fire commit counter when this hits 0 */
@@ -196,6 +194,9 @@ struct peer {
 
 	/* Most recent channel_update message. */
 	u8 *channel_update;
+
+	/* --experimental-upgrade-protocol */
+	bool experimental_upgrade;
 };
 
 static u8 *create_channel_announcement(const tal_t *ctx, struct peer *peer);
@@ -227,7 +228,6 @@ const u8 *hsm_req(const tal_t *ctx, const u8 *req TAKES)
 	return msg;
 }
 
-#if EXPERIMENTAL_FEATURES
 static void maybe_send_stfu(struct peer *peer)
 {
 	if (!peer->stfu)
@@ -251,6 +251,12 @@ static void handle_stfu(struct peer *peer, const u8 *stfu)
 {
 	struct channel_id channel_id;
 	u8 remote_initiated;
+
+	if (!feature_negotiated(peer->our_features,
+				peer->their_features,
+				OPT_QUIESCE))
+		peer_failed_warn(peer->pps, &peer->channel_id,
+				 "stfu not supported");
 
 	if (!fromwire_stfu(stfu, &channel_id, &remote_initiated))
 		peer_failed_warn(peer->pps, &peer->channel_id,
@@ -341,16 +347,6 @@ static void set_channel_type(struct channel *channel, const u8 *type)
 	wire_sync_write(MASTER_FD,
 			take(towire_channeld_upgraded(NULL, channel->type)));
 }
-#else /* !EXPERIMENTAL_FEATURES */
-static bool handle_master_request_later(struct peer *peer, const u8 *msg)
-{
-	return false;
-}
-
-static void maybe_send_stfu(struct peer *peer)
-{
-}
-#endif
 
 /* Tell gossipd to create channel_update (then it goes into
  * gossip_store, then streams out to peers, or sends it directly if
@@ -651,9 +647,24 @@ static void handle_peer_channel_ready(struct peer *peer, const u8 *msg)
 	billboard_update(peer);
 }
 
+/* Checks that key is valid, and signed this hash
+ *
+ * FIXME: move this inside common/utils.h */
+static bool check_signed_hash_nodeid(const struct sha256_double *hash,
+				     const secp256k1_ecdsa_signature *signature,
+				     const struct node_id *id)
+{
+	struct pubkey key;
+
+	return pubkey_from_node_id(&key, id)
+		&& check_signed_hash(hash, signature, &key);
+}
+
 static void handle_peer_announcement_signatures(struct peer *peer, const u8 *msg)
 {
+	const u8 *cannounce;
 	struct channel_id chanid;
+	struct sha256_double hash;
 
 	if (!fromwire_announcement_signatures(msg,
 					      &chanid,
@@ -673,6 +684,44 @@ static void handle_peer_announcement_signatures(struct peer *peer, const u8 *msg
 				type_to_string(tmpctx, struct channel_id, &chanid));
 	}
 
+	/* BOLT 7:
+	 * - if the node_signature OR the bitcoin_signature is NOT correct:
+	 *  - MAY send a warning and close the connection, or send an error and fail the channel.
+	 *
+	 * In our case, we send an error and stop the open channel procedure. This approach is
+	 * considered overly strict since the peer can recover from it. However, this step is
+	 * optional. If the peer sends it, we assume that the signature must be correct.*/
+	 cannounce = create_channel_announcement(tmpctx, peer);
+
+	/* 2 byte msg type + 256 byte signatures */
+	int offset = 258;
+	sha256_double(&hash, cannounce + offset,
+		       tal_count(cannounce) - offset);
+
+	 if (!check_signed_hash_nodeid(&hash, &peer->announcement_node_sigs[REMOTE], &peer->node_ids[REMOTE])) {
+		peer_failed_warn(peer->pps, &chanid,
+					 "Bad node_signature %s hash %s"
+					 " on announcement_signatures %s",
+					 type_to_string(tmpctx,
+							secp256k1_ecdsa_signature,
+							&peer->announcement_node_sigs[REMOTE]),
+					 type_to_string(tmpctx,
+							struct sha256_double,
+							&hash),
+					 tal_hex(tmpctx, cannounce));
+	}
+	if (!check_signed_hash(&hash, &peer->announcement_bitcoin_sigs[REMOTE], &peer->channel->funding_pubkey[REMOTE])) {
+		peer_failed_warn(peer->pps, &chanid,
+					 "Bad bitcoin_signature %s hash %s"
+					 " on announcement_signatures %s",
+					 type_to_string(tmpctx,
+							secp256k1_ecdsa_signature,
+							&peer->announcement_bitcoin_sigs[REMOTE]),
+					 type_to_string(tmpctx,
+							struct sha256_double,
+							&hash),
+					 tal_hex(tmpctx, cannounce));
+	}
 	peer->have_sigs[REMOTE] = true;
 	billboard_update(peer);
 
@@ -689,20 +738,20 @@ static void handle_peer_add_htlc(struct peer *peer, const u8 *msg)
 	u8 onion_routing_packet[TOTAL_PACKET_SIZE(ROUTING_INFO_SIZE)];
 	enum channel_add_err add_err;
 	struct htlc *htlc;
-	struct tlv_update_add_tlvs *tlvs;
+	struct tlv_update_add_htlc_tlvs *tlvs;
 
 	if (!fromwire_update_add_htlc(msg, msg, &channel_id, &id, &amount,
 				      &payment_hash, &cltv_expiry,
 				      onion_routing_packet, &tlvs)
 	    /* This is an *even* field: don't send if we didn't understand */
-	    || (tlvs->blinding && !feature_offered(peer->our_features->bits[INIT_FEATURE],
-						   OPT_ROUTE_BLINDING))) {
+	    || (tlvs->blinding_point && !feature_offered(peer->our_features->bits[INIT_FEATURE],
+							 OPT_ROUTE_BLINDING))) {
 		peer_failed_warn(peer->pps, &peer->channel_id,
 				 "Bad peer_add_htlc %s", tal_hex(msg, msg));
 	}
 	add_err = channel_add_htlc(peer->channel, REMOTE, id, amount,
 				   cltv_expiry, &payment_hash,
-				   onion_routing_packet, tlvs->blinding, &htlc, NULL,
+				   onion_routing_packet, tlvs->blinding_point, &htlc, NULL,
 				   /* We don't immediately fail incoming htlcs,
 				    * instead we wait and fail them after
 				    * they've been committed */
@@ -974,7 +1023,7 @@ static u8 *master_wait_sync_reply(const tal_t *ctx,
 
 		reply = wire_sync_read(ctx, MASTER_FD);
 		if (!reply)
-			status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			status_failed(STATUS_FAIL_MASTER_IO,
 				      "Could not set sync read from master: %s",
 				      strerror(errno));
 		type = fromwire_peektype(reply);
@@ -1074,9 +1123,8 @@ static struct bitcoin_signature *calc_commitsigs(const tal_t *ctx,
 		wscript = bitcoin_tx_output_get_witscript(tmpctx, txs[0],
 							  txs[i+1]->wtx->inputs[0].index);
 		msg = towire_hsmd_sign_remote_htlc_tx(NULL, txs[i + 1], wscript,
-						     &peer->remote_per_commit,
-						      channel_has(peer->channel,
-								  OPT_ANCHOR_OUTPUTS));
+						      &peer->remote_per_commit,
+						      channel_has_anchors(peer->channel));
 
 		msg = hsm_req(tmpctx, take(msg));
 		if (!fromwire_hsmd_sign_tx_reply(msg, &htlc_sigs[i]))
@@ -1144,11 +1192,10 @@ static bool want_fee_update(const struct peer *peer, u32 *target)
 	if (peer->channel->opener != LOCAL)
 		return false;
 
-#if EXPERIMENTAL_FEATURES
 	/* No fee update while quiescing! */
 	if (peer->stfu)
 		return false;
-#endif
+
 	current = channel_feerate(peer->channel, REMOTE);
 
 	/* max is *approximate*: only take it into account if we're
@@ -1184,11 +1231,10 @@ static bool want_blockheight_update(const struct peer *peer, u32 *height)
 	if (peer->channel->lease_expiry == 0)
 		return false;
 
-#if EXPERIMENTAL_FEATURES
 	/* No fee update while quiescing! */
 	if (peer->stfu)
 		return false;
-#endif
+
 	/* What's the current blockheight */
 	last = get_blockheight(peer->channel->blockheight_states,
 			       peer->channel->opener, LOCAL);
@@ -1605,7 +1651,7 @@ static void handle_peer_commit_sig(struct peer *peer, const u8 *msg)
 	/* SIGHASH_ALL is implied. */
 	commit_sig.sighash_type = SIGHASH_ALL;
 	htlc_sigs = unraw_sigs(tmpctx, raw_sigs,
-			       channel_has(peer->channel, OPT_ANCHOR_OUTPUTS));
+			       channel_has_anchors(peer->channel));
 
 	txs =
 	    channel_txs(tmpctx, &htlc_map, NULL,
@@ -1972,9 +2018,11 @@ static void handle_peer_fail_malformed_htlc(struct peer *peer, const u8 *msg)
 	 *       `error` and fail the channel.
 	 */
 	if (!(failure_code & BADONION)) {
-		peer_failed_warn(peer->pps, &peer->channel_id,
-				 "Bad update_fail_malformed_htlc failure code %u",
-				 failure_code);
+		/* But LND (at least, Bitrefill to Blockstream Store) sends this? */
+		status_unusual("Bad update_fail_malformed_htlc failure code %u",
+			       failure_code);
+		/* We require this internally. */
+		failure_code |= BADONION;
 	}
 
 	e = channel_fail_htlc(peer->channel, LOCAL, id, &htlc);
@@ -2098,7 +2146,7 @@ static void handle_peer_shutdown(struct peer *peer, const u8 *shutdown)
 
 static void handle_unexpected_tx_sigs(struct peer *peer, const u8 *msg)
 {
-	const struct witness_stack **ws;
+	const struct witness **witnesses;
 	struct channel_id cid;
 	struct bitcoin_txid txid;
 
@@ -2106,7 +2154,7 @@ static void handle_unexpected_tx_sigs(struct peer *peer, const u8 *msg)
 	 * This happens when they've/we've exchanged channel_ready,
 	 * but they did not receive our channel_ready. */
 	if (!fromwire_tx_signatures(tmpctx, msg, &cid, &txid,
-				    cast_const3(struct witness_stack ***, &ws)))
+				    cast_const3(struct witness ***, &witnesses)))
 		peer_failed_warn(peer->pps, &peer->channel_id,
 			    "Bad tx_signatures %s",
 			    tal_hex(msg, msg));
@@ -2128,29 +2176,17 @@ static void handle_unexpected_reestablish(struct peer *peer, const u8 *msg)
 	u64 next_revocation_number;
 	struct secret your_last_per_commitment_secret;
 	struct pubkey my_current_per_commitment_point;
-#if EXPERIMENTAL_FEATURES
 	struct tlv_channel_reestablish_tlvs *tlvs;
-#endif
 
-
-	if (!fromwire_channel_reestablish
-#if EXPERIMENTAL_FEATURES
-	    (tmpctx, msg, &channel_id,
-	     &next_commitment_number,
-	     &next_revocation_number,
-	     &your_last_per_commitment_secret,
-	     &my_current_per_commitment_point,
-	     &tlvs)
-#else
-	    (msg, &channel_id,
-	     &next_commitment_number,
-	     &next_revocation_number,
-	     &your_last_per_commitment_secret,
-	     &my_current_per_commitment_point)
-#endif
-		)
+	if (!fromwire_channel_reestablish(tmpctx, msg, &channel_id,
+					  &next_commitment_number,
+					  &next_revocation_number,
+					  &your_last_per_commitment_secret,
+					  &my_current_per_commitment_point,
+					  &tlvs)) {
 		peer_failed_warn(peer->pps, &peer->channel_id,
 				 "Bad channel_reestablish %s", tal_hex(peer, msg));
+	}
 
 	/* Is it the same as the peer channel ID?  */
 	if (channel_id_eq(&channel_id, &peer->channel_id)) {
@@ -2245,12 +2281,9 @@ static void peer_in(struct peer *peer, const u8 *msg)
 	case WIRE_SHUTDOWN:
 		handle_peer_shutdown(peer, msg);
 		return;
-
-#if EXPERIMENTAL_FEATURES
 	case WIRE_STFU:
 		handle_stfu(peer, msg);
 		return;
-#endif
 	case WIRE_INIT:
 	case WIRE_OPEN_CHANNEL:
 	case WIRE_ACCEPT_CHANNEL:
@@ -2416,11 +2449,11 @@ static void resend_commitment(struct peer *peer, struct changed_htlc *last)
 					 last[i].id);
 
 		if (h->state == SENT_ADD_COMMIT) {
-			struct tlv_update_add_tlvs *tlvs;
+			struct tlv_update_add_htlc_tlvs *tlvs;
 			if (h->blinding) {
-				tlvs = tlv_update_add_tlvs_new(tmpctx);
-				tlvs->blinding = tal_dup(tlvs, struct pubkey,
-							 h->blinding);
+				tlvs = tlv_update_add_htlc_tlvs_new(tmpctx);
+				tlvs->blinding_point = tal_dup(tlvs, struct pubkey,
+							       h->blinding);
 			} else
 				tlvs = NULL;
 			msg = towire_update_add_htlc(NULL, &peer->channel_id,
@@ -2663,7 +2696,6 @@ static bool capture_premature_msg(const u8 ***shit_lnd_says, const u8 *msg)
 	return true;
 }
 
-#if EXPERIMENTAL_FEATURES
 /* Unwrap a channel_type into a raw byte array for the wire: can be NULL */
 static u8 *to_bytearr(const tal_t *ctx,
 		      const struct channel_type *channel_type TAKES)
@@ -2683,23 +2715,6 @@ static u8 *to_bytearr(const tal_t *ctx,
 	return ret;
 }
 
-/* This is the no-tlvs version, where we can't handle old tlvs */
-static bool fromwire_channel_reestablish_notlvs(const void *p, struct channel_id *channel_id, u64 *next_commitment_number, u64 *next_revocation_number, struct secret *your_last_per_commitment_secret, struct pubkey *my_current_per_commitment_point)
-{
-	const u8 *cursor = p;
-	size_t plen = tal_count(p);
-
-	if (fromwire_u16(&cursor, &plen) != WIRE_CHANNEL_REESTABLISH)
-		return false;
- 	fromwire_channel_id(&cursor, &plen, channel_id);
- 	*next_commitment_number = fromwire_u64(&cursor, &plen);
- 	*next_revocation_number = fromwire_u64(&cursor, &plen);
- 	fromwire_secret(&cursor, &plen, your_last_per_commitment_secret);
- 	fromwire_pubkey(&cursor, &plen, my_current_per_commitment_point);
-	return cursor != NULL;
-}
-#endif
-
 static void peer_reconnect(struct peer *peer,
 			   const struct secret *last_remote_per_commit_secret,
 			   bool reestablish_only)
@@ -2716,9 +2731,7 @@ static void peer_reconnect(struct peer *peer,
 	struct secret last_local_per_commitment_secret;
 	bool dataloss_protect, check_extra_fields;
 	const u8 **premature_msgs = tal_arr(peer, const u8 *, 0);
-#if EXPERIMENTAL_FEATURES
 	struct tlv_channel_reestablish_tlvs *send_tlvs, *recv_tlvs;
-#endif
 
 	dataloss_protect = feature_negotiated(peer->our_features,
 					      peer->their_features,
@@ -2733,53 +2746,45 @@ static void peer_reconnect(struct peer *peer,
 	get_per_commitment_point(peer->next_index[LOCAL] - 1,
 				 &my_current_per_commitment_point, NULL);
 
-#if EXPERIMENTAL_FEATURES
-	/* Subtle: we free tmpctx below as we loop, so tal off peer */
-	send_tlvs = tlv_channel_reestablish_tlvs_new(peer);
+	if (peer->experimental_upgrade) {
+		/* Subtle: we free tmpctx below as we loop, so tal off peer */
+		send_tlvs = tlv_channel_reestablish_tlvs_new(peer);
 
-	/* FIXME: v0.10.1 would send a different tlv set, due to older spec.
-	 * That did *not* offer OPT_QUIESCE, so in that case don't send tlvs. */
-	if (!feature_negotiated(peer->our_features,
-				peer->their_features,
-				OPT_QUIESCE))
-		goto skip_tlvs;
-
-	/* BOLT-upgrade_protocol #2:
-	 * A node sending `channel_reestablish`, if it supports upgrading channels:
-	 *   - MUST set `next_to_send` the commitment number of the next
-	 *     `commitment_signed` it expects to send.
-	 */
-	send_tlvs->next_to_send = tal_dup(send_tlvs, u64, &peer->next_index[REMOTE]);
-
-	/* BOLT-upgrade_protocol #2:
-	 * - if it initiated the channel:
-	 *   - MUST set `desired_type` to the channel_type it wants for the
-	 *     channel.
-	 */
-	if (peer->channel->opener == LOCAL)
-		send_tlvs->desired_channel_type =
-			to_bytearr(send_tlvs,
-				   take(channel_desired_type(NULL,
-							     peer->channel)));
-	else {
 		/* BOLT-upgrade_protocol #2:
-		 * - otherwise:
-		 *  - MUST set `current_type` to the current channel_type of the
-		 *    channel.
-		 *  - MUST set `upgradable` to the channel types it could change
-		 *    to.
-		 *  - MAY not set `upgradable` if it would be empty.
+		 * A node sending `channel_reestablish`, if it supports upgrading channels:
+		 *   - MUST set `next_to_send` the commitment number of the next
+		 *     `commitment_signed` it expects to send.
 		 */
-		send_tlvs->current_channel_type
-			= to_bytearr(send_tlvs, peer->channel->type);
-		send_tlvs->upgradable_channel_type
-			= to_bytearr(send_tlvs,
-				     take(channel_upgradable_type(NULL,
-								  peer->channel)));
-	}
+		send_tlvs->next_to_send = tal_dup(send_tlvs, u64, &peer->next_index[REMOTE]);
 
-skip_tlvs:
-#endif
+		/* BOLT-upgrade_protocol #2:
+		 * - if it initiated the channel:
+		 *   - MUST set `desired_type` to the channel_type it wants for the
+		 *     channel.
+		 */
+		if (peer->channel->opener == LOCAL) {
+			send_tlvs->desired_channel_type =
+				to_bytearr(send_tlvs,
+					   take(channel_desired_type(NULL,
+								     peer->channel)));
+		} else {
+			/* BOLT-upgrade_protocol #2:
+			 * - otherwise:
+			 *  - MUST set `current_type` to the current channel_type of the
+			 *    channel.
+			 *  - MUST set `upgradable` to the channel types it could change
+			 *    to.
+			 *  - MAY not set `upgradable` if it would be empty.
+			 */
+			send_tlvs->current_channel_type
+				= to_bytearr(send_tlvs, peer->channel->type);
+			send_tlvs->upgradable_channel_type
+				= to_bytearr(send_tlvs,
+					     take(channel_upgradable_type(NULL,
+									  peer->channel)));
+		}
+	} else
+		send_tlvs = NULL;
 
 	/* BOLT #2:
 	 *
@@ -2818,22 +2823,15 @@ skip_tlvs:
 			 peer->revocations_received,
 			 last_remote_per_commit_secret,
 			 /* Can send any (valid) point here */
-			 &peer->remote_per_commit
-#if EXPERIMENTAL_FEATURES
-			 , send_tlvs
-#endif
-				);
+			 &peer->remote_per_commit, send_tlvs);
 	} else {
 		msg = towire_channel_reestablish
 			(NULL, &peer->channel_id,
 			 peer->next_index[LOCAL],
 			 peer->revocations_received,
 			 last_remote_per_commit_secret,
-			 &my_current_per_commitment_point
-#if EXPERIMENTAL_FEATURES
-			 , send_tlvs
-#endif
-				);
+			 &my_current_per_commitment_point,
+			 send_tlvs);
 	}
 
 	peer_write(peer->pps, take(msg));
@@ -2857,53 +2855,22 @@ skip_tlvs:
 	} while (handle_peer_error(peer->pps, &peer->channel_id, msg) ||
 		 capture_premature_msg(&premature_msgs, msg));
 
-#if EXPERIMENTAL_FEATURES
 	/* Initialize here in case we don't read it below! */
 	recv_tlvs = tlv_channel_reestablish_tlvs_new(tmpctx);
 
-	/* FIXME: v0.10.1 would send a different tlv set, due to older spec.
-	 * That did *not* offer OPT_QUIESCE, so in that case ignore tlvs. */
-	if (!feature_negotiated(peer->our_features,
-				peer->their_features,
-				OPT_QUIESCE)) {
-		if (!fromwire_channel_reestablish_notlvs(msg,
-					&channel_id,
-					&next_commitment_number,
-					&next_revocation_number,
-					&last_local_per_commitment_secret,
-					&remote_current_per_commitment_point))
-			peer_failed_warn(peer->pps,
-					 &peer->channel_id,
-					 "bad reestablish msg: %s %s",
-					 peer_wire_name(fromwire_peektype(msg)),
-					 tal_hex(msg, msg));
-	} else if (!fromwire_channel_reestablish(tmpctx, msg,
-						 &channel_id,
-						 &next_commitment_number,
-						 &next_revocation_number,
-						 &last_local_per_commitment_secret,
-						 &remote_current_per_commitment_point,
-						 &recv_tlvs)) {
-			peer_failed_warn(peer->pps,
-					 &peer->channel_id,
-					 "bad reestablish msg: %s %s",
-					 peer_wire_name(fromwire_peektype(msg)),
-					 tal_hex(msg, msg));
-	}
-#else /* !EXPERIMENTAL_FEATURES */
-	if (!fromwire_channel_reestablish(msg,
-					&channel_id,
-					&next_commitment_number,
-					&next_revocation_number,
-					&last_local_per_commitment_secret,
-					  &remote_current_per_commitment_point)) {
+	if (!fromwire_channel_reestablish(tmpctx, msg,
+					  &channel_id,
+					  &next_commitment_number,
+					  &next_revocation_number,
+					  &last_local_per_commitment_secret,
+					  &remote_current_per_commitment_point,
+					  &recv_tlvs)) {
 		peer_failed_warn(peer->pps,
 				 &peer->channel_id,
 				 "bad reestablish msg: %s %s",
 				 peer_wire_name(fromwire_peektype(msg)),
 				 tal_hex(msg, msg));
 	}
-#endif
 
 	if (!channel_id_eq(&channel_id, &peer->channel_id)) {
 		peer_failed_err(peer->pps,
@@ -3081,7 +3048,10 @@ skip_tlvs:
 	/* (If we had sent `closing_signed`, we'd be in closingd). */
 	maybe_send_shutdown(peer);
 
-#if EXPERIMENTAL_FEATURES
+	/* If we didn't send (i.e. don't support!) ignore theirs */
+	if (!send_tlvs)
+		recv_tlvs = tlv_channel_reestablish_tlvs_new(tmpctx);
+
 	if (recv_tlvs->desired_channel_type)
 		status_debug("They sent desired_channel_type [%s]",
 			     fmt_featurebits(tmpctx,
@@ -3160,8 +3130,6 @@ skip_tlvs:
 			set_channel_type(peer->channel, type);
 	}
 	tal_free(send_tlvs);
-
-#endif /* EXPERIMENTAL_FEATURES */
 
 	/* Now stop, we've been polite long enough. */
 	if (reestablish_only) {
@@ -3294,7 +3262,7 @@ static void handle_offer_htlc(struct peer *peer, const u8 *inmsg)
 	const char *failstr;
 	struct amount_sat htlc_fee;
 	struct pubkey *blinding;
-	struct tlv_update_add_tlvs *tlvs;
+	struct tlv_update_add_htlc_tlvs *tlvs;
 
 	if (!peer->channel_ready[LOCAL] || !peer->channel_ready[REMOTE])
 		status_failed(STATUS_FAIL_MASTER_IO,
@@ -3306,8 +3274,8 @@ static void handle_offer_htlc(struct peer *peer, const u8 *inmsg)
 		master_badmsg(WIRE_CHANNELD_OFFER_HTLC, inmsg);
 
 	if (blinding) {
-		tlvs = tlv_update_add_tlvs_new(tmpctx);
-		tlvs->blinding = tal_dup(tlvs, struct pubkey, blinding);
+		tlvs = tlv_update_add_htlc_tlvs_new(tmpctx);
+		tlvs->blinding_point = tal_dup(tlvs, struct pubkey, blinding);
 	} else
 		tlvs = NULL;
 
@@ -3636,7 +3604,6 @@ static void handle_dev_memleak(struct peer *peer, const u8 *msg)
 							       found_leak)));
 }
 
-#if EXPERIMENTAL_FEATURES
 static void handle_dev_quiesce(struct peer *peer, const u8 *msg)
 {
 	if (!fromwire_channeld_dev_quiesce(msg))
@@ -3650,7 +3617,6 @@ static void handle_dev_quiesce(struct peer *peer, const u8 *msg)
 	peer->stfu_initiator = LOCAL;
 	maybe_send_stfu(peer);
 }
-#endif /* EXPERIMENTAL_FEATURES */
 #endif /* DEVELOPER */
 
 static void req_in(struct peer *peer, const u8 *msg)
@@ -3708,10 +3674,8 @@ static void req_in(struct peer *peer, const u8 *msg)
 		handle_dev_memleak(peer, msg);
 		return;
 	case WIRE_CHANNELD_DEV_QUIESCE:
-#if EXPERIMENTAL_FEATURES
 		handle_dev_quiesce(peer, msg);
 		return;
-#endif /* EXPERIMENTAL_FEATURES */
 #else
 	case WIRE_CHANNELD_DEV_REENABLE_COMMIT:
 	case WIRE_CHANNELD_DEV_MEMLEAK:
@@ -3836,7 +3800,8 @@ static void init_channel(struct peer *peer)
 				    &dev_disable_commit,
 				    &pbases,
 				    &reestablish_only,
-				    &peer->channel_update)) {
+				    &peer->channel_update,
+				    &peer->experimental_upgrade)) {
 		master_badmsg(WIRE_CHANNELD_INIT, msg);
 	}
 
@@ -3848,9 +3813,12 @@ static void init_channel(struct peer *peer)
 	peer->dev_fast_gossip = dev_fast_gossip;
 #endif
 
-	status_debug("option_static_remotekey = %u, option_anchor_outputs = %u",
+	status_debug("option_static_remotekey = %u,"
+		     " option_anchor_outputs = %u"
+		     " option_anchors_zero_fee_htlc_tx = %u",
 		     channel_type_has(channel_type, OPT_STATIC_REMOTEKEY),
-		     channel_type_has(channel_type, OPT_ANCHOR_OUTPUTS));
+		     channel_type_has(channel_type, OPT_ANCHOR_OUTPUTS),
+		     channel_type_has(channel_type, OPT_ANCHORS_ZERO_FEE_HTLC_TX));
 
 	/* Keeping an array of pointers is better since it allows us to avoid
 	 * extra allocations later. */
@@ -3980,11 +3948,9 @@ int main(int argc, char *argv[])
 	peer->shutdown_wrong_funding = NULL;
 	peer->last_update_timestamp = 0;
 	peer->last_empty_commitment = 0;
-#if EXPERIMENTAL_FEATURES
 	peer->stfu = false;
 	peer->stfu_sent[LOCAL] = peer->stfu_sent[REMOTE] = false;
 	peer->update_queue = msg_queue_new(peer, false);
-#endif
 
 	/* We send these to HSM to get real signatures; don't have valgrind
 	 * complain. */

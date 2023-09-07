@@ -11,6 +11,7 @@
 #include <common/onionreply.h>
 #include <common/timeout.h>
 #include <common/type_to_string.h>
+#include <connectd/connectd_wiregen.h>
 #include <db/exec.h>
 #include <gossipd/gossipd_wiregen.h>
 #include <lightningd/chaintopology.h>
@@ -591,6 +592,14 @@ static void htlc_offer_timeout(struct htlc_out *out)
 	tal_free(channel->owner);
 	channel_set_billboard(channel, false,
 			      "Adding HTLC timed out: killed connection");
+
+	/* Force a disconnect in case the issue is with TCP */
+	if (channel->peer->ld->connectd) {
+		const struct peer *peer = channel->peer;
+		subd_send_msg(peer->ld->connectd,
+			      take(towire_connectd_discard_peer(NULL, &peer->id,
+								peer->connectd_counter)));
+	}
 }
 
 /* Returns failmsg, or NULL on success. */
@@ -1014,7 +1023,7 @@ static bool htlc_accepted_hook_deserialize(struct htlc_accepted_hook_payload *re
 				      buffer + failmsgtok->start);
 			local_fail_in_htlc(hin, take(failmsg));
 			return false;
-		} else if (deprecated_apis
+		} else if (ld->deprecated_apis
 			   && (failcodetok = json_get_member(buffer, toks,
 							     "failure_code"))) {
 			unsigned int failcode;
@@ -1462,13 +1471,20 @@ static void fulfill_our_htlc_out(struct channel *channel, struct htlc_out *hout,
 						hout->msat);
 
 	if (hout->am_origin)
-		payment_succeeded(ld, hout, preimage);
+		payment_succeeded(ld, &hout->payment_hash, hout->partid, hout->groupid, preimage);
 	else if (hout->in) {
-		fulfill_htlc(hout->in, preimage);
-		wallet_forwarded_payment_add(ld->wallet, hout->in,
-					     FORWARD_STYLE_TLV,
-					     channel_scid_or_local_alias(hout->key.channel), hout,
-					     FORWARD_SETTLED, 0);
+		/* Did we abandon the incoming?  Oops! */
+		if (hout->in->failonion) {
+			/* FIXME: Accounting? */
+			log_unusual(channel->log, "FUNDS LOSS of %s: peer took funds onchain before we could time out the HTLC, but we abandoned incoming HTLC to save the incoming channel",
+				    fmt_amount_msat(tmpctx, hout->msat));
+		} else {
+			fulfill_htlc(hout->in, preimage);
+			wallet_forwarded_payment_add(ld->wallet, hout->in,
+						     FORWARD_STYLE_TLV,
+						     channel_scid_or_local_alias(hout->key.channel), hout,
+						     FORWARD_SETTLED, 0);
+		}
 	}
 }
 
@@ -1754,8 +1770,14 @@ void onchain_failed_our_htlc(const struct channel *channel,
 	} else if (hout->in) {
 		log_debug(channel->log, "HTLC id %"PRIu64" has incoming",
 			  htlc->id);
-		local_fail_in_htlc(hout->in,
-				   take(towire_permanent_channel_failure(NULL)));
+ 		/* Careful!  We might have already timed out incoming
+		 * HTLC in consider_failing_incoming */
+		if (hout->in->badonion == 0
+		    && !hout->in->failonion
+		    && !hout->in->preimage) {
+			local_fail_in_htlc(hout->in,
+					   take(towire_permanent_channel_failure(NULL)));
+		}
 		wallet_forwarded_payment_add(hout->key.channel->peer->ld->wallet,
 					 hout->in, FORWARD_STYLE_TLV,
 					 channel_scid_or_local_alias(channel), hout,
@@ -2661,6 +2683,43 @@ static u32 htlc_in_deadline(const struct lightningd *ld,
 	return hin->cltv_expiry - (ld->config.cltv_expiry_delta + 1)/2;
 }
 
+/* onchaind might fail to time out an HTLC: maybe fees spiked, or maybe
+ * it decided it wasn't worthwhile.  This risks cascading failure if
+ * it was routed: the incoming peer will get upset with us, too.
+ *
+ * So, if we're within 3 blocks of this happening, we fail upstream.
+ * It's weird to do this by looking at hout, rather than hin, but
+ * there's a pointer from hout->hin and not vice versa (we don't
+ * normally need it). */
+static void consider_failing_incoming(struct lightningd *ld,
+				      u32 height,
+				      struct htlc_out *hout)
+{
+	/* Already failed or succeeded? */
+	if (hout->failmsg || hout->failonion || hout->preimage)
+		return;
+
+	/* Has no corresponding input we should be stressed about? */
+	if (!hout->in)
+		return;
+
+	/* Already done it once? */
+	if (hout->in->failonion)
+		return;
+
+	/* OK, if we're within 3 blocks of upstream getting upset, force it
+	 * to fail without waiting for onchaind. */
+	if (height + 3 < hout->in->cltv_expiry)
+		return;
+
+	log_unusual(hout->key.channel->log,
+		    "Abandoning unresolved onchain HTLC at block %u"
+		    " (expired at %u) to avoid peer closing incoming HTLC at block %u",
+		    height, hout->cltv_expiry, hout->in->cltv_expiry);
+
+	local_fail_in_htlc(hout->in, take(towire_permanent_channel_failure(NULL)));
+}
+
 void htlcs_notify_new_block(struct lightningd *ld, u32 height)
 {
 	bool removed;
@@ -2687,8 +2746,10 @@ void htlcs_notify_new_block(struct lightningd *ld, u32 height)
 				continue;
 
 			/* Peer on chain already? */
-			if (channel_on_chain(hout->key.channel))
+			if (channel_on_chain(hout->key.channel)) {
+				consider_failing_incoming(ld, height, hout);
 				continue;
+			}
 
 			/* Peer already failed, or we hit it? */
 			if (hout->key.channel->error)

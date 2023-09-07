@@ -7,7 +7,7 @@ from pyln.proto.onion import TlvPayload
 from pyln.testing.utils import EXPERIMENTAL_DUAL_FUND, FUNDAMOUNT, scid_to_int
 from utils import (
     DEVELOPER, wait_for, only_one, sync_blockheight, TIMEOUT,
-    EXPERIMENTAL_FEATURES, VALGRIND, mine_funding_to_announce, first_scid
+    VALGRIND, mine_funding_to_announce, first_scid
 )
 import copy
 import os
@@ -70,6 +70,9 @@ def test_pay(node_factory):
     # Test listsendpays indexed by bolt11.
     payments = l1.rpc.listsendpays(inv)['payments']
     assert len(payments) == 1 and payments[0]['payment_preimage'] == preimage
+
+    # Make sure they're completely settled, so accounting correct.
+    wait_for(lambda: only_one(l1.rpc.listpeerchannels()['channels'])['htlcs'] == [])
 
     # Check channels apy summary view of channel activity
     apys_1 = l1.rpc.bkpr_channelsapy()['channels_apy']
@@ -699,10 +702,14 @@ def test_sendpay(node_factory):
 
 
 @unittest.skipIf(TEST_NETWORK != 'regtest', "The reserve computation is bitcoin specific")
-def test_sendpay_cant_afford(node_factory):
+@pytest.mark.parametrize("anchors", [False, True])
+def test_sendpay_cant_afford(node_factory, anchors):
     # Set feerates the same so we don't have to wait for update.
-    l1, l2 = node_factory.line_graph(2, fundamount=10**6,
-                                     opts={'feerates': (15000, 15000, 15000, 15000)})
+    opts = {'feerates': (15000, 15000, 15000, 15000)}
+    if anchors:
+        opts['experimental-anchors'] = None
+
+    l1, l2 = node_factory.line_graph(2, fundamount=10**6, opts=opts)
 
     # Can't pay more than channel capacity.
     with pytest.raises(RpcError):
@@ -726,7 +733,7 @@ def test_sendpay_cant_afford(node_factory):
     # assert False
 
     # This is the fee, which needs to be taken into account for l1.
-    if EXPERIMENTAL_FEATURES:
+    if anchors:
         # option_anchor_outputs
         available = 10**9 - 44700000
     else:
@@ -1987,6 +1994,7 @@ def test_setchannel_usage(node_factory, bitcoind):
     assert(result['channels'][0]['fee_proportional_millionths'] == 137)
     assert(result['channels'][0]['minimum_htlc_out_msat'] == 17)
     assert(result['channels'][0]['maximum_htlc_out_msat'] == 133337)
+    assert(result['channels'][0]['ignore_fee_limits'] is False)
 
     # check if custom values made it into the database
     db_fees = channel_get_config(scid)
@@ -3546,7 +3554,7 @@ def test_keysend_strip_tlvs(node_factory):
         opts=[
             {
                 # Not needed, just for listconfigs test.
-                'accept-htlc-tlv-types': '133773310,99990',
+                'accept-htlc-tlv-type': [133773310, 99990],
                 "plugin": os.path.join(os.path.dirname(__file__), "plugins/sphinx-receiver.py"),
             },
             {
@@ -3556,7 +3564,7 @@ def test_keysend_strip_tlvs(node_factory):
     )
 
     # Make sure listconfigs works here
-    assert l1.rpc.listconfigs()['accept-htlc-tlv-types'] == '133773310,99990'
+    assert l1.rpc.listconfigs('accept-htlc-tlv-type')['configs']['accept-htlc-tlv-type']['values_int'] == [133773310, 99990]
 
     # l1 is configured to accept, so l2 should still filter them out
     l1.rpc.keysend(l2.info['id'], amt, extratlvs={133773310: 'FEEDC0DE'})
@@ -3763,49 +3771,6 @@ def test_pay_peer(node_factory, bitcoind):
     l1.dev_pay(inv, use_shadow=False)
 
 
-def test_mpp_presplit(node_factory):
-    """Make a rather large payment of 5*10ksat and see it being split.
-    """
-    MPP_TARGET_SIZE = 10**7  # Taken from libpluin-pay.c
-    amt = 5 * MPP_TARGET_SIZE
-
-    # Assert that the amount we're going to send is indeed larger than our
-    # split size.
-    assert(MPP_TARGET_SIZE < amt)
-
-    l1, l2, l3 = node_factory.line_graph(
-        3, fundamount=10**8, wait_for_announce=True,
-        opts={'wumbo': None,
-              'max-dust-htlc-exposure-msat': '500000sat'}
-    )
-
-    inv = l3.rpc.invoice(amt, 'lbl', 'desc')['bolt11']
-    p = l1.rpc.pay(inv)
-
-    assert(p['parts'] >= 5)
-    inv = l3.rpc.listinvoices()['invoices'][0]
-
-    assert(inv['amount_msat'] == inv['amount_received_msat'])
-
-    # Make sure that bolt11 isn't duplicated for every part
-    bolt11s = 0
-    count = 0
-    for p in l1.rpc.listsendpays()['payments']:
-        if 'bolt11' in p:
-            bolt11s += 1
-        count += 1
-
-    # You were supposed to mpp!
-    assert count > 1
-    # Not every one should have the bolt11 string
-    assert bolt11s < count
-    # In fact, only one should
-    assert bolt11s == 1
-
-    # But listpays() gathers it:
-    assert only_one(l1.rpc.listpays()['pays'])['bolt11'] == inv['bolt11']
-
-
 def test_mpp_adaptive(node_factory, bitcoind):
     """We have two paths, both too small on their own, let's combine them.
 
@@ -3958,33 +3923,6 @@ def test_bolt11_null_after_pay(node_factory, bitcoind):
     assert('completed_at' in pays[0])
 
 
-def test_mpp_presplit_routehint_conflict(node_factory, bitcoind):
-    '''
-    We had a bug where pre-splitting the payment prevents *any*
-    routehints from being taken.
-    We tickle that bug here by building l1->l2->l3, but with
-    l2->l3 as an unpublished channel.
-    If the payment is large enough to trigger pre-splitting, the
-    routehints are not applied in any of the splits.
-    '''
-    l1, l2, l3 = node_factory.get_nodes(3)
-
-    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
-    l1l2, _ = l1.fundchannel(l2, 10**7, announce_channel=True)
-    l2.rpc.connect(l3.info['id'], 'localhost', l3.port)
-    l2.fundchannel(l3, 10**7, announce_channel=False)
-
-    mine_funding_to_announce(bitcoind, [l1, l2, l3])
-
-    # Wait for l3 to learn about l1->l2, otherwise it will think
-    # l2 is a deadend and not add it to the routehint.
-    wait_for(lambda: len(l3.rpc.listchannels(l1l2)['channels']) >= 2)
-
-    inv = l3.rpc.invoice(Millisatoshi(2 * 10000 * 1000), 'i', 'i', exposeprivatechannels=True)['bolt11']
-
-    l1.rpc.pay(inv)
-
-
 def test_delpay_argument_invalid(node_factory, bitcoind):
     """
     This test includes all possible combinations of input error inside the
@@ -4029,24 +3967,6 @@ def test_delpay_argument_invalid(node_factory, bitcoind):
     assert payments['payments'][0]['bolt11'] == inv['bolt11']
     assert len(payments['payments']) == 1
     assert len(l2.rpc.listpays()['pays']) == 0
-
-
-def test_delpay_payment_split(node_factory, bitcoind):
-    """
-    Test behavior of delpay with an MPP
-    """
-    MPP_TARGET_SIZE = 10**7  # Taken from libpluin-pay.c
-    amt = 4 * MPP_TARGET_SIZE
-
-    l1, l2, l3 = node_factory.line_graph(3, fundamount=10**5,
-                                         wait_for_announce=True)
-    inv = l3.rpc.invoice(amt, 'lbl', 'desc')
-    l1.rpc.pay(inv['bolt11'])
-
-    assert len(l1.rpc.listpays()['pays']) == 1
-    delpay_result = l1.rpc.delpay(inv['payment_hash'], 'complete')['payments']
-    assert len(delpay_result) >= 4
-    assert len(l1.rpc.listpays()['pays']) == 0
 
 
 @pytest.mark.developer("needs dev-no-reconnect, dev-routes to force failover")
@@ -4279,38 +4199,6 @@ def test_mpp_interference_2(node_factory, bitcoind, executor):
     p3.result(TIMEOUT)
 
 
-def test_large_mpp_presplit(node_factory):
-    """Make sure that ludicrous amounts don't saturate channels
-
-    We aim to have at most PRESPLIT_MAX_SPLITS HTLCs created directly from the
-    `presplit` modifier. The modifier will scale up its target size to
-    guarantee this, while still bucketizing payments that are in the following
-    range:
-
-    ```
-    target_size = PRESPLIT_MAX_SPLITS^{n} + MPP_TARGET_SIZE
-    target_size < amount <= target_size * PRESPLIT_MAX_SPLITS
-    ```
-
-    """
-    PRESPLIT_MAX_SPLITS = 16
-    MPP_TARGET_SIZE = 10 ** 7
-    amt = 400 * MPP_TARGET_SIZE
-
-    l1, l2, l3 = node_factory.line_graph(
-        3, fundamount=10**8, wait_for_announce=True,
-        opts={'wumbo': None}
-    )
-
-    inv = l3.rpc.invoice(amt, 'lbl', 'desc')['bolt11']
-    p = l1.rpc.pay(inv)
-
-    assert(p['parts'] <= PRESPLIT_MAX_SPLITS)
-    inv = l3.rpc.listinvoices()['invoices'][0]
-
-    assert(inv['amount_msat'] == inv['amount_received_msat'])
-
-
 @pytest.mark.developer("builds large network, which is slow if not DEVELOPER")
 @pytest.mark.slow_test
 def test_mpp_overload_payee(node_factory, bitcoind):
@@ -4367,7 +4255,6 @@ def test_mpp_overload_payee(node_factory, bitcoind):
     l1.rpc.pay(inv)
 
 
-@unittest.skipIf(EXPERIMENTAL_FEATURES, "this is always on with EXPERIMENTAL_FEATURES")
 def test_offer_needs_option(node_factory):
     """Make sure we don't make offers without offer command"""
     l1 = node_factory.get_node()
@@ -4797,13 +4684,8 @@ def test_fetchinvoice_recurrence(node_factory, bitcoind):
 def test_fetchinvoice_autoconnect(node_factory, bitcoind):
     """We should autoconnect if we need to, to route."""
 
-    if EXPERIMENTAL_FEATURES:
-        # We have to force option_onion_messages off!
-        opts1 = {'dev-force-features': '-39'}
-    else:
-        opts1 = {}
     l1, l2 = node_factory.line_graph(2, wait_for_announce=True,
-                                     opts=[opts1,
+                                     opts=[{},
                                            {'experimental-offers': None,
                                             'dev-allow-localhost': None}])
 
@@ -4948,9 +4830,17 @@ def test_self_pay(node_factory):
     l1, l2 = node_factory.line_graph(2, wait_for_announce=True)
 
     inv = l1.rpc.invoice(10000, 'test', 'test')['bolt11']
+    l1.rpc.pay(inv)
 
-    with pytest.raises(RpcError):
-        l1.rpc.pay(inv)
+    # We can pay twice, no problem!
+    l1.rpc.pay(inv)
+
+    inv2 = l1.rpc.invoice(10000, 'test2', 'test2')['bolt11']
+    l1.rpc.delinvoice('test2', 'unpaid')
+
+    with pytest.raises(RpcError, match=r'Unknown invoice') as excinfo:
+        l1.rpc.pay(inv2)
+    assert excinfo.value.error['code'] == 203
 
 
 @unittest.skipIf(TEST_NETWORK != 'regtest', "Canned invoice is network specific")
@@ -5036,18 +4926,6 @@ gives a routehint straight to us causes an issue
     l3.stop()
     with pytest.raises(RpcError, match=r'Destination .* is not reachable directly and all routehints were unusable'):
         l2.rpc.pay(inv)
-
-
-def test_pay_low_max_htlcs(node_factory):
-    """Test we can pay if *any* HTLC slots are available"""
-
-    l1, l2, l3 = node_factory.line_graph(3,
-                                         opts={'max-concurrent-htlcs': 1},
-                                         wait_for_announce=True)
-    l1.rpc.pay(l3.rpc.invoice(FUNDAMOUNT * 50, "test", "test")['bolt11'])
-    l1.daemon.wait_for_log(
-        r'Number of pre-split HTLCs \([0-9]+\) exceeds our HTLC budget \([0-9]+\), skipping pre-splitter'
-    )
 
 
 def test_setchannel_enforcement_delay(node_factory, bitcoind):
@@ -5417,3 +5295,122 @@ def test_invoice_pay_desc_with_quotes(node_factory):
 
     # pay an invoice
     l1.rpc.pay(invoice, description=description)
+
+
+def test_self_sendpay(node_factory):
+    """We get much more descriptive errors from a self-payment than a remote payment, since we're not relying on a single WIRE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS but can share more useful information"""
+    l1 = node_factory.get_node()
+
+    inv = l1.rpc.invoice('100000sat', 'test_selfpay', "Test of payment to self")
+    assert only_one(l1.rpc.listinvoices()['invoices'])['status'] == 'unpaid'
+    inv_expires = l1.rpc.invoice('1btc', 'test_selfpay-expires', "Test of payment to self", expiry=1)
+
+    # Requires amount.
+    with pytest.raises(RpcError, match="Self-payment requires amount_msat"):
+        l1.rpc.sendpay([], inv['payment_hash'], label='selfpay', bolt11=inv['bolt11'], payment_secret=inv['payment_secret'])
+
+    # Requires non-zero partid.
+    with pytest.raises(RpcError, match=r"Self-payment does not allow \(non-zero\) partid"):
+        l1.rpc.sendpay([], inv['payment_hash'], label='selfpay', bolt11=inv['bolt11'], payment_secret=inv['payment_secret'], amount_msat='100000sat', partid=1)
+
+    # Bad payment_hash.
+    with pytest.raises(RpcError, match="Unknown invoice"):
+        l1.rpc.sendpay([], '00' * 32, label='selfpay-badimage', bolt11=inv['bolt11'], payment_secret=inv['payment_secret'], amount_msat='100000sat')
+
+    # Missing payment_secret
+    with pytest.raises(RpcError, match="Attempt to pay .* without secret"):
+        l1.rpc.sendpay([], inv['payment_hash'], label='selfpay-badimage', bolt11=inv['bolt11'], amount_msat='100000sat')
+
+    # Bad payment_secret
+    with pytest.raises(RpcError, match="Attempt to pay .* with wrong secret"):
+        l1.rpc.sendpay([], inv['payment_hash'], label='selfpay-badimage', bolt11=inv['bolt11'], payment_secret='00' * 32, amount_msat='100000sat')
+
+    # Expired
+    time.sleep(2)
+    with pytest.raises(RpcError, match="Already paid or expired invoice"):
+        l1.rpc.sendpay([], inv_expires['payment_hash'], label='selfpay-badimage', bolt11=inv_expires['bolt11'], payment_secret=inv['payment_secret'], amount_msat='1btc')
+
+    # This one works!
+    l1.rpc.sendpay([], inv['payment_hash'], label='selfpay', bolt11=inv['bolt11'], payment_secret=inv['payment_secret'], amount_msat='100000sat')
+
+    assert only_one(l1.rpc.listinvoices(payment_hash=inv['payment_hash'])['invoices'])['status'] == 'paid'
+    # Only one is complete.
+    assert [p['status'] for p in l1.rpc.listsendpays()['payments'] if p['status'] != 'failed'] == ['complete']
+
+    # Can't pay paid one already paid!
+    with pytest.raises(RpcError, match="Already paid or expired invoice"):
+        l1.rpc.sendpay([], inv['payment_hash'], label='selfpay', bolt11=inv['bolt11'], payment_secret=inv['payment_secret'], amount_msat='100000sat')
+
+
+def test_strip_lightning_suffix_from_inv(node_factory):
+    """
+    Reproducer for [1] that pay an invoice with the `lightning:<bolt11|bolt12>`
+    prefix and then, will check if core lightning is able to strip it during
+    list `listpays` command.
+
+    [1] https://github.com/ElementsProject/lightning/issues/6207
+    """
+    l1, l2 = node_factory.line_graph(2)
+    inv = l2.rpc.invoice(40, "strip-lightning-prefix", "test to be able to strip the `lightning:` prefix.")["bolt11"]
+    wait_for(lambda: only_one(l1.rpc.listpeerchannels(l2.info['id'])['channels'])['state'] == 'CHANNELD_NORMAL')
+
+    # Testing the prefix stripping case
+    l1.rpc.pay(f"lightning:{inv}")
+    listpays = l1.rpc.listpays()["pays"]
+    assert len(listpays) == 1, f"the list pays is bigger than what we expected {listpays}"
+    # we can access by index here because the payment are sorted by db idx
+    assert listpays[0]['bolt11'] == inv, f"list pays contains a different invoice, expected is {inv} but we get {listpays[0]['bolt11']}"
+
+    # Testing the case of the invoice is upper case
+    inv = l2.rpc.invoice(40, "strip-lightning-prefix-upper-case", "test to be able to strip the `lightning:` prefix with an upper case invoice.")["bolt11"]
+    wait_for(lambda: only_one(l1.rpc.listpeerchannels(l2.info['id'])['channels'])['state'] == 'CHANNELD_NORMAL')
+
+    # Testing the prefix stripping with an invoice in upper case case
+    l1.rpc.pay(f"lightning:{inv.upper()}")
+    listpays = l1.rpc.listpays()["pays"]
+    assert len(listpays) == 2, f"the list pays is bigger than what we expected {listpays}"
+    assert listpays[1]['bolt11'] == inv, f"list pays contains a different invoice, expected is {inv} but we get {listpays[0]['bolt11']}"
+
+    # Testing the string lowering of an invoice in upper case
+    # Testing the case of the invoice is upper case
+    inv = l2.rpc.invoice(40, "strip-lightning-upper-case", "test to be able to lower the invoice string.")["bolt11"]
+    wait_for(lambda: only_one(l1.rpc.listpeerchannels(l2.info['id'])['channels'])['state'] == 'CHANNELD_NORMAL')
+
+    l1.rpc.pay(inv.upper())
+    listpays = l1.rpc.listpays()["pays"]
+    assert len(listpays) == 3, f"the list pays is bigger than what we expected {listpays}"
+    assert listpays[2]['bolt11'] == inv, f"list pays contains a different invoice, expected is {inv} but we get {listpays[0]['bolt11']}"
+
+
+def test_listsendpays_crash(node_factory):
+    l1 = node_factory.get_node()
+
+    inv = l1.rpc.invoice(40, "inv", "inv")["bolt11"]
+    l1.rpc.listsendpays('lightning:' + inv)
+
+
+@pytest.mark.developer("updates are delayed without --dev-fast-gossip")
+def test_pay_routehint_minhtlc(node_factory, bitcoind):
+    # l1 -> l2 -> l3 private -> l4
+    l1, l2, l3 = node_factory.line_graph(3, wait_for_announce=True)
+    l4 = node_factory.get_node()
+
+    l3.fundchannel(l4, announce_channel=False)
+
+    # l2->l3 required htlc of at least 1sat
+    scid = only_one(l2.rpc.setchannel(l3.info['id'], htlcmin=1000)['channels'])['short_channel_id']
+
+    # Make sure l4 knows about l1
+    wait_for(lambda: l4.rpc.listnodes(l1.info['id'])['nodes'] != [])
+
+    # And make sure l1 knows that l2->l3 has htlcmin 1000
+    wait_for(lambda: l1.rpc.listchannels(scid)['channels'][0]['htlc_minimum_msat'] == Millisatoshi(1000))
+
+    inv = l4.rpc.invoice(100000, "inv", "inv")
+    assert only_one(l1.rpc.decodepay(inv['bolt11'])['routes'])
+
+    # You should be able to pay the invoice!
+    l1.rpc.pay(inv['bolt11'])
+
+    # And you should also be able to getroute (and have it ignore htlc_min/max constraints!)
+    l1.rpc.getroute(l3.info['id'], amount_msat=0, riskfactor=1)

@@ -98,7 +98,8 @@ u8 *bitcoin_wscript_htlc_offer(const tal_t *ctx,
 			       const struct pubkey *remotehtlckey,
 			       const struct sha256 *payment_hash,
 			       const struct pubkey *revocationkey,
-			       bool option_anchor_outputs);
+			       bool option_anchor_outputs,
+			       bool option_anchors_zero_fee_htlc_tx);
 u8 **bitcoin_witness_htlc_timeout_tx(const tal_t *ctx,
 				     const struct bitcoin_signature *localsig,
 				     const struct bitcoin_signature *remotesig,
@@ -109,7 +110,8 @@ u8 *bitcoin_wscript_htlc_receive(const tal_t *ctx,
 				 const struct pubkey *remotekey,
 				 const struct sha256 *payment_hash,
 				 const struct pubkey *revocationkey,
-				 bool option_anchor_outputs);
+				 bool option_anchor_outputs,
+				 bool option_anchors_zero_fee_htlc_tx);
 u8 **bitcoin_witness_htlc_success_tx(const tal_t *ctx,
 				     const struct bitcoin_signature *localsig,
 				     const struct bitcoin_signature *remotesig,
@@ -122,14 +124,16 @@ u8 *bitcoin_wscript_htlc_offer_ripemd160(const tal_t *ctx,
 					 const struct pubkey *remotehtlckey,
 					 const struct ripemd160 *payment_ripemd,
 					 const struct pubkey *revocationkey,
-					 bool option_anchor_outputs);
+					 bool option_anchor_outputs,
+					 bool option_anchors_zero_fee_htlc_tx);
 u8 *bitcoin_wscript_htlc_receive_ripemd(const tal_t *ctx,
 					const struct abs_locktime *htlc_abstimeout,
 					const struct pubkey *localkey,
 					const struct pubkey *remotekey,
 					const struct ripemd160 *payment_ripemd,
 					const struct pubkey *revocationkey,
-					bool option_anchor_outputs);
+					bool option_anchor_outputs,
+					bool option_anchors_zero_fee_htlc_tx);
 
 /* BOLT #3 HTLC-success/HTLC-timeout output */
 u8 *bitcoin_wscript_htlc_tx(const tal_t *ctx,
@@ -158,6 +162,9 @@ bool is_known_scripttype(const u8 *script);
 
 /* Is this a to-remote witness script (used for option_anchor_outputs)? */
 bool is_to_remote_anchored_witness_script(const u8 *script, size_t script_len);
+
+/* Is this an anchor witness script? */
+bool is_anchor_witness_script(const u8 *script, size_t script_len);
 
 /* Are these two scripts equal? */
 bool scripteq(const u8 *s1, const u8 *s2);

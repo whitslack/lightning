@@ -84,6 +84,11 @@
               }
             }
           },
+          "ignore_fee_limits": {
+            "type": "boolean",
+            "added": "v23.08",
+            "description": "set if we allow this peer to set fees to anything they want"
+          },
           "feerate": {
             "type": "object",
             "description": "Feerates for the current tx",
@@ -187,7 +192,7 @@
           },
           "private": {
             "type": "boolean",
-            "description": "if False, we will not announce this channel"
+            "description": "if True, we will not announce this channel"
           },
           "opener": {
             "type": "string",
@@ -212,6 +217,7 @@
               "enum": [
                 "option_static_remotekey",
                 "option_anchor_outputs",
+                "option_anchors_zero_fee_htlc_tx",
                 "option_scid_alias",
                 "option_zeroconf"
               ],
@@ -608,6 +614,7 @@
                 "scratch_txid": {},
                 "channel_type": {},
                 "feerate": {},
+                "ignore_fee_limits": {},
                 "owner": {},
                 "short_channel_id": {},
                 "channel_id": {},
@@ -698,6 +705,7 @@
                 "scratch_txid": {},
                 "channel_type": {},
                 "feerate": {},
+                "ignore_fee_limits": {},
                 "owner": {},
                 "short_channel_id": {},
                 "channel_id": {},
@@ -787,6 +795,7 @@
                 "scratch_txid": {},
                 "channel_type": {},
                 "feerate": {},
+                "ignore_fee_limits": {},
                 "owner": {},
                 "short_channel_id": {},
                 "channel_id": {},
@@ -877,6 +886,7 @@
                 "scratch_txid": {},
                 "channel_type": {},
                 "feerate": {},
+                "ignore_fee_limits": {},
                 "owner": {},
                 "alias": {},
                 "short_channel_id": {},

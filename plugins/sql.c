@@ -114,7 +114,7 @@ struct table_desc {
 static STRMAP(struct table_desc *) tablemap;
 static size_t max_dbmem = 500000000;
 static struct sqlite3 *db;
-static const char *dbfilename;
+static char *dbfilename;
 static int gosstore_fd = -1;
 static size_t gosstore_nodes_off = 0, gosstore_channels_off = 0;
 static u64 next_rowid = 1;
@@ -1614,7 +1614,7 @@ int main(int argc, char *argv[])
 	}
 	plugin_main(argv, init, PLUGIN_RESTARTABLE, true, NULL, commands, ARRAY_SIZE(commands),
 	            NULL, 0, NULL, 0, NULL, 0,
-		    plugin_option("sqlfilename",
+		    plugin_option("dev-sqlfilename",
 				  "string",
 				  "Use on-disk sqlite3 file instead of in memory (e.g. debugging)",
 				  charp_option, &dbfilename),

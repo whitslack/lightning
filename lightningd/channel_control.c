@@ -10,7 +10,7 @@
 #include <common/wire_error.h>
 #include <connectd/connectd_wiregen.h>
 #include <errno.h>
-#include <hsmd/capabilities.h>
+#include <hsmd/permissions.h>
 #include <lightningd/chaintopology.h>
 #include <lightningd/channel.h>
 #include <lightningd/channel_control.h>
@@ -24,25 +24,39 @@
 #include <lightningd/peer_fd.h>
 #include <wally_bip32.h>
 
-static void update_feerates(struct lightningd *ld, struct channel *channel)
+void channel_update_feerates(struct lightningd *ld, const struct channel *channel)
 {
 	u8 *msg;
-	u32 feerate = unilateral_feerate(ld->topology);
+	u32 min_feerate, max_feerate;
+	bool anchors = channel_type_has_anchors(channel->type);
+	u32 feerate = unilateral_feerate(ld->topology, anchors);
 
 	/* Nothing to do if we don't know feerate. */
 	if (!feerate)
 		return;
 
+	/* For anchors, we just need the commitment tx to relay. */
+	if (anchors)
+		min_feerate = get_feerate_floor(ld->topology);
+	else
+		min_feerate = feerate_min(ld, NULL);
+	max_feerate = feerate_max(ld, NULL);
+
+	if (channel->ignore_fee_limits || ld->config.ignore_fee_limits) {
+		min_feerate = 1;
+		max_feerate = 0xFFFFFFFF;
+	}
+
 	log_debug(ld->log,
 		  "update_feerates: feerate = %u, min=%u, max=%u, penalty=%u",
 		  feerate,
-		  feerate_min(ld, NULL),
+		  min_feerate,
 		  feerate_max(ld, NULL),
 		  penalty_feerate(ld->topology));
 
 	msg = towire_channeld_feerates(NULL, feerate,
-				       feerate_min(ld, NULL),
-				       feerate_max(ld, NULL),
+				       min_feerate,
+				       max_feerate,
 				       penalty_feerate(ld->topology));
 	subd_send_msg(channel->owner, take(msg));
 }
@@ -57,7 +71,7 @@ static void try_update_feerates(struct lightningd *ld, struct channel *channel)
 	if (!channel->owner)
 		return;
 
-	update_feerates(ld, channel);
+	channel_update_feerates(ld, channel);
 }
 
 static void try_update_blockheight(struct lightningd *ld,
@@ -68,6 +82,12 @@ static void try_update_blockheight(struct lightningd *ld,
 
 	log_debug(channel->log, "attempting update blockheight %s",
 		  type_to_string(tmpctx, struct channel_id, &channel->cid));
+
+	if (!topology_synced(ld->topology)) {
+		log_debug(channel->log, "chain not synced,"
+			  " not updating blockheight");
+		return;
+	}
 
 	/* If they're offline, check that we're not too far behind anyway */
 	if (!channel->owner) {
@@ -480,7 +500,6 @@ static void forget_channel(struct channel *channel, const char *why)
 		forget(channel);
 }
 
-#if EXPERIMENTAL_FEATURES
 static void handle_channel_upgrade(struct channel *channel,
 				   const u8 *msg)
 {
@@ -519,7 +538,6 @@ static void handle_channel_upgrade(struct channel *channel,
 
 	wallet_channel_save(channel->peer->ld->wallet, channel);
 }
-#endif /* EXPERIMENTAL_FEATURES */
 
 static unsigned channel_msg(struct subd *sd, const u8 *msg, const int *fds)
 {
@@ -569,13 +587,9 @@ static unsigned channel_msg(struct subd *sd, const u8 *msg, const int *fds)
 	case WIRE_CHANNELD_LOCAL_PRIVATE_CHANNEL:
 		handle_local_private_channel(sd->channel, msg);
 		break;
-#if EXPERIMENTAL_FEATURES
 	case WIRE_CHANNELD_UPGRADED:
 		handle_channel_upgrade(sd->channel, msg);
 		break;
-#else
-	case WIRE_CHANNELD_UPGRADED:
-#endif
 	/* And we never get these from channeld. */
 	case WIRE_CHANNELD_INIT:
 	case WIRE_CHANNELD_FUNDING_DEPTH:
@@ -622,14 +636,15 @@ bool peer_start_channeld(struct channel *channel,
 	struct secret last_remote_per_commit_secret;
 	secp256k1_ecdsa_signature *remote_ann_node_sig, *remote_ann_bitcoin_sig;
 	struct penalty_base *pbases;
+	u32 min_feerate, max_feerate, curr_blockheight;
 
 	hsmfd = hsm_get_client_fd(ld, &channel->peer->id,
 				  channel->dbid,
-				  HSM_CAP_SIGN_GOSSIP
-				  | HSM_CAP_ECDH
-				  | HSM_CAP_COMMITMENT_POINT
-				  | HSM_CAP_SIGN_REMOTE_TX
-				  | HSM_CAP_SIGN_ONCHAIN_TX);
+				  HSM_PERM_SIGN_GOSSIP
+				  | HSM_PERM_ECDH
+				  | HSM_PERM_COMMITMENT_POINT
+				  | HSM_PERM_SIGN_REMOTE_TX
+				  | HSM_PERM_SIGN_ONCHAIN_TX);
 
 	channel_set_owner(channel,
 			  new_channel_subd(channel, ld,
@@ -693,8 +708,8 @@ bool peer_start_channeld(struct channel *channel,
 	}
 
 	/* Warn once. */
-	if (ld->config.ignore_fee_limits)
-		log_debug(channel->log, "Ignoring fee limits!");
+	if (channel->ignore_fee_limits || ld->config.ignore_fee_limits)
+		log_unusual(channel->log, "Ignoring fee limits!");
 
 	if (!wallet_remote_ann_sigs_load(tmpctx, channel->peer->ld->wallet,
 					 channel->dbid,
@@ -721,6 +736,36 @@ bool peer_start_channeld(struct channel *channel,
 		return false;
 	}
 
+	/* For anchors, we just need the commitment tx to relay. */
+	if (channel_type_has_anchors(channel->type))
+		min_feerate = get_feerate_floor(ld->topology);
+	else
+		min_feerate = feerate_min(ld, NULL);
+	max_feerate = feerate_max(ld, NULL);
+
+	if (channel->ignore_fee_limits || ld->config.ignore_fee_limits) {
+		min_feerate = 1;
+		max_feerate = 0xFFFFFFFF;
+	}
+
+	/* Make sure we don't go backsards on blockheights */
+	curr_blockheight = get_block_height(ld->topology);
+	if (curr_blockheight < get_blockheight(channel->blockheight_states,
+					       channel->opener, LOCAL)) {
+
+		u32 last_height = get_blockheight(channel->blockheight_states,
+						  channel->opener, LOCAL);
+
+		log_debug(channel->log,
+			  "current blockheight is (%d),"
+			  " last saved (%d). setting to last saved. %s",
+			  curr_blockheight,
+			  last_height,
+			  !topology_synced(ld->topology) ? "(not synced)" : "");
+
+		curr_blockheight = last_height;
+	}
+
 	initmsg = towire_channeld_init(tmpctx,
 				       chainparams,
 				       ld->our_features,
@@ -728,14 +773,14 @@ bool peer_start_channeld(struct channel *channel,
 				       &channel->funding,
 				       channel->funding_sats,
 				       channel->minimum_depth,
-				       get_block_height(ld->topology),
+				       curr_blockheight,
 				       channel->blockheight_states,
 				       channel->lease_expiry,
 				       &channel->our_config,
 				       &channel->channel_info.their_config,
 				       channel->fee_states,
-				       feerate_min(ld, NULL),
-				       feerate_max(ld, NULL),
+				       min_feerate,
+				       max_feerate,
 				       penalty_feerate(ld->topology),
 				       &channel->last_sig,
 				       &channel->channel_info.remote_fundingkey,
@@ -790,7 +835,8 @@ bool peer_start_channeld(struct channel *channel,
 					     NULL),
 				       pbases,
 				       reestablish_only,
-				       channel->channel_update);
+				       channel->channel_update,
+				       ld->experimental_upgrade_protocol);
 
 	/* We don't expect a response: we are triggered by funding_depth_cb. */
 	subd_send_msg(channel->owner, take(initmsg));
@@ -1084,6 +1130,10 @@ struct command_result *cancel_channel_before_broadcast(struct command *cmd,
 	}
 
 	tal_arr_expand(&cancel_channel->forgets, cmd);
+	/* Now, cmd will be ended by forget() or process_check_funding_broadcast(),
+	 * but in the shutdown case it might be freed first and those crash.  So instead
+	 * we make it a child if forgets so it will stay around at least that long! */
+	tal_steal(cancel_channel->forgets, cmd);
 
 	/* Check if the transaction is onchain. */
 	/* Note: The above check and this check can't completely ensure that
@@ -1164,7 +1214,6 @@ static const struct json_command dev_feerate_command = {
 };
 AUTODATA(json_command, &dev_feerate_command);
 
-#if EXPERIMENTAL_FEATURES
 static void quiesce_reply(struct subd *channeld UNUSED,
 			  const u8 *reply,
 			  const int *fds UNUSED,
@@ -1196,6 +1245,7 @@ static struct command_result *json_dev_quiesce(struct command *cmd,
 	if (!peer)
 		return command_fail(cmd, LIGHTNINGD, "Peer not connected");
 
+	/* FIXME: If this becomes a real API, check for OPT_QUIESCE! */
 	channel = peer_any_active_channel(peer, &more_than_one);
 	if (!channel || !channel->owner || channel->state != CHANNELD_NORMAL)
 		return command_fail(cmd, LIGHTNINGD, "Peer bad state");
@@ -1216,5 +1266,4 @@ static const struct json_command dev_quiesce_command = {
 	"Initiate quiscence protocol with peer"
 };
 AUTODATA(json_command, &dev_quiesce_command);
-#endif /* EXPERIMENTAL_FEATURES */
 #endif /* DEVELOPER */

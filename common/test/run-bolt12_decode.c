@@ -195,7 +195,7 @@ int main(int argc, char *argv[])
 		size_t dlen;
 		struct json_escape *esc;
 
-		json_to_bool(json, json_get_member(json, t, "valid"), &valid);
+		assert(json_to_bool(json, json_get_member(json, t, "valid"), &valid));
 		strtok = json_get_member(json, t, "string");
 		esc = json_escape_string_(tmpctx, json + strtok->start,
 					  strtok->end - strtok->start);
@@ -203,6 +203,7 @@ int main(int argc, char *argv[])
 		actual = (string_to_data(tmpctx, str, strlen(str),
 					 "lno", &dlen, &fail) != NULL);
 		assert(actual == valid);
+		printf("%s %s\n", str, valid ? "OK": "INVALID");
 	}
 out:
 	common_shutdown();

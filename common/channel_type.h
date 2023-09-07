@@ -9,6 +9,7 @@
 struct channel_type *channel_type_none(const tal_t *ctx);
 struct channel_type *channel_type_static_remotekey(const tal_t *ctx);
 struct channel_type *channel_type_anchor_outputs(const tal_t *ctx);
+struct channel_type *channel_type_anchors_zero_fee_htlc(const tal_t *ctx);
 
 /* channel_type variants */
 void channel_type_set_zeroconf(struct channel_type *channel_type);
@@ -30,6 +31,9 @@ struct channel_type *default_channel_type(const tal_t *ctx,
 /* Does this type include this feature? */
 bool channel_type_has(const struct channel_type *type, int feature);
 
+/* Convenience for querying either anchor_outputs or anchors_zero_fee_htlc_tx */
+bool channel_type_has_anchors(const struct channel_type *type);
+
 /* Are these two channel_types equivalent? */
 bool channel_type_eq(const struct channel_type *a,
 		     const struct channel_type *b);
@@ -38,8 +42,7 @@ bool channel_type_eq(const struct channel_type *a,
 struct channel_type *channel_type_accept(const tal_t *ctx,
 					 const u8 *t,
 					 const struct feature_set *our_features,
-					 const u8 *their_features,
-					 bool accept_zeroconf);
+					 const u8 *their_features);
 
 /* Return an array of feature strings indicating channel type. */
 const char **channel_type_name(const tal_t *ctx, const struct channel_type *t);

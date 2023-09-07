@@ -322,13 +322,13 @@ static bool shutdown_complete(const struct state *state)
 }
 
 /* They failed the open with us */
-static void negotiation_aborted(struct state *state, const char *why)
+static void negotiation_aborted(struct state *state, const char *why, bool aborted)
 {
 	status_debug("aborted opening negotiation: %s", why);
 
 	/* Tell master that funding failed. */
 	peer_failed_received_errmsg(state->pps, why,
-				    &state->channel_id, true);
+				    &state->channel_id, true, aborted);
 }
 
 /* Softer version of 'warning' (we don't disconnect)
@@ -355,7 +355,7 @@ static void open_abort(struct state *state,
 	 * status. */
 	peer_billboard(true, errmsg);
 	msg = towire_tx_abort(NULL, &state->channel_id,
-			      (u8 *)tal_dup_arr(errmsg, char, errmsg,
+			      (u8 *)tal_dup_arr(tmpctx, char, errmsg,
 					  strlen(errmsg), 0));
 	peer_write(state->pps, take(msg));
 
@@ -558,27 +558,6 @@ static bool is_openers(const struct wally_map *unknowns)
 			      "PSBTs must have serial_ids set");
 
 	return serial_id % 2 == TX_INITIATOR;
-}
-
-static size_t psbt_input_weight(struct wally_psbt *psbt,
-				size_t in)
-{
-	size_t weight;
-
-	/* txid + txout + sequence */
-	weight = (32 + 4 + 4) * 4;
-	weight +=
-		(psbt->inputs[in].redeem_script_len +
-			(varint_t) varint_size(psbt->inputs[in].redeem_script_len)) * 4;
-
-	return weight;
-}
-
-static size_t psbt_output_weight(struct wally_psbt *psbt,
-				 size_t outnum)
-{
-	return (8 + psbt->tx->outputs[outnum].script_len +
-		varint_size(psbt->tx->outputs[outnum].script_len)) * 4;
 }
 
 static bool find_txout(struct wally_psbt *psbt, const u8 *wscript, u32 *funding_txout)
@@ -980,9 +959,8 @@ static u8 *psbt_to_tx_sigs_msg(const tal_t *ctx,
 			       struct state *state,
 			       const struct wally_psbt *psbt)
 {
-	const struct witness_stack **ws =
-		psbt_to_witness_stacks(tmpctx, psbt,
-				       state->our_role);
+	const struct witness **ws =
+		psbt_to_witnesses(tmpctx, psbt, state->our_role);
 
 	return towire_tx_signatures(ctx, &state->channel_id,
 				    &state->tx_state->funding.txid,
@@ -993,16 +971,15 @@ static void handle_tx_sigs(struct state *state, const u8 *msg)
 {
 	struct channel_id cid;
 	struct bitcoin_txid txid;
-	const struct witness_stack **ws;
-	size_t j = 0;
+	const struct witness **witnesses;
 	struct tx_state *tx_state = state->tx_state;
 	enum tx_role their_role = state->our_role == TX_INITIATOR ?
 		TX_ACCEPTER : TX_INITIATOR;
 
 	if (!fromwire_tx_signatures(tmpctx, msg, &cid, &txid,
 				    cast_const3(
-					 struct witness_stack ***,
-					 &ws)))
+					 struct witness ***,
+					 &witnesses)))
 		open_err_fatal(state, "Bad tx_signatures %s",
 			       tal_hex(msg, msg));
 
@@ -1044,11 +1021,10 @@ static void handle_tx_sigs(struct state *state, const u8 *msg)
 					     &tx_state->funding.txid));
 
 	/* We put the PSBT + sigs all together */
-	for (size_t i = 0; i < tx_state->psbt->num_inputs; i++) {
+	for (size_t i = 0, j = 0; i < tx_state->psbt->num_inputs; i++) {
 		struct wally_psbt_input *in =
 			&tx_state->psbt->inputs[i];
 		u64 in_serial;
-		const struct witness_element **elem;
 
 		if (!psbt_get_serial_id(&in->unknowns, &in_serial)) {
 			status_broken("PSBT input %zu missing serial_id %s",
@@ -1060,13 +1036,12 @@ static void handle_tx_sigs(struct state *state, const u8 *msg)
 		if (in_serial % 2 != their_role)
 			continue;
 
-		if (j == tal_count(ws))
-			open_err_warn(state, "Mismatch witness stack count %s",
+		if (j == tal_count(witnesses))
+			open_err_warn(state, "Mismatched witness stack count %s",
 				      tal_hex(msg, msg));
 
-		elem = cast_const2(const struct witness_element **,
-				   ws[j++]->witness_elements);
-		psbt_finalize_input(tx_state->psbt, in, elem);
+		psbt_finalize_input(tx_state->psbt, in, witnesses[j]);
+		j++;
 	}
 
 	tx_state->remote_funding_sigs_rcvd = true;
@@ -1231,7 +1206,7 @@ static void handle_tx_abort(struct state *state, u8 *msg)
 	} else
 		desc = state->aborted_err;
 
-	negotiation_aborted(state, desc);
+	negotiation_aborted(state, desc, true);
 }
 
 static u8 *handle_channel_ready(struct state *state, u8 *msg)
@@ -1314,7 +1289,7 @@ static u8 *opening_negotiate_msg(const tal_t *ctx, struct state *state)
 			}
 			negotiation_aborted(state,
 					    tal_fmt(tmpctx, "They sent %s",
-						    err));
+						    err), false);
 			/* Return NULL so caller knows to stop negotiating. */
 			return NULL;
 		}
@@ -1408,9 +1383,7 @@ static u8 *opening_negotiate_msg(const tal_t *ctx, struct state *state)
 		case WIRE_PONG:
 		case WIRE_PEER_STORAGE:
 		case WIRE_YOUR_PEER_STORAGE:
-#if EXPERIMENTAL_FEATURES
 		case WIRE_STFU:
-#endif
 			break;
 		}
 
@@ -1784,9 +1757,7 @@ static bool run_tx_interactive(struct state *state,
 		case WIRE_PONG:
 		case WIRE_PEER_STORAGE:
 		case WIRE_YOUR_PEER_STORAGE:
-#if EXPERIMENTAL_FEATURES
 		case WIRE_STFU:
-#endif
 			open_abort(state, "Unexpected wire message %s",
 				   tal_hex(tmpctx, msg));
 			return false;
@@ -2236,8 +2207,7 @@ static void accepter_start(struct state *state, const u8 *oc2_msg)
 			channel_type_accept(state,
 					    open_tlv->channel_type,
 					    state->our_features,
-					    state->their_features,
-					    state->minimum_depth == 0);
+					    state->their_features);
 		if (!state->channel_type) {
 			negotiation_failed(state,
 					   "Did not support channel_type %s",
@@ -2446,8 +2416,12 @@ static void accepter_start(struct state *state, const u8 *oc2_msg)
 				 state->min_effective_htlc_capacity,
 				 &tx_state->remoteconf,
 				 &tx_state->localconf,
-				 anchors_negotiated(state->our_features,
-						    state->their_features),
+				 feature_negotiated(state->our_features,
+						    state->their_features,
+						    OPT_ANCHOR_OUTPUTS),
+				 feature_negotiated(state->our_features,
+						    state->their_features,
+						    OPT_ANCHORS_ZERO_FEE_HTLC_TX),
 				 &err_reason)) {
 		negotiation_failed(state, "%s", err_reason);
 		return;
@@ -2854,13 +2828,15 @@ static void opener_start(struct state *state, u8 *msg)
 	struct lease_rates *expected_rates;
 	struct tx_state *tx_state = state->tx_state;
 	struct amount_sat *requested_lease;
+	u32 nonanchor_feerate, anchor_feerate;
 
 	if (!fromwire_dualopend_opener_init(state, msg,
 					    &tx_state->psbt,
 					    &tx_state->opener_funding,
 					    &state->upfront_shutdown_script[LOCAL],
 					    &state->local_upfront_shutdown_wallet_index,
-					    &state->feerate_per_kw_commitment,
+					    &nonanchor_feerate,
+					    &anchor_feerate,
 					    &tx_state->feerate_per_kw_funding,
 					    &state->channel_flags,
 					    &requested_lease,
@@ -2886,6 +2862,12 @@ static void opener_start(struct state *state, u8 *msg)
 						   state->our_features,
 						   state->their_features);
 	open_tlv->channel_type = state->channel_type->features;
+
+	/* Given channel type, which feerate do we use? */
+	if (channel_type_has_anchors(state->channel_type))
+		state->feerate_per_kw_commitment = anchor_feerate;
+	else
+		state->feerate_per_kw_commitment = nonanchor_feerate;
 
 	if (requested_lease)
 		state->requested_lease = tal_steal(state, requested_lease);
@@ -3196,8 +3178,12 @@ static void opener_start(struct state *state, u8 *msg)
 				 state->min_effective_htlc_capacity,
 				 &tx_state->remoteconf,
 				 &tx_state->localconf,
-				 anchors_negotiated(state->our_features,
-						    state->their_features),
+				 feature_negotiated(state->our_features,
+						    state->their_features,
+						    OPT_ANCHOR_OUTPUTS),
+				 feature_negotiated(state->our_features,
+						    state->their_features,
+						    OPT_ANCHORS_ZERO_FEE_HTLC_TX),
 				 &err_reason)) {
 		negotiation_failed(state, "%s", err_reason);
 		return;
@@ -3389,9 +3375,9 @@ static void rbf_local_start(struct state *state, u8 *msg)
 
 	/* For now, we always just echo/send the funding amount */
 	init_rbf_tlvs->funding_output_contribution
-		= tal(init_rbf_tlvs, u64);
+		= tal(init_rbf_tlvs, s64);
 	*init_rbf_tlvs->funding_output_contribution
-	       = tx_state->opener_funding.satoshis; /* Raw: wire conversion */
+	       = (s64)tx_state->opener_funding.satoshis; /* Raw: wire conversion */
 
 	msg = towire_tx_init_rbf(tmpctx, &state->channel_id,
 				 tx_state->tx_locktime,
@@ -3486,8 +3472,12 @@ static void rbf_local_start(struct state *state, u8 *msg)
 				 state->min_effective_htlc_capacity,
 				 &tx_state->remoteconf,
 				 &tx_state->localconf,
-				 anchors_negotiated(state->our_features,
-						    state->their_features),
+				 feature_negotiated(state->our_features,
+						    state->their_features,
+						    OPT_ANCHOR_OUTPUTS),
+				 feature_negotiated(state->our_features,
+						    state->their_features,
+						    OPT_ANCHORS_ZERO_FEE_HTLC_TX),
 				 &err_reason)) {
 		open_abort(state, "%s", err_reason);
 		return;
@@ -3624,8 +3614,12 @@ static void rbf_remote_start(struct state *state, const u8 *rbf_msg)
 				 state->min_effective_htlc_capacity,
 				 &tx_state->remoteconf,
 				 &tx_state->localconf,
-				 anchors_negotiated(state->our_features,
-						    state->their_features),
+				 feature_negotiated(state->our_features,
+						    state->their_features,
+						    OPT_ANCHOR_OUTPUTS),
+				 feature_negotiated(state->our_features,
+						    state->their_features,
+						    OPT_ANCHORS_ZERO_FEE_HTLC_TX),
 				 &err_reason)) {
 		negotiation_failed(state, "%s", err_reason);
 		goto free_rbf_ctx;
@@ -3650,9 +3644,9 @@ static void rbf_remote_start(struct state *state, const u8 *rbf_msg)
 
 	/* We always send the funding amount */
 	ack_rbf_tlvs->funding_output_contribution
-		= tal(ack_rbf_tlvs, u64);
+		= tal(ack_rbf_tlvs, s64);
 	*ack_rbf_tlvs->funding_output_contribution
-	       = tx_state->accepter_funding.satoshis; /* Raw: wire conversion */
+	       = (s64)tx_state->accepter_funding.satoshis; /* Raw: wire conversion */
 
 	msg = towire_tx_ack_rbf(tmpctx, &state->channel_id, ack_rbf_tlvs);
 	peer_write(state->pps, msg);
@@ -3826,9 +3820,7 @@ static void do_reconnect_dance(struct state *state)
 		last_remote_per_commit_secret;
 	struct pubkey remote_current_per_commit_point;
 	struct tx_state *tx_state = state->tx_state;
-#if EXPERIMENTAL_FEATURES
 	struct tlv_channel_reestablish_tlvs *tlvs;
-#endif
 
 	/* BOLT #2:
 	 *     - if `next_revocation_number` equals 0:
@@ -3839,14 +3831,26 @@ static void do_reconnect_dance(struct state *state)
 	       sizeof(last_remote_per_commit_secret));
 
 	/* We always send reconnect/reestablish */
+
+	/* BOLT-e299850cb5ebd8bd9c55763bbc498fcdf94a9567 #2:
+	 *
+	 * - if it has sent `commitment_signed` for an
+	 *   interactive transaction construction but it has
+	 *   not received `tx_signatures`:
+	 *   - MUST set `next_funding_txid` to the txid of that
+	 *     interactive transaction.
+	 *   - otherwise:
+	 *   - MUST NOT set `next_funding_txid`.
+	 */
+	tlvs = tlv_channel_reestablish_tlvs_new(tmpctx);
+	if (!tx_state->remote_funding_sigs_rcvd)
+		tlvs->next_funding = &tx_state->funding.txid;
+
 	msg = towire_channel_reestablish
 		(NULL, &state->channel_id, 1, 0,
 		 &last_remote_per_commit_secret,
-		 &state->first_per_commitment_point[LOCAL]
-#if EXPERIMENTAL_FEATURES
-		 , NULL
-#endif
-			);
+		 &state->first_per_commitment_point[LOCAL], tlvs);
+
 	peer_write(state->pps, take(msg));
 
 	peer_billboard(false, "Sent reestablish, waiting for theirs");
@@ -3861,22 +3865,12 @@ static void do_reconnect_dance(struct state *state)
 				   &state->channel_id,
 				   msg));
 
-	if (!fromwire_channel_reestablish
-#if EXPERIMENTAL_FEATURES
-			(tmpctx, msg, &cid,
-			 &next_commitment_number,
-			 &next_revocation_number,
-			 &last_local_per_commit_secret,
-			 &remote_current_per_commit_point,
-			 &tlvs)
-#else
-			(msg, &cid,
-			 &next_commitment_number,
-			 &next_revocation_number,
-			 &last_local_per_commit_secret,
-			 &remote_current_per_commit_point)
-#endif
-				)
+	if (!fromwire_channel_reestablish(tmpctx, msg, &cid,
+					  &next_commitment_number,
+					  &next_revocation_number,
+					  &last_local_per_commit_secret,
+					  &remote_current_per_commit_point,
+					  &tlvs))
 		open_err_fatal(state, "Bad reestablish msg: %s %s",
 			       peer_wire_name(fromwire_peektype(msg)),
 			       tal_hex(msg, msg));
@@ -4069,9 +4063,7 @@ static u8 *handle_peer_in(struct state *state)
 	case WIRE_PONG:
 	case WIRE_PEER_STORAGE:
 	case WIRE_YOUR_PEER_STORAGE:
-#if EXPERIMENTAL_FEATURES
 	case WIRE_STFU:
-#endif
 		break;
 	}
 
@@ -4127,6 +4119,7 @@ int main(int argc, char *argv[])
 	u8 *msg;
 	struct amount_sat total_funding, *requested_lease;
 	struct amount_msat our_msat;
+	bool from_abort;
 
 	subdaemon_setup(argc, argv);
 
@@ -4155,6 +4148,7 @@ int main(int argc, char *argv[])
 		/*~ Initially we're not associated with a channel, but
 		 * handle_peer_gossip_or_error compares this. */
 		memset(&state->channel_id, 0, sizeof(state->channel_id));
+		from_abort = false;
 		state->channel = NULL;
 		state->tx_state->remote_funding_sigs_rcvd = false;
 
@@ -4175,6 +4169,7 @@ int main(int argc, char *argv[])
 		state->requested_lease = NULL;
 	} else if (fromwire_dualopend_reinit(state, msg,
 					     &chainparams,
+					     &from_abort,
 					     &state->our_features,
 					     &state->their_features,
 					     &state->tx_state->localconf,
@@ -4287,7 +4282,7 @@ int main(int argc, char *argv[])
 	pollfd[1].events = POLLIN;
 
 	/* Do reconnect, if need be */
-	if (state->channel) {
+	if (state->channel && !from_abort) {
 		do_reconnect_dance(state);
 		state->reconnected = true;
 	}
