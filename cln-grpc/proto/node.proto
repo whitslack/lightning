@@ -61,6 +61,8 @@ service Node {
 	rpc SignInvoice(SigninvoiceRequest) returns (SigninvoiceResponse) {}
 	rpc SignMessage(SignmessageRequest) returns (SignmessageResponse) {}
 	rpc Stop(StopRequest) returns (StopResponse) {}
+	rpc PreApproveKeysend(PreapprovekeysendRequest) returns (PreapprovekeysendResponse) {}
+	rpc PreApproveInvoice(PreapproveinvoiceRequest) returns (PreapproveinvoiceResponse) {}
 }
 
 message GetinfoRequest {
@@ -68,7 +70,7 @@ message GetinfoRequest {
 
 message GetinfoResponse {
 	bytes id = 1;
-	string alias = 2;
+	optional string alias = 2;
 	bytes color = 3;
 	uint32 num_peers = 4;
 	uint32 num_pending_channels = 5;
@@ -101,7 +103,6 @@ message GetinfoAddress {
 		IPV6 = 2;
 		TORV2 = 3;
 		TORV3 = 4;
-		WEBSOCKET = 5;
 	}
 	GetinfoAddressType item_type = 1;
 	uint32 port = 2;
@@ -112,6 +113,7 @@ message GetinfoBinding {
 	// Getinfo.binding[].type
 	enum GetinfoBindingType {
 		LOCAL_SOCKET = 0;
+		WEBSOCKET = 5;
 		IPV4 = 1;
 		IPV6 = 2;
 		TORV2 = 3;
@@ -756,47 +758,15 @@ message ListtransactionsTransactions {
 }
 
 message ListtransactionsTransactionsInputs {
-	// ListTransactions.transactions[].inputs[].type
-	enum ListtransactionsTransactionsInputsType {
-		THEIRS = 0;
-		DEPOSIT = 1;
-		WITHDRAW = 2;
-		CHANNEL_FUNDING = 3;
-		CHANNEL_MUTUAL_CLOSE = 4;
-		CHANNEL_UNILATERAL_CLOSE = 5;
-		CHANNEL_SWEEP = 6;
-		CHANNEL_HTLC_SUCCESS = 7;
-		CHANNEL_HTLC_TIMEOUT = 8;
-		CHANNEL_PENALTY = 9;
-		CHANNEL_UNILATERAL_CHEAT = 10;
-	}
 	bytes txid = 1;
 	uint32 index = 2;
 	uint32 sequence = 3;
-	optional ListtransactionsTransactionsInputsType item_type = 4;
-	optional string channel = 5;
 }
 
 message ListtransactionsTransactionsOutputs {
-	// ListTransactions.transactions[].outputs[].type
-	enum ListtransactionsTransactionsOutputsType {
-		THEIRS = 0;
-		DEPOSIT = 1;
-		WITHDRAW = 2;
-		CHANNEL_FUNDING = 3;
-		CHANNEL_MUTUAL_CLOSE = 4;
-		CHANNEL_UNILATERAL_CLOSE = 5;
-		CHANNEL_SWEEP = 6;
-		CHANNEL_HTLC_SUCCESS = 7;
-		CHANNEL_HTLC_TIMEOUT = 8;
-		CHANNEL_PENALTY = 9;
-		CHANNEL_UNILATERAL_CHEAT = 10;
-	}
 	uint32 index = 1;
 	Amount amount_msat = 6;
 	bytes scriptPubKey = 3;
-	optional ListtransactionsTransactionsOutputsType item_type = 4;
-	optional string channel = 5;
 }
 
 message PayRequest {
@@ -857,7 +827,6 @@ message ListnodesNodesAddresses {
 		IPV6 = 2;
 		TORV2 = 3;
 		TORV3 = 4;
-		WEBSOCKET = 5;
 	}
 	ListnodesNodesAddressesType item_type = 1;
 	uint32 port = 2;
@@ -1698,4 +1667,20 @@ message StopRequest {
 }
 
 message StopResponse {
+}
+
+message PreapprovekeysendRequest {
+	optional bytes destination = 1;
+	optional bytes payment_hash = 2;
+	optional Amount amount_msat = 3;
+}
+
+message PreapprovekeysendResponse {
+}
+
+message PreapproveinvoiceRequest {
+	optional string bolt11 = 1;
+}
+
+message PreapproveinvoiceResponse {
 }

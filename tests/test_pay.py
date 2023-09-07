@@ -7,7 +7,7 @@ from pyln.proto.onion import TlvPayload
 from pyln.testing.utils import EXPERIMENTAL_DUAL_FUND, FUNDAMOUNT
 from utils import (
     DEVELOPER, wait_for, only_one, sync_blockheight, TIMEOUT,
-    EXPERIMENTAL_FEATURES, VALGRIND, mine_funding_to_announce, first_scid
+    VALGRIND, mine_funding_to_announce, first_scid, anchor_expected
 )
 import copy
 import os
@@ -726,7 +726,7 @@ def test_sendpay_cant_afford(node_factory):
     # assert False
 
     # This is the fee, which needs to be taken into account for l1.
-    if EXPERIMENTAL_FEATURES:
+    if anchor_expected(l1, l2):
         # option_anchor_outputs
         available = 10**9 - 44700000
     else:
@@ -3546,7 +3546,7 @@ def test_keysend_strip_tlvs(node_factory):
         opts=[
             {
                 # Not needed, just for listconfigs test.
-                'accept-htlc-tlv-types': '133773310,99990',
+                'accept-htlc-tlv-type': [133773310, 99990],
                 "plugin": os.path.join(os.path.dirname(__file__), "plugins/sphinx-receiver.py"),
             },
             {
@@ -3556,7 +3556,7 @@ def test_keysend_strip_tlvs(node_factory):
     )
 
     # Make sure listconfigs works here
-    assert l1.rpc.listconfigs()['accept-htlc-tlv-types'] == '133773310,99990'
+    assert l1.rpc.listconfigs('accept-htlc-tlv-type')['configs']['accept-htlc-tlv-type']['values_int'] == [133773310, 99990]
 
     # l1 is configured to accept, so l2 should still filter them out
     l1.rpc.keysend(l2.info['id'], amt, extratlvs={133773310: 'FEEDC0DE'})
@@ -4366,7 +4366,6 @@ def test_mpp_overload_payee(node_factory, bitcoind):
     l1.rpc.pay(inv)
 
 
-@unittest.skipIf(EXPERIMENTAL_FEATURES, "this is always on with EXPERIMENTAL_FEATURES")
 def test_offer_needs_option(node_factory):
     """Make sure we don't make offers without offer command"""
     l1 = node_factory.get_node()
@@ -4793,13 +4792,8 @@ def test_fetchinvoice_recurrence(node_factory, bitcoind):
 def test_fetchinvoice_autoconnect(node_factory, bitcoind):
     """We should autoconnect if we need to, to route."""
 
-    if EXPERIMENTAL_FEATURES:
-        # We have to force option_onion_messages off!
-        opts1 = {'dev-force-features': '-39'}
-    else:
-        opts1 = {}
     l1, l2 = node_factory.line_graph(2, wait_for_announce=True,
-                                     opts=[opts1,
+                                     opts=[{},
                                            {'experimental-offers': None,
                                             'dev-allow-localhost': None}])
 

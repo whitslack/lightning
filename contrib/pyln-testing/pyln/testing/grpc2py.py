@@ -488,8 +488,6 @@ def listtransactions_transactions_inputs2py(m):
         "txid": hexlify(m.txid),  # PrimitiveField in generate_composite
         "index": m.index,  # PrimitiveField in generate_composite
         "sequence": m.sequence,  # PrimitiveField in generate_composite
-        "type": str(m.item_type),  # EnumField in generate_composite
-        "channel": m.channel,  # PrimitiveField in generate_composite
     })
 
 
@@ -498,8 +496,6 @@ def listtransactions_transactions_outputs2py(m):
         "index": m.index,  # PrimitiveField in generate_composite
         "amount_msat": amount2msat(m.amount_msat),  # PrimitiveField in generate_composite
         "script_pub_key": hexlify(m.script_pub_key),  # PrimitiveField in generate_composite
-        "type": str(m.item_type),  # EnumField in generate_composite
-        "channel": m.channel,  # PrimitiveField in generate_composite
     })
 
 
@@ -1323,5 +1319,15 @@ def signmessage2py(m):
 
 
 def stop2py(m):
+    return remove_default({
+    })
+
+
+def preapprovekeysend2py(m):
+    return remove_default({
+    })
+
+
+def preapproveinvoice2py(m):
     return remove_default({
     })

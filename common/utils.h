@@ -123,10 +123,10 @@ void tal_wally_end(const tal_t *parent);
 /* ... or this if you want to reparent onto something which is
  * allocated by libwally here.  Fixes up this from_wally obj to have a
  * proper tal_name, too! */
-#define tal_wally_end_onto(parent, from_wally, type)			\
-	tal_wally_end_onto_((parent),					\
-			    (from_wally) + 0*sizeof((from_wally) == (type *)0), \
-			    stringify(type))
+#define tal_wally_end_onto(parent, from_wally, type)                           \
+	tal_wally_end_onto_(                                                   \
+	    (parent), (from_wally),                                            \
+	    &stringify(type)[0 * sizeof((from_wally) == (type *)0)])
 void tal_wally_end_onto_(const tal_t *parent,
 			 tal_t *from_wally,
 			 const char *from_wally_name);
@@ -151,13 +151,6 @@ STRUCTEQ_DEF(ripemd160, 0, u);
 #define IFDEV(dev, nondev) ((void)(nondev), (dev))
 #else
 #define IFDEV(dev, nondev) (nondev)
-#endif
-
-#if EXPERIMENTAL_FEATURES
-/* Make sure that nondev is evaluated, and valid, but is a constant */
-#define IFEXPERIMENTAL(exp, nonexp) (0 ? (nonexp) : (exp))
-#else
-#define IFEXPERIMENTAL(exp, nonexp) (nonexp)
 #endif
 
 /* Context which all wally allocations use (see common/setup.c) */

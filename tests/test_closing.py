@@ -5,7 +5,7 @@ from pyln.testing.utils import SLOW_MACHINE
 from utils import (
     only_one, sync_blockheight, wait_for, TIMEOUT,
     account_balance, first_channel_id, closing_fee, TEST_NETWORK,
-    scriptpubkey_addr, calc_lease_fee, EXPERIMENTAL_FEATURES,
+    scriptpubkey_addr, calc_lease_fee,
     check_utxos_channel, anchor_expected, check_coin_moves,
     check_balance_snaps, mine_funding_to_announce, check_inspect_channel,
     first_scid
@@ -418,7 +418,6 @@ def closing_negotiation_step(node_factory, bitcoind, chainparams, opts):
     assert opts['expected_close_fee'] == fee_mempool
 
 
-@unittest.skipIf(EXPERIMENTAL_FEATURES, "anchors uses quick-close, not negotiation")
 @unittest.skipIf(TEST_NETWORK == 'liquid-regtest', "Different closing fees")
 def test_closing_negotiation_step_30pct(node_factory, bitcoind, chainparams):
     """Test that the closing fee negotiation step works, 30%"""
@@ -434,7 +433,6 @@ def test_closing_negotiation_step_30pct(node_factory, bitcoind, chainparams):
     closing_negotiation_step(node_factory, bitcoind, chainparams, opts)
 
 
-@unittest.skipIf(EXPERIMENTAL_FEATURES, "anchors uses quick-close, not negotiation")
 @unittest.skipIf(TEST_NETWORK == 'liquid-regtest', "Different closing fees")
 def test_closing_negotiation_step_100pct(node_factory, bitcoind, chainparams):
     """Test that the closing fee negotiation step works, 100%"""
@@ -455,7 +453,6 @@ def test_closing_negotiation_step_100pct(node_factory, bitcoind, chainparams):
     closing_negotiation_step(node_factory, bitcoind, chainparams, opts)
 
 
-@unittest.skipIf(EXPERIMENTAL_FEATURES, "anchors uses quick-close, not negotiation")
 @unittest.skipIf(TEST_NETWORK == 'liquid-regtest', "Different closing fees")
 def test_closing_negotiation_step_1sat(node_factory, bitcoind, chainparams):
     """Test that the closing fee negotiation step works, 1sat"""
@@ -471,7 +468,6 @@ def test_closing_negotiation_step_1sat(node_factory, bitcoind, chainparams):
     closing_negotiation_step(node_factory, bitcoind, chainparams, opts)
 
 
-@unittest.skipIf(EXPERIMENTAL_FEATURES, "anchors uses quick-close, not negotiation")
 @unittest.skipIf(TEST_NETWORK == 'liquid-regtest', "Different closing fees")
 def test_closing_negotiation_step_700sat(node_factory, bitcoind, chainparams):
     """Test that the closing fee negotiation step works, 700sat"""
@@ -846,21 +842,11 @@ def test_channel_lease_post_expiry(node_factory, bitcoind, chainparams):
     l2.daemon.wait_for_log('Blockheight: SENT_ADD_ACK_COMMIT->RCVD_ADD_ACK_REVOCATION LOCAL now 115')
 
     # We need to give l1-l2 time to update their blockheights
-    bitcoind.generate_block(1000)
-    sync_blockheight(bitcoind, [l1, l2])
-    l1.daemon.wait_for_log('peer_out WIRE_UPDATE_BLOCKHEIGHT')
-
-    bitcoind.generate_block(1000)
-    sync_blockheight(bitcoind, [l1, l2])
-    l1.daemon.wait_for_log('peer_out WIRE_UPDATE_BLOCKHEIGHT')
-
-    bitcoind.generate_block(1000)
-    sync_blockheight(bitcoind, [l1, l2])
-    l1.daemon.wait_for_log('peer_out WIRE_UPDATE_BLOCKHEIGHT')
-
-    bitcoind.generate_block(1000)
-    sync_blockheight(bitcoind, [l1, l2])
-    l1.daemon.wait_for_log('peer_out WIRE_UPDATE_BLOCKHEIGHT')
+    for i in range(0, 4000, 1000):
+        for _ in range(0, 1000, 200):
+            bitcoind.generate_block(200)
+        sync_blockheight(bitcoind, [l1, l2])
+        l1.daemon.wait_for_log('peer_out WIRE_UPDATE_BLOCKHEIGHT')
 
     bitcoind.generate_block(32)
     sync_blockheight(bitcoind, [l1, l2])
@@ -971,9 +957,12 @@ def test_channel_lease_unilat_closes(node_factory, bitcoind):
     l3.rpc.close(l2.info['id'], 1, force_lease_closed=True)
 
     # Wait til to_self_delay expires, l1 should claim to_local back
-    bitcoind.generate_block(10, wait_for_mempool=2)
-    l1.daemon.wait_for_log('Broadcasting OUR_DELAYED_RETURN_TO_WALLET')
-    bitcoind.generate_block(1, wait_for_mempool=1)
+    bitcoind.generate_block(1, wait_for_mempool=2)
+    _, txid, blocks = l1.wait_for_onchaind_tx('OUR_DELAYED_RETURN_TO_WALLET',
+                                              'OUR_UNILATERAL/DELAYED_OUTPUT_TO_US')
+    assert blocks == 4
+    bitcoind.generate_block(blocks)
+    l1.mine_txid_or_rbf(txid, numblocks=1)
     l1.daemon.wait_for_log('Resolved OUR_UNILATERAL/DELAYED_OUTPUT_TO_US by our proposal OUR_DELAYED_RETURN_TO_WALLET')
     assert len(l1.rpc.listfunds()['outputs']) == 2
 
@@ -1001,7 +990,8 @@ def test_channel_lease_unilat_closes(node_factory, bitcoind):
     l2.rpc.withdraw(l2.rpc.newaddr()['bech32'], "all", utxos=[utxo1])
 
     # l3 cleans up their to-self after their lease expires
-    assert l3.daemon.is_in_log('Broadcasting OUR_DELAYED_RETURN_TO_WALLET')
+    l3.wait_for_onchaind_tx('OUR_DELAYED_RETURN_TO_WALLET',
+                            'OUR_UNILATERAL/DELAYED_OUTPUT_TO_US')
 
     # We were making a journal_entry for anchors, but now we ignore them
     incomes = l2.rpc.bkpr_listincome()['income_events']
@@ -1079,10 +1069,10 @@ def test_channel_lease_lessor_cheat(node_factory, bitcoind, chainparams):
 
     l1.start()
     sync_blockheight(bitcoind, [l1])
-    l1.daemon.wait_for_logs(['Broadcasting OUR_PENALTY_TX',
-                             ' Propose handling THEIR_REVOKED_UNILATERAL/DELAYED_CHEAT_OUTPUT_TO_THEM by OUR_PENALTY_TX'])
+    _, txid, _ = l1.wait_for_onchaind_tx('OUR_PENALTY_TX',
+                                         'THEIR_REVOKED_UNILATERAL/DELAYED_CHEAT_OUTPUT_TO_THEM')
 
-    bitcoind.generate_block(1, wait_for_mempool=1)
+    l1.mine_txid_or_rbf(txid, numblocks=1)
     # l2 sees that l1 has spent their coins!
     l2.daemon.wait_for_log('Unknown spend of OUR_UNILATERAL/DELAYED_OUTPUT_TO_US by')
 
@@ -1156,10 +1146,11 @@ def test_channel_lease_lessee_cheat(node_factory, bitcoind, chainparams):
 
     l2.start()
     sync_blockheight(bitcoind, [l2])
-    l2.daemon.wait_for_logs(['Broadcasting OUR_PENALTY_TX',
-                             ' Propose handling THEIR_REVOKED_UNILATERAL/DELAYED_CHEAT_OUTPUT_TO_THEM by OUR_PENALTY_TX'])
+    _, txid, _ = l2.wait_for_onchaind_tx('OUR_PENALTY_TX',
+                                         'THEIR_REVOKED_UNILATERAL/DELAYED_CHEAT_OUTPUT_TO_THEM')
 
-    bitcoind.generate_block(1, wait_for_mempool=1)
+    l2.mine_txid_or_rbf(txid, numblocks=1)
+
     # l2 sees that l1 has spent their coins!
     l1.daemon.wait_for_logs(['Grinding for to_remote',
                              'Unknown spend of OUR_UNILATERAL/DELAYED_OUTPUT_TO_US by'])
@@ -3301,7 +3292,7 @@ Try a range of future segwit versions as shutdown scripts.  We create many nodes
             l1.rpc.fundchannel(l2.info['id'], 10**6)
 
 
-@unittest.skipIf(not EXPERIMENTAL_FEATURES, "Needs anchor_outputs")
+@unittest.skip("Needs anchor_outputs")
 @pytest.mark.developer("needs to set dev-disconnect")
 def test_closing_higherfee(node_factory, bitcoind, executor):
     """With anchor outputs we can ask for a *higher* fee than the last commit tx"""

@@ -207,11 +207,12 @@ There are currently four supported option 'types':
   - string: a string
   - bool: a boolean
   - int: parsed as a signed integer (64-bit)
-  - flag: no-arg flag option. Is boolean under the hood. Defaults to false.
+  - flag: no-arg flag option. Presented as `true` if config specifies it.
 
 In addition, string and int types can specify `"multi": true` to indicate
 they can be specified multiple times.  These will always be represented in
-`init` as a (possibly empty) JSON array.
+`init` as a (possibly empty) JSON array.  "multi" flag types do not make 
+sense.
 
 Nota bene: if a `flag` type option is not set, it will not appear
 in the options set that is passed to the plugin.
@@ -229,7 +230,6 @@ Here's an example option set, as sent in response to `getmanifest`
     {
       "name": "run-hot",
       "type": "flag",
-      "default": None,  // defaults to false
       "description": "If set, overclocks plugin"
     },
     {
@@ -1714,7 +1714,8 @@ data. Each plugin must follow the below specification for `lightningd` to operat
 ### `getchaininfo`
 
 Called at startup, it's used to check the network `lightningd` is operating on and to
-get the sync status of the backend.
+get the sync status of the backend. Optionally, the plugins can use `last_height` to
+make sure that the Bitcoin backend is not behind core lightning.
 
 The plugin must respond to `getchaininfo` with the following fields:
     - `chain` (string), the network name as introduced in bip70

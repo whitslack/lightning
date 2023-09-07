@@ -69,6 +69,8 @@ pub enum Request {
 	SignInvoice(requests::SigninvoiceRequest),
 	SignMessage(requests::SignmessageRequest),
 	Stop(requests::StopRequest),
+	PreApproveKeysend(requests::PreapprovekeysendRequest),
+	PreApproveInvoice(requests::PreapproveinvoiceRequest),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -128,6 +130,8 @@ pub enum Response {
 	SignInvoice(responses::SigninvoiceResponse),
 	SignMessage(responses::SignmessageResponse),
 	Stop(responses::StopResponse),
+	PreApproveKeysend(responses::PreapprovekeysendResponse),
+	PreApproveInvoice(responses::PreapproveinvoiceResponse),
 }
 
 
@@ -1375,6 +1379,42 @@ pub mod requests {
 	    type Response = super::responses::StopResponse;
 	}
 
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct PreapprovekeysendRequest {
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub destination: Option<PublicKey>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub payment_hash: Option<String>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub amount_msat: Option<Amount>,
+	}
+
+	impl From<PreapprovekeysendRequest> for Request {
+	    fn from(r: PreapprovekeysendRequest) -> Self {
+	        Request::PreApproveKeysend(r)
+	    }
+	}
+
+	impl IntoRequest for PreapprovekeysendRequest {
+	    type Response = super::responses::PreapprovekeysendResponse;
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct PreapproveinvoiceRequest {
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub bolt11: Option<String>,
+	}
+
+	impl From<PreapproveinvoiceRequest> for Request {
+	    fn from(r: PreapproveinvoiceRequest) -> Self {
+	        Request::PreApproveInvoice(r)
+	    }
+	}
+
+	impl IntoRequest for PreapproveinvoiceRequest {
+	    type Response = super::responses::PreapproveinvoiceResponse;
+	}
+
 }
 
 
@@ -1393,7 +1433,7 @@ pub mod responses {
 	    pub invoice: String,
 	}
 
-	/// Type of connection
+	/// Type of connection (until 23.08, `websocket` was also allowed)
 	#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 	pub enum GetinfoAddressType {
 	    #[serde(rename = "dns")]
@@ -1406,8 +1446,6 @@ pub mod responses {
 	    TORV2,
 	    #[serde(rename = "torv3")]
 	    TORV3,
-	    #[serde(rename = "websocket")]
-	    WEBSOCKET,
 	}
 
 	impl TryFrom<i32> for GetinfoAddressType {
@@ -1419,7 +1457,6 @@ pub mod responses {
 	    2 => Ok(GetinfoAddressType::IPV6),
 	    3 => Ok(GetinfoAddressType::TORV2),
 	    4 => Ok(GetinfoAddressType::TORV3),
-	    5 => Ok(GetinfoAddressType::WEBSOCKET),
 	            o => Err(anyhow::anyhow!("Unknown variant {} for enum GetinfoAddressType", o)),
 	        }
 	    }
@@ -1439,6 +1476,8 @@ pub mod responses {
 	pub enum GetinfoBindingType {
 	    #[serde(rename = "local socket")]
 	    LOCAL_SOCKET,
+	    #[serde(rename = "websocket")]
+	    WEBSOCKET,
 	    #[serde(rename = "ipv4")]
 	    IPV4,
 	    #[serde(rename = "ipv6")]
@@ -1454,10 +1493,11 @@ pub mod responses {
 	    fn try_from(c: i32) -> Result<GetinfoBindingType, anyhow::Error> {
 	        match c {
 	    0 => Ok(GetinfoBindingType::LOCAL_SOCKET),
-	    1 => Ok(GetinfoBindingType::IPV4),
-	    2 => Ok(GetinfoBindingType::IPV6),
-	    3 => Ok(GetinfoBindingType::TORV2),
-	    4 => Ok(GetinfoBindingType::TORV3),
+	    1 => Ok(GetinfoBindingType::WEBSOCKET),
+	    2 => Ok(GetinfoBindingType::IPV4),
+	    3 => Ok(GetinfoBindingType::IPV6),
+	    4 => Ok(GetinfoBindingType::TORV2),
+	    5 => Ok(GetinfoBindingType::TORV3),
 	            o => Err(anyhow::anyhow!("Unknown variant {} for enum GetinfoBindingType", o)),
 	        }
 	    }
@@ -1478,7 +1518,8 @@ pub mod responses {
 	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct GetinfoResponse {
 	    pub id: PublicKey,
-	    pub alias: String,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub alias: Option<String>,
 	    pub color: String,
 	    pub num_peers: u32,
 	    pub num_pending_channels: u32,
@@ -1492,7 +1533,8 @@ pub mod responses {
 	    pub blockheight: u32,
 	    pub network: String,
 	    pub fees_collected_msat: Amount,
-	    pub address: Vec<GetinfoAddress>,
+	    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
+	    pub address: Option<Vec<GetinfoAddress>>,
 	    #[serde(skip_serializing_if = "crate::is_none_or_empty")]
 	    pub binding: Option<Vec<GetinfoBinding>>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
@@ -2596,119 +2638,19 @@ pub mod responses {
 	    }
 	}
 
-	/// the purpose of this input (*EXPERIMENTAL_FEATURES* only)
-	#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
-	pub enum ListtransactionsTransactionsInputsType {
-	    #[serde(rename = "theirs")]
-	    THEIRS,
-	    #[serde(rename = "deposit")]
-	    DEPOSIT,
-	    #[serde(rename = "withdraw")]
-	    WITHDRAW,
-	    #[serde(rename = "channel_funding")]
-	    CHANNEL_FUNDING,
-	    #[serde(rename = "channel_mutual_close")]
-	    CHANNEL_MUTUAL_CLOSE,
-	    #[serde(rename = "channel_unilateral_close")]
-	    CHANNEL_UNILATERAL_CLOSE,
-	    #[serde(rename = "channel_sweep")]
-	    CHANNEL_SWEEP,
-	    #[serde(rename = "channel_htlc_success")]
-	    CHANNEL_HTLC_SUCCESS,
-	    #[serde(rename = "channel_htlc_timeout")]
-	    CHANNEL_HTLC_TIMEOUT,
-	    #[serde(rename = "channel_penalty")]
-	    CHANNEL_PENALTY,
-	    #[serde(rename = "channel_unilateral_cheat")]
-	    CHANNEL_UNILATERAL_CHEAT,
-	}
-
-	impl TryFrom<i32> for ListtransactionsTransactionsInputsType {
-	    type Error = anyhow::Error;
-	    fn try_from(c: i32) -> Result<ListtransactionsTransactionsInputsType, anyhow::Error> {
-	        match c {
-	    0 => Ok(ListtransactionsTransactionsInputsType::THEIRS),
-	    1 => Ok(ListtransactionsTransactionsInputsType::DEPOSIT),
-	    2 => Ok(ListtransactionsTransactionsInputsType::WITHDRAW),
-	    3 => Ok(ListtransactionsTransactionsInputsType::CHANNEL_FUNDING),
-	    4 => Ok(ListtransactionsTransactionsInputsType::CHANNEL_MUTUAL_CLOSE),
-	    5 => Ok(ListtransactionsTransactionsInputsType::CHANNEL_UNILATERAL_CLOSE),
-	    6 => Ok(ListtransactionsTransactionsInputsType::CHANNEL_SWEEP),
-	    7 => Ok(ListtransactionsTransactionsInputsType::CHANNEL_HTLC_SUCCESS),
-	    8 => Ok(ListtransactionsTransactionsInputsType::CHANNEL_HTLC_TIMEOUT),
-	    9 => Ok(ListtransactionsTransactionsInputsType::CHANNEL_PENALTY),
-	    10 => Ok(ListtransactionsTransactionsInputsType::CHANNEL_UNILATERAL_CHEAT),
-	            o => Err(anyhow::anyhow!("Unknown variant {} for enum ListtransactionsTransactionsInputsType", o)),
-	        }
-	    }
-	}
 	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct ListtransactionsTransactionsInputs {
 	    pub txid: String,
 	    pub index: u32,
 	    pub sequence: u32,
-	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub item_type: Option<ListtransactionsTransactionsInputsType>,
-	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub channel: Option<ShortChannelId>,
 	}
 
-	/// the purpose of this output (*EXPERIMENTAL_FEATURES* only)
-	#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
-	pub enum ListtransactionsTransactionsOutputsType {
-	    #[serde(rename = "theirs")]
-	    THEIRS,
-	    #[serde(rename = "deposit")]
-	    DEPOSIT,
-	    #[serde(rename = "withdraw")]
-	    WITHDRAW,
-	    #[serde(rename = "channel_funding")]
-	    CHANNEL_FUNDING,
-	    #[serde(rename = "channel_mutual_close")]
-	    CHANNEL_MUTUAL_CLOSE,
-	    #[serde(rename = "channel_unilateral_close")]
-	    CHANNEL_UNILATERAL_CLOSE,
-	    #[serde(rename = "channel_sweep")]
-	    CHANNEL_SWEEP,
-	    #[serde(rename = "channel_htlc_success")]
-	    CHANNEL_HTLC_SUCCESS,
-	    #[serde(rename = "channel_htlc_timeout")]
-	    CHANNEL_HTLC_TIMEOUT,
-	    #[serde(rename = "channel_penalty")]
-	    CHANNEL_PENALTY,
-	    #[serde(rename = "channel_unilateral_cheat")]
-	    CHANNEL_UNILATERAL_CHEAT,
-	}
-
-	impl TryFrom<i32> for ListtransactionsTransactionsOutputsType {
-	    type Error = anyhow::Error;
-	    fn try_from(c: i32) -> Result<ListtransactionsTransactionsOutputsType, anyhow::Error> {
-	        match c {
-	    0 => Ok(ListtransactionsTransactionsOutputsType::THEIRS),
-	    1 => Ok(ListtransactionsTransactionsOutputsType::DEPOSIT),
-	    2 => Ok(ListtransactionsTransactionsOutputsType::WITHDRAW),
-	    3 => Ok(ListtransactionsTransactionsOutputsType::CHANNEL_FUNDING),
-	    4 => Ok(ListtransactionsTransactionsOutputsType::CHANNEL_MUTUAL_CLOSE),
-	    5 => Ok(ListtransactionsTransactionsOutputsType::CHANNEL_UNILATERAL_CLOSE),
-	    6 => Ok(ListtransactionsTransactionsOutputsType::CHANNEL_SWEEP),
-	    7 => Ok(ListtransactionsTransactionsOutputsType::CHANNEL_HTLC_SUCCESS),
-	    8 => Ok(ListtransactionsTransactionsOutputsType::CHANNEL_HTLC_TIMEOUT),
-	    9 => Ok(ListtransactionsTransactionsOutputsType::CHANNEL_PENALTY),
-	    10 => Ok(ListtransactionsTransactionsOutputsType::CHANNEL_UNILATERAL_CHEAT),
-	            o => Err(anyhow::anyhow!("Unknown variant {} for enum ListtransactionsTransactionsOutputsType", o)),
-	        }
-	    }
-	}
 	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct ListtransactionsTransactionsOutputs {
 	    pub index: u32,
 	    pub amount_msat: Amount,
 	    #[serde(rename = "scriptPubKey")]
 	    pub script_pub_key: String,
-	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub item_type: Option<ListtransactionsTransactionsOutputsType>,
-	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub channel: Option<ShortChannelId>,
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
@@ -2788,7 +2730,7 @@ pub mod responses {
 	    }
 	}
 
-	/// Type of connection
+	/// Type of connection (until 23.08, `websocket` was also allowed)
 	#[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 	pub enum ListnodesNodesAddressesType {
 	    #[serde(rename = "dns")]
@@ -2801,8 +2743,6 @@ pub mod responses {
 	    TORV2,
 	    #[serde(rename = "torv3")]
 	    TORV3,
-	    #[serde(rename = "websocket")]
-	    WEBSOCKET,
 	}
 
 	impl TryFrom<i32> for ListnodesNodesAddressesType {
@@ -2814,7 +2754,6 @@ pub mod responses {
 	    2 => Ok(ListnodesNodesAddressesType::IPV6),
 	    3 => Ok(ListnodesNodesAddressesType::TORV2),
 	    4 => Ok(ListnodesNodesAddressesType::TORV3),
-	    5 => Ok(ListnodesNodesAddressesType::WEBSOCKET),
 	            o => Err(anyhow::anyhow!("Unknown variant {} for enum ListnodesNodesAddressesType", o)),
 	        }
 	    }
@@ -4323,6 +4262,36 @@ pub mod responses {
 	    fn try_from(response: Response) -> Result<Self, Self::Error> {
 	        match response {
 	            Response::Stop(response) => Ok(response),
+	            _ => Err(TryFromResponseError)
+	        }
+	    }
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct PreapprovekeysendResponse {
+	}
+
+	impl TryFrom<Response> for PreapprovekeysendResponse {
+	    type Error = super::TryFromResponseError;
+
+	    fn try_from(response: Response) -> Result<Self, Self::Error> {
+	        match response {
+	            Response::PreApproveKeysend(response) => Ok(response),
+	            _ => Err(TryFromResponseError)
+	        }
+	    }
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct PreapproveinvoiceResponse {
+	}
+
+	impl TryFrom<Response> for PreapproveinvoiceResponse {
+	    type Error = super::TryFromResponseError;
+
+	    fn try_from(response: Response) -> Result<Self, Self::Error> {
+	        match response {
+	            Response::PreApproveInvoice(response) => Ok(response),
 	            _ => Err(TryFromResponseError)
 	        }
 	    }

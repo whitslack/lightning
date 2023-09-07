@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 export DEBIAN_FRONTEND=noninteractive
-export BITCOIN_VERSION=24.0.1
+export BITCOIN_VERSION=25.0
 export ELEMENTS_VERSION=22.0.2
 export RUST_VERSION=stable
 
@@ -24,7 +24,6 @@ sudo apt-get -qq install --no-install-recommends --allow-unauthenticated -yy \
      git \
      libc6-dev-arm64-cross \
      libc6-dev-armhf-cross \
-     libgmp-dev \
      libpq-dev \
      libprotobuf-c-dev \
      libsqlite3-dev \

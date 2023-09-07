@@ -1246,13 +1246,17 @@ wallet_commit_channel(struct lightningd *ld,
 					     &commitment_feerate);
 	channel->min_possible_feerate = commitment_feerate;
 	channel->max_possible_feerate = commitment_feerate;
-	channel->scb = tal(channel, struct scb_chan);
-	channel->scb->id = channel->dbid;
-	channel->scb->addr = channel->peer->addr;
-	channel->scb->node_id = channel->peer->id;
-	channel->scb->funding = *funding;
-	channel->scb->cid = channel->cid;
-	channel->scb->funding_sats = total_funding;
+	if (channel->peer->addr.itype == ADDR_INTERNAL_WIREADDR) {
+		channel->scb = tal(channel, struct scb_chan);
+		channel->scb->id = channel->dbid;
+		channel->scb->unused = 0;
+		channel->scb->addr = channel->peer->addr.u.wireaddr.wireaddr;
+		channel->scb->node_id = channel->peer->id;
+		channel->scb->funding = *funding;
+		channel->scb->cid = channel->cid;
+		channel->scb->funding_sats = total_funding;
+	} else
+		channel->scb = NULL;
 
 	channel->type = channel_type_dup(channel, type);
 	channel->scb->type = channel_type_dup(channel->scb, type);
@@ -2794,24 +2798,6 @@ static struct command_result *json_openchannel_init(struct command *cmd,
 		return command_fail(cmd, FUNDING_UNKNOWN_PEER, "Unknown peer");
 	}
 
-	channel = peer_any_unsaved_channel(peer, NULL);
-	if (!channel) {
-		channel = new_unsaved_channel(peer,
-					      peer->ld->config.fee_base,
-					      peer->ld->config.fee_per_satoshi);
-
-		/* We derive initial channel_id *now*, so we can tell it to
-		 * connectd. */
-		derive_tmp_channel_id(&channel->cid,
-				      &channel->local_basepoints.revocation);
-	}
-
-	if (channel->open_attempt
-	     || !list_empty(&channel->inflights))
-		return command_fail(cmd, FUNDING_STATE_INVALID,
-				    "Channel funding in-progress. %s",
-				    channel_state_name(channel));
-
 	if (!feature_negotiated(cmd->ld->our_features,
 			        peer->their_features,
 				OPT_DUAL_FUND)) {
@@ -2849,6 +2835,20 @@ static struct command_result *json_openchannel_init(struct command *cmd,
 				    "PSBT is missing required fields %s",
 				    type_to_string(tmpctx, struct wally_psbt,
 						   psbt));
+
+	if (socketpair(AF_LOCAL, SOCK_STREAM, 0, fds) != 0) {
+		return command_fail(cmd, FUND_MAX_EXCEEDED,
+				    "Failed to create socketpair: %s",
+				    strerror(errno));
+	}
+
+	/* Now we can't fail, create channel */
+	channel = new_unsaved_channel(peer,
+				      peer->ld->config.fee_base,
+				      peer->ld->config.fee_per_satoshi);
+	/* We derive initial channel_id *now*, so we can tell it to connectd. */
+	derive_tmp_channel_id(&channel->cid,
+			      &channel->local_basepoints.revocation);
 
 	/* Get a new open_attempt going */
 	channel->opener = LOCAL;
@@ -2894,12 +2894,6 @@ static struct command_result *json_openchannel_init(struct command *cmd,
 					   get_block_height(cmd->ld->topology),
 					   false,
 					   rates);
-
-	if (socketpair(AF_LOCAL, SOCK_STREAM, 0, fds) != 0) {
-		return command_fail(cmd, FUND_MAX_EXCEEDED,
-				    "Failed to create socketpair: %s",
-				    strerror(errno));
-	}
 
 	/* Start dualopend! */
 	if (!peer_start_dualopend(peer, new_peer_fd(cmd, fds[0]), channel)) {
@@ -3309,24 +3303,14 @@ static struct command_result *json_queryrates(struct command *cmd,
 				    peer->connected == PEER_DISCONNECTED
 				    ? "not connected" : "still connecting");
 
-	/* FIXME: This is wrong: we should always create a new channel? */
-	channel = peer_any_unsaved_channel(peer, NULL);
-	if (!channel) {
-		channel = new_unsaved_channel(peer,
-					      peer->ld->config.fee_base,
-					      peer->ld->config.fee_per_satoshi);
+	channel = new_unsaved_channel(peer,
+				      peer->ld->config.fee_base,
+				      peer->ld->config.fee_per_satoshi);
 
-		/* We derive initial channel_id *now*, so we can tell it to
-		 * connectd. */
-		derive_tmp_channel_id(&channel->cid,
-				      &channel->local_basepoints.revocation);
-	}
-
-	if (channel->open_attempt
-	     || !list_empty(&channel->inflights))
-		return command_fail(cmd, FUNDING_STATE_INVALID,
-				    "Channel funding in-progress. %s",
-				    channel_state_name(channel));
+	/* We derive initial channel_id *now*, so we can tell it to
+	 * connectd. */
+	derive_tmp_channel_id(&channel->cid,
+			      &channel->local_basepoints.revocation);
 
 	if (!feature_negotiated(cmd->ld->our_features,
 			        peer->their_features,

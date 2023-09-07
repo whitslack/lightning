@@ -371,16 +371,12 @@ The following tables are currently supported:
     - `txid` (type `txid`, sqltype `BLOB`)
     - `idx` (type `u32`, sqltype `INTEGER`, from JSON field `index`)
     - `sequence` (type `u32`, sqltype `INTEGER`)
-    - `type` (type `string`, sqltype `TEXT`)
-    - `channel` (type `short_channel_id`, sqltype `TEXT`)
   - related table `transactions_outputs`
     - `row` (reference to `transactions.rowid`, sqltype `INTEGER`)
     - `arrindex` (index within array, sqltype `INTEGER`)
     - `idx` (type `u32`, sqltype `INTEGER`, from JSON field `index`)
     - `amount_msat` (type `msat`, sqltype `INTEGER`)
     - `scriptPubKey` (type `hex`, sqltype `BLOB`)
-    - `type` (type `string`, sqltype `TEXT`)
-    - `channel` (type `short_channel_id`, sqltype `TEXT`)
 
 [comment]: # (GENERATE-DOC-END)
 
@@ -506,4 +502,4 @@ RESOURCES
 ---------
 
 Main web site: <https://github.com/ElementsProject/lightning>
-[comment]: # ( SHA256STAMP:3cb366d8ab200731c1254bcb1fae2ff2c0e500852cd1e1c6c3aecc423861af71)
+[comment]: # ( SHA256STAMP:20232a402688ee267ba0117077eb39a0a7ed301fc389b627127e830705921907)

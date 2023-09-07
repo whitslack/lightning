@@ -52,7 +52,7 @@ impl From<responses::GetinfoResponse> for pb::GetinfoResponse {
     fn from(c: responses::GetinfoResponse) -> Self {
         Self {
             id: c.id.serialize().to_vec(), // Rule #2 for type pubkey
-            alias: c.alias, // Rule #2 for type string
+            alias: c.alias, // Rule #2 for type string?
             color: hex::decode(&c.color).unwrap(), // Rule #2 for type hex
             num_peers: c.num_peers, // Rule #2 for type u32
             num_pending_channels: c.num_pending_channels, // Rule #2 for type u32
@@ -65,7 +65,7 @@ impl From<responses::GetinfoResponse> for pb::GetinfoResponse {
             network: c.network, // Rule #2 for type string
             fees_collected_msat: Some(c.fees_collected_msat.into()), // Rule #2 for type msat
             // Field: Getinfo.address[]
-            address: c.address.into_iter().map(|i| i.into()).collect(), // Rule #3 for type GetinfoAddress
+            address: c.address.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
             // Field: Getinfo.binding[]
             binding: c.binding.map(|arr| arr.into_iter().map(|i| i.into()).collect()).unwrap_or(vec![]), // Rule #3
             warning_bitcoind_sync: c.warning_bitcoind_sync, // Rule #2 for type string?
@@ -626,8 +626,6 @@ impl From<responses::ListtransactionsTransactionsInputs> for pb::Listtransaction
             txid: hex::decode(&c.txid).unwrap(), // Rule #2 for type txid
             index: c.index, // Rule #2 for type u32
             sequence: c.sequence, // Rule #2 for type u32
-            item_type: c.item_type.map(|v| v as i32),
-            channel: c.channel.map(|v| v.to_string()), // Rule #2 for type short_channel_id?
         }
     }
 }
@@ -639,8 +637,6 @@ impl From<responses::ListtransactionsTransactionsOutputs> for pb::Listtransactio
             index: c.index, // Rule #2 for type u32
             amount_msat: Some(c.amount_msat.into()), // Rule #2 for type msat
             script_pub_key: hex::decode(&c.script_pub_key).unwrap(), // Rule #2 for type hex
-            item_type: c.item_type.map(|v| v as i32),
-            channel: c.channel.map(|v| v.to_string()), // Rule #2 for type short_channel_id?
         }
     }
 }
@@ -1565,6 +1561,22 @@ impl From<responses::StopResponse> for pb::StopResponse {
 }
 
 #[allow(unused_variables,deprecated)]
+impl From<responses::PreapprovekeysendResponse> for pb::PreapprovekeysendResponse {
+    fn from(c: responses::PreapprovekeysendResponse) -> Self {
+        Self {
+        }
+    }
+}
+
+#[allow(unused_variables,deprecated)]
+impl From<responses::PreapproveinvoiceResponse> for pb::PreapproveinvoiceResponse {
+    fn from(c: responses::PreapproveinvoiceResponse) -> Self {
+        Self {
+        }
+    }
+}
+
+#[allow(unused_variables,deprecated)]
 impl From<requests::GetinfoRequest> for pb::GetinfoRequest {
     fn from(c: requests::GetinfoRequest) -> Self {
         Self {
@@ -2222,6 +2234,26 @@ impl From<requests::StopRequest> for pb::StopRequest {
     }
 }
 
+#[allow(unused_variables,deprecated)]
+impl From<requests::PreapprovekeysendRequest> for pb::PreapprovekeysendRequest {
+    fn from(c: requests::PreapprovekeysendRequest) -> Self {
+        Self {
+            destination: c.destination.map(|v| v.serialize().to_vec()), // Rule #2 for type pubkey?
+            payment_hash: c.payment_hash.map(|v| hex::decode(v).unwrap()), // Rule #2 for type hex?
+            amount_msat: c.amount_msat.map(|f| f.into()), // Rule #2 for type msat?
+        }
+    }
+}
+
+#[allow(unused_variables,deprecated)]
+impl From<requests::PreapproveinvoiceRequest> for pb::PreapproveinvoiceRequest {
+    fn from(c: requests::PreapproveinvoiceRequest) -> Self {
+        Self {
+            bolt11: c.bolt11, // Rule #2 for type string?
+        }
+    }
+}
+
 
 #[allow(unused_variables,deprecated)]
 impl From<pb::GetinfoRequest> for requests::GetinfoRequest {
@@ -2861,6 +2893,26 @@ impl From<pb::SignmessageRequest> for requests::SignmessageRequest {
 impl From<pb::StopRequest> for requests::StopRequest {
     fn from(c: pb::StopRequest) -> Self {
         Self {
+        }
+    }
+}
+
+#[allow(unused_variables,deprecated)]
+impl From<pb::PreapprovekeysendRequest> for requests::PreapprovekeysendRequest {
+    fn from(c: pb::PreapprovekeysendRequest) -> Self {
+        Self {
+            destination: c.destination.map(|v| PublicKey::from_slice(&v).unwrap()), // Rule #1 for type pubkey?
+            payment_hash: c.payment_hash.map(|v| hex::encode(v)), // Rule #1 for type hex?
+            amount_msat: c.amount_msat.map(|a| a.into()), // Rule #1 for type msat?
+        }
+    }
+}
+
+#[allow(unused_variables,deprecated)]
+impl From<pb::PreapproveinvoiceRequest> for requests::PreapproveinvoiceRequest {
+    fn from(c: pb::PreapproveinvoiceRequest) -> Self {
+        Self {
+            bolt11: c.bolt11, // Rule #1 for type string?
         }
     }
 }

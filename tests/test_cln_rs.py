@@ -4,7 +4,7 @@ from pathlib import Path
 from pyln.testing import node_pb2 as nodepb
 from pyln.testing import node_pb2_grpc as nodegrpc
 from pyln.testing import primitives_pb2 as primitivespb
-from pyln.testing.utils import env, TEST_NETWORK, wait_for, sync_blockheight
+from pyln.testing.utils import env, TEST_NETWORK, wait_for, sync_blockheight, TIMEOUT
 import grpc
 import pytest
 import subprocess
@@ -43,17 +43,7 @@ def test_plugin_start(node_factory):
     plugins = l1.rpc.plugin('list')['plugins']
     assert len([p for p in plugins if 'cln-plugin-startup' in p['name'] and p['active']]) == 1
 
-    cfg = l1.rpc.listconfigs()
-    p = cfg['plugins'][0]
-    p['path'] = None  # The path is host-specific, so blank it.
-    expected = {
-        'name': 'cln-plugin-startup',
-        'options': {
-            'test-option': 31337
-        },
-        'path': None
-    }
-    assert expected == p
+    assert str(bin_path) in l1.rpc.listconfigs()['configs']['plugin']['values_str']
 
     # Now check that the `testmethod was registered ok
     l1.rpc.help("testmethod") == {
@@ -275,14 +265,13 @@ def test_cln_plugin_reentrant(node_factory, executor):
     f1 = executor.submit(l2.rpc.pay, i1)
     f2 = executor.submit(l2.rpc.pay, i2)
 
-    import time
-    time.sleep(3)
+    l1.daemon.wait_for_logs(["plugin-cln-plugin-reentrant: Holding on to incoming HTLC Object"] * 2)
 
     print("Releasing HTLCs after holding them")
     l1.rpc.call('release')
 
-    assert f1.result()
-    assert f2.result()
+    assert f1.result(timeout=TIMEOUT)
+    assert f2.result(timeout=TIMEOUT)
 
 
 def test_grpc_keysend_routehint(bitcoind, node_factory):

@@ -2,7 +2,7 @@ from fixtures import *  # noqa: F401,F403
 from fixtures import TEST_NETWORK
 from pyln.client import RpcError, Millisatoshi
 from utils import (
-    only_one, wait_for, sync_blockheight, first_channel_id, calc_lease_fee, check_coin_moves, anchor_expected, EXPERIMENTAL_FEATURES
+    only_one, wait_for, sync_blockheight, first_channel_id, calc_lease_fee, check_coin_moves, anchor_expected
 )
 
 from pathlib import Path
@@ -194,7 +194,7 @@ def test_v2_fail_second(node_factory, bitcoind):
     l1, l2 = node_factory.line_graph(2, wait_for_announce=True)
 
     # Should have one channel between them.
-    only_one(only_one(l1.rpc.listpeers(l2.info['id'])['peers'])['channels'])
+    only_one(l1.rpc.listpeerchannels(l2.info['id'])['channels'])
 
     amount = 2**24 - 1
     l1.fundwallet(amount + 10000000)
@@ -209,16 +209,20 @@ def test_v2_fail_second(node_factory, bitcoind):
     psbt = l1.rpc.fundpsbt(amount, '253perkw', 250, reserve=0)['psbt']
     start = l1.rpc.openchannel_init(l2.info['id'], amount, psbt)
 
+    # They will both see a pair of channels
+    assert len(l1.rpc.listpeerchannels(l2.info['id'])['channels']) == 2
+    assert len(l2.rpc.listpeerchannels(l1.info['id'])['channels']) == 2
+
     # We can abort a channel
     l1.rpc.openchannel_abort(start['channel_id'])
 
-    peer_info = only_one(l1.rpc.listpeers(l2.info['id'])['peers'])
     # We should have deleted the 'in-progress' channel info
-    only_one(peer_info['channels'])
+    only_one(l1.rpc.listpeerchannels(l2.info['id'])['channels'])
 
     # FIXME: check that tx-abort was sent
     # Should be able to reattempt without reconnecting
     start = l1.rpc.openchannel_init(l2.info['id'], amount, psbt)
+    assert len(l1.rpc.listpeerchannels(l2.info['id'])['channels']) == 2
 
 
 @unittest.skipIf(TEST_NETWORK != 'regtest', 'elementsd doesnt yet support PSBT features we need')
@@ -1809,6 +1813,7 @@ def test_zeroconf_multichan_forward(node_factory):
                                .format(normal_scid, zeroconf_scid))
 
 
+@pytest.mark.developer("dev-allowdustreserve")
 def test_zeroreserve(node_factory, bitcoind):
     """Ensure we can set the reserves.
 
@@ -1888,6 +1893,7 @@ def test_zeroreserve(node_factory, bitcoind):
     assert len(decoded['vout']) == 1 if TEST_NETWORK == 'regtest' else 2
 
 
+@pytest.mark.developer("dev-allowdustreserve")
 def test_zeroreserve_mixed(node_factory, bitcoind):
     """l1 runs with zeroreserve, l2 and l3 without, should still work
 
@@ -1918,6 +1924,7 @@ def test_zeroreserve_mixed(node_factory, bitcoind):
     l3.rpc.fundchannel(l1.info['id'], 10**6)
 
 
+@pytest.mark.developer("dev-allowdustreserve")
 def test_zeroreserve_alldust(node_factory):
     """If we allow dust reserves we need larger fundings
 
@@ -1997,7 +2004,7 @@ def test_openchannel_no_confirmed_inputs_opener(node_factory, bitcoind):
     l2_opts = l1_opts.copy()
     l1_opts['require-confirmed-inputs'] = True
     l1, l2 = node_factory.get_nodes(2, opts=[l1_opts, l2_opts])
-    assert l1.rpc.listconfigs()['require-confirmed-inputs']
+    assert l1.rpc.listconfigs()['configs']['require-confirmed-inputs']['value_bool'] is True
 
     amount = 500000
     l1.fundwallet(20000000)
@@ -2038,7 +2045,7 @@ def test_openchannel_no_unconfirmed_inputs_accepter(node_factory, bitcoind):
     l2_opts = l1_opts.copy()
     l2_opts['require-confirmed-inputs'] = True
     l1, l2 = node_factory.get_nodes(2, opts=[l1_opts, l2_opts])
-    assert l2.rpc.listconfigs()['require-confirmed-inputs']
+    assert l2.rpc.listconfigs()['configs']['require-confirmed-inputs']['value_bool'] is True
 
     amount = 500000
     l1.fundwallet(20000000)
@@ -2089,7 +2096,7 @@ def test_openchannel_no_unconfirmed_inputs_accepter(node_factory, bitcoind):
     l2.stop()
     del l2.daemon.opts['require-confirmed-inputs']
     l2.start()
-    assert not l2.rpc.listconfigs()['require-confirmed-inputs']
+    assert l2.rpc.listconfigs()['configs']['require-confirmed-inputs']['value_bool'] is False
 
     # Turn the mock back on so we pretend everything l1 sends is unconf
     l2.daemon.rpcproxy.mock_rpc('gettxout', _no_utxo_response)
@@ -2112,7 +2119,7 @@ def test_openchannel_no_unconfirmed_inputs_accepter(node_factory, bitcoind):
     _verify_utxos(l1, utxo_lookups)
 
 
-@unittest.skipIf(not EXPERIMENTAL_FEATURES, "anchors not available")
+@unittest.skip("anchors not available")
 @pytest.mark.developer("dev-force-features, dev-queryrates required")
 @pytest.mark.openchannel('v2')
 def test_no_anchor_liquidity_ads(node_factory, bitcoind):

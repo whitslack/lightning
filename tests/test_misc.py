@@ -9,10 +9,9 @@ from pyln.testing.utils import (
     wait_for, TailableProc, env, mine_funding_to_announce
 )
 from utils import (
-    account_balance, scriptpubkey_addr, check_coin_moves
+    account_balance, scriptpubkey_addr, check_coin_moves, anchor_expected
 )
 from ephemeral_port_reserve import reserve
-from utils import EXPERIMENTAL_FEATURES
 
 import json
 import os
@@ -722,46 +721,39 @@ def test_address(node_factory):
     ret = l2.rpc.connect(l1.info['id'], l1.daemon.opts['bind-addr'])
     assert ret['address'] == {'type': 'local socket', 'socket': l1.daemon.opts['bind-addr']}
 
-    # 'addr' with local socket works too.
-    l1.stop()
-    del l1.daemon.opts['bind-addr']
-    l1.daemon.opts['addr'] = os.path.join(l1.daemon.lightning_dir, TEST_NETWORK, "sock")
-    # start expects a port, so we open-code here.
-    l1.daemon.start()
-
-    l2 = node_factory.get_node()
-    l2.rpc.connect(l1.info['id'], l1.daemon.opts['addr'])
-
 
 def test_listconfigs(node_factory, bitcoind, chainparams):
     # Make extremely long entry, check it works
     for deprecated in (True, False):
         l1 = node_factory.get_node(options={'log-prefix': 'lightning1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
-                                            'allow-deprecated-apis': deprecated})
+                                            'allow-deprecated-apis': deprecated,
+                                            'wumbo': None})
 
-        configs = l1.rpc.listconfigs()
-        # See utils.py
-        assert configs['allow-deprecated-apis'] == deprecated
-        assert configs['network'] == chainparams['name']
-        assert configs['ignore-fee-limits'] is False
-        assert configs['log-prefix'] == 'lightning1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx...'
+        configs = l1.rpc.listconfigs()['configs']
+        # See utils.py for these values
+        for name, valfield, val in (('allow-deprecated-apis', 'value_bool', deprecated),
+                                    ('network', 'value_str', chainparams['name']),
+                                    ('ignore-fee-limits', 'value_bool', False),
+                                    ('log-prefix', 'value_str', 'lightning1-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx')):
+            c = configs[name]
+            assert c['source'] == 'cmdline'
+            assert c[valfield] == val
+            assert 'plugin' not in c
 
         # These are aliases, but we don't print the (unofficial!) wumbo.
         assert 'wumbo' not in configs
-        assert configs['large-channels'] is False
+        assert configs['large-channels']['set'] is True
+        assert configs['large-channels']['source'] == 'cmdline'
 
-        # Test one at a time.
+        # Test modern ones!
         for c in configs.keys():
-            if c.startswith('#') or c.startswith('plugins') or c == 'important-plugins':
-                continue
-            oneconfig = l1.rpc.listconfigs(config=c)
-            assert(oneconfig[c] == configs[c])
+            oneconfig = l1.rpc.listconfigs(config=c)['configs']
+            assert oneconfig[c] == configs[c]
 
 
 def test_listconfigs_plugins(node_factory, bitcoind, chainparams):
-    l1 = node_factory.get_node()
+    l1 = node_factory.get_node(options={'allow-deprecated-apis': True})
 
-    # assert that we have pay plugin and that plugins have a name and path
     configs = l1.rpc.listconfigs()
     assert configs['important-plugins']
     assert len([p for p in configs['important-plugins'] if p['name'] == "pay"]) == 1
@@ -1651,7 +1643,7 @@ def test_feerates(node_factory):
         assert feerate['perkw']
         assert 'perkb' not in feerate
 
-    if EXPERIMENTAL_FEATURES:
+    if anchor_expected(l1):
         # option_anchor_outputs
         assert htlc_timeout_cost == htlc_feerate * 666 // 1000
         assert htlc_success_cost == htlc_feerate * 706 // 1000
@@ -1707,8 +1699,19 @@ def test_logging(node_factory):
                                      .format(l2.daemon.lightning_dir),
                                      '-H',
                                      'listconfigs']).decode('utf-8').splitlines()
-    assert 'log-file=logfile1' in lines
-    assert 'log-file=logfile2' in lines
+    # Arrays get split awkwardly by -H!
+    assert 'log-file=values_str=logfile1' in lines
+    assert 'logfile2' in lines
+
+    # Flat mode is better!
+    lines = subprocess.check_output(['cli/lightning-cli',
+                                     '--network={}'.format(TEST_NETWORK),
+                                     '--lightning-dir={}'
+                                     .format(l2.daemon.lightning_dir),
+                                     '-F',
+                                     'listconfigs']).decode('utf-8').splitlines()
+    assert 'configs.log-file.values_str[0]=logfile1' in lines
+    assert 'configs.log-file.values_str[1]=logfile2' in lines
 
 
 @unittest.skipIf(VALGRIND,
@@ -1744,8 +1747,8 @@ def test_configfile_before_chdir(node_factory):
     # Update executable to point to right place
     l1.daemon.executable = os.path.join(olddir, l1.daemon.executable)
     l1.start()
-    assert l1.rpc.listconfigs()['always-use-proxy']
-    assert l1.rpc.listconfigs()['proxy'] == '127.0.0.1:100'
+    assert l1.rpc.listconfigs()['configs']['always-use-proxy'] == {'source': os.path.abspath(config) + ":1", 'value_bool': True}
+    assert l1.rpc.listconfigs()['configs']['proxy'] == {'source': os.path.abspath(config) + ":2", 'value_str': '127.0.0.1:100'}
     os.chdir(olddir)
 
 
@@ -1950,7 +1953,7 @@ def test_bitcoind_feerate_floor(node_factory, bitcoind):
     """Don't return a feerate less than minrelaytxfee/mempoolminfee."""
     l1 = node_factory.get_node()
 
-    anchors = EXPERIMENTAL_FEATURES
+    anchors = anchor_expected(l1)
     assert l1.rpc.feerates('perkb') == {
         "perkb": {
             "opening": 30000,
@@ -2148,23 +2151,12 @@ def test_list_features_only(node_factory):
                 'option_static_remotekey/odd',
                 'option_payment_secret/even',
                 'option_basic_mpp/odd',
-                ]
-    if EXPERIMENTAL_FEATURES:
-        expected += ['option_anchor_outputs/odd']
-        expected += ['option_route_blinding/odd']
-        expected += ['option_shutdown_anysegwit/odd']
-        expected += ['option_quiesce/odd']
-        expected += ['option_onion_messages/odd']
-        expected += ['option_channel_type/odd']
-        expected += ['option_scid_alias/odd']
-        expected += ['option_zeroconf/odd']
-        expected += ['supports_open_accept_channel_type']
-    else:
-        expected += ['option_route_blinding/odd']
-        expected += ['option_shutdown_anysegwit/odd']
-        expected += ['option_channel_type/odd']
-        expected += ['option_scid_alias/odd']
-        expected += ['option_zeroconf/odd']
+                'option_route_blinding/odd',
+                'option_shutdown_anysegwit/odd',
+                'option_channel_type/odd',
+                'option_scid_alias/odd',
+                'option_zeroconf/odd',
+                'supports_open_accept_channel_type']
     assert features == expected
 
 
@@ -2176,7 +2168,7 @@ def test_relative_config_dir(node_factory):
     os.chdir('/'.join(root_dir))
     l1.daemon.executable = os.path.join(initial_dir, l1.daemon.executable)
     l1.start()
-    assert os.path.isabs(l1.rpc.listconfigs()["lightning-dir"])
+    assert os.path.isabs(l1.rpc.listconfigs()['configs']["lightning-dir"]['value_str'])
     l1.stop()
     os.chdir(initial_dir)
 
@@ -2253,7 +2245,7 @@ def test_include(node_factory):
     l1.daemon.opts['conf'] = os.path.join(subdir, "conf1")
     l1.start()
 
-    assert l1.rpc.listconfigs('alias')['alias'] == 'conf2'
+    assert l1.rpc.listconfigs('alias')['configs']['alias'] == {'source': os.path.join(subdir, "conf2") + ":1", 'value_str': 'conf2'}
 
 
 def test_config_in_subdir(node_factory, chainparams):
@@ -2265,7 +2257,7 @@ def test_config_in_subdir(node_factory, chainparams):
         f.write('alias=test_config_in_subdir')
     l1.start()
 
-    assert l1.rpc.listconfigs('alias')['alias'] == 'test_config_in_subdir'
+    assert l1.rpc.listconfigs('alias')['configs']['alias'] == {'source': os.path.join(subdir, "config") + ":1", 'value_str': 'test_config_in_subdir'}
 
     l1.stop()
 
@@ -2275,7 +2267,7 @@ def test_config_in_subdir(node_factory, chainparams):
 
     out = subprocess.run(['lightningd/lightningd',
                           '--lightning-dir={}'.format(l1.daemon.opts.get("lightning-dir"))],
-                         stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=TIMEOUT)
     assert out.returncode == 1
     assert "conf: not permitted in configuration files" in out.stderr.decode('utf-8')
 
@@ -2294,7 +2286,7 @@ def test_config_in_subdir(node_factory, chainparams):
                           '--lightning-dir={}'.format(l1.daemon.opts.get("lightning-dir"))],
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     assert out.returncode == 1
-    assert "network: not permitted in network-specific configuration files" in out.stderr.decode('utf-8')
+    assert "network={}: not permitted in network-specific configuration files".format(network) in out.stderr.decode('utf-8')
 
     # lightning-dir only allowed if we explicitly use --conf
     os.unlink(os.path.join(subdir, "config"))
@@ -2305,7 +2297,7 @@ def test_config_in_subdir(node_factory, chainparams):
                           '--lightning-dir={}'.format(l1.daemon.opts.get("lightning-dir"))],
                          stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     assert out.returncode == 1
-    assert "lightning-dir: not permitted in implicit configuration files" in out.stderr.decode('utf-8')
+    assert "lightning-dir={}/test: not permitted in implicit configuration files".format(l1.daemon.opts.get("lightning-dir")) in out.stderr.decode('utf-8')
 
     l1.daemon.opts['conf'] = os.path.join(l1.daemon.opts.get("lightning-dir"), "config")
     l1.start()
@@ -2893,7 +2885,7 @@ def test_notimestamp_logging(node_factory):
     l1.start()
     assert l1.daemon.logs[0].startswith("DEBUG")
 
-    assert l1.rpc.listconfigs()['log-timestamps'] is False
+    assert l1.rpc.listconfigs()['configs']['log-timestamps']['value_bool'] is False
 
 
 def test_getlog(node_factory):
@@ -2919,7 +2911,7 @@ def test_log_filter(node_factory):
 
 def test_force_feerates(node_factory):
     l1 = node_factory.get_node(options={'force-feerates': 1111})
-    assert l1.rpc.listconfigs()['force-feerates'] == '1111'
+    assert l1.rpc.listconfigs()['configs']['force-feerates']['value_str'] == '1111'
 
     # Note that estimates are still valid here, despite "force-feerates"
     estimates = [{"blockcount": 2,
@@ -2949,7 +2941,7 @@ def test_force_feerates(node_factory):
     l1.daemon.opts['force-feerates'] = '1111/2222'
     l1.start()
 
-    assert l1.rpc.listconfigs()['force-feerates'] == '1111/2222'
+    assert l1.rpc.listconfigs()['configs']['force-feerates']['value_str'] == '1111/2222'
     assert l1.rpc.feerates('perkw')['perkw'] == {
         "opening": 1111,
         "mutual_close": 2222,
@@ -2964,7 +2956,7 @@ def test_force_feerates(node_factory):
     l1.daemon.opts['force-feerates'] = '1111/2222/3333/4444/5555/6666'
     l1.start()
 
-    assert l1.rpc.listconfigs()['force-feerates'] == '1111/2222/3333/4444/5555/6666'
+    assert l1.rpc.listconfigs()['configs']['force-feerates']['value_str'] == '1111/2222/3333/4444/5555/6666'
     assert l1.rpc.feerates('perkw')['perkw'] == {
         "opening": 1111,
         "mutual_close": 2222,
