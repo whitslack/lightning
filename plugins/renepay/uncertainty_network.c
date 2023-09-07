@@ -291,8 +291,7 @@ bool uncertainty_network_update_from_listpeerchannels(
 			goto malformed;
 
 		/* Don't report opening/closing channels */
-		if (!json_tok_streq(buf, statetok, "CHANNELD_NORMAL")
-		    && !json_tok_streq(buf, statetok, "CHANNELD_AWAITING_SPLICE")) {
+		if (!json_tok_streq(buf, statetok, "CHANNELD_NORMAL")) {
 			tal_arr_expand(&p->disabled, scid);
 			continue;
 		}
