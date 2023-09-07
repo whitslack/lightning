@@ -374,6 +374,8 @@ void plugin_kill(struct plugin *plugin, enum log_level loglevel,
 	log_(plugin->log, loglevel,
 	     NULL, loglevel >= LOG_UNUSUAL,
 	     "Killing plugin: %s", msg);
+	/* Unless, maybe, plugin was *really* important? */
+	assert(plugin->pid != -1);
 	kill(plugin->pid, SIGKILL);
 	if (plugin->start_cmd) {
 		plugin_cmd_killed(plugin->start_cmd, plugin, msg);
@@ -1867,7 +1869,7 @@ bool plugins_send_getmanifest(struct plugins *plugins, const char *cmd_id)
 		}
 		if (plugins->startup)
 			fatal("error starting plugin '%s': %s", p->cmd, err);
-		plugin_kill(p, LOG_UNUSUAL, "%s", err);
+		tal_free(p);
 	}
 
 	return sent;
