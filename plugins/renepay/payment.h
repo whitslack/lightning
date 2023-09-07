@@ -4,6 +4,8 @@
 #include <common/gossmap.h>
 #include <plugins/libplugin.h>
 
+struct pay_flow;
+
 enum payment_status {
         PAYMENT_PENDING, PAYMENT_SUCCESS, PAYMENT_FAIL
 };
@@ -28,7 +30,7 @@ struct payment {
 	struct gossmap_localmods *local_gossmods;
 
 	/* Channels we decided to disable for various reasons. */
-	struct short_channel_id *disabled;
+	struct short_channel_id *disabled_scids;
 
 	/* Used in get_payflows to set ids to each pay_flow. */
 	u64 next_partid;
@@ -140,7 +142,13 @@ struct amount_msat payment_delivered(const struct payment *p);
 struct amount_msat payment_amount(const struct payment *p);
 struct amount_msat payment_fees(const struct payment *p);
 
-void payment_note(struct payment *p, const char *fmt, ...);
+/* These log at LOG_DBG, append to notes, and send command notification */
+void payment_note(struct payment *p,
+		  enum log_level lvl,
+		  const char *fmt, ...);
+void payflow_note(struct pay_flow *pf,
+		  enum log_level lvl,
+		  const char *fmt, ...);
 void payment_assert_delivering_incomplete(const struct payment *p);
 void payment_assert_delivering_all(const struct payment *p);
 
@@ -148,6 +156,18 @@ void payment_assert_delivering_all(const struct payment *p);
 void payment_reconsider(struct payment *p);
 
 u64 payment_parts(const struct payment *payment);
+
+/* Disable this scid for this payment, and tell me why! */
+void payflow_disable_chan(struct pay_flow *pf,
+			  struct short_channel_id scid,
+			  enum log_level lvl,
+			  const char *fmt, ...);
+
+/* Sometimes, disabling chan is independent of a flow. */
+void payment_disable_chan(struct payment *p,
+			  struct short_channel_id scid,
+			  enum log_level lvl,
+			  const char *fmt, ...);
 
 struct command_result *payment_fail(
 	struct payment *payment,

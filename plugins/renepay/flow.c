@@ -48,6 +48,52 @@ const char *fmt_chan_extra_map(
 	return buff;
 }
 
+const char *fmt_chan_extra_details(const tal_t *ctx,
+				   struct chan_extra_map* chan_extra_map,
+				   const struct short_channel_id_dir *scidd)
+{
+	const struct chan_extra *ce = chan_extra_map_get(chan_extra_map,
+							 scidd->scid);
+	const struct chan_extra_half *ch;
+	char *str = tal_strdup(ctx, "");
+	char sep = '(';
+
+	if (!ce)
+		return str;
+
+	ch = &ce->half[scidd->dir];
+	if (ch->num_htlcs != 0) {
+		tal_append_fmt(&str, "%c%s in %zu htlcs",
+			       sep,
+			       fmt_amount_msat(tmpctx, ch->htlc_total),
+			       ch->num_htlcs);
+		sep = ',';
+	}
+	/* Happens with local channels, where we're certain. */
+	if (amount_msat_eq(ch->known_min, ch->known_max)) {
+		tal_append_fmt(&str, "%cmin=max=%s",
+			       sep,
+			       fmt_amount_msat(tmpctx, ch->known_min));
+		sep = ',';
+	} else {
+		if (amount_msat_greater(ch->known_min, AMOUNT_MSAT(0))) {
+			tal_append_fmt(&str, "%cmin=%s",
+				       sep,
+				       fmt_amount_msat(tmpctx, ch->known_min));
+			sep = ',';
+	}
+		if (!amount_msat_eq(ch->known_max, ce->capacity)) {
+			tal_append_fmt(&str, "%cmax=%s",
+				       sep,
+				       fmt_amount_msat(tmpctx, ch->known_max));
+			sep = ',';
+		}
+	}
+	if (!streq(str, ""))
+		tal_append_fmt(&str, ")");
+	return str;
+}
+
 struct chan_extra *new_chan_extra(
 		struct chan_extra_map *chan_extra_map,
 		const struct short_channel_id scid,
@@ -120,82 +166,77 @@ static void chan_extra_can_send_(
 
 	chan_extra_adjust_half(ce,!dir);
 }
+
 void chan_extra_can_send(
 		struct chan_extra_map *chan_extra_map,
-		struct short_channel_id scid,
-		int dir,
+		const struct short_channel_id_dir *scidd,
 		struct amount_msat x)
 {
 	struct chan_extra *ce = chan_extra_map_get(chan_extra_map,
-						   scid);
+						   scidd->scid);
 	if(!ce)
 	{
 		debug_err("%s unexpected chan_extra ce is NULL",
 			__PRETTY_FUNCTION__);
 	}
-	if(!amount_msat_add(&x,x,ce->half[dir].htlc_total))
+	if(!amount_msat_add(&x,x,ce->half[scidd->dir].htlc_total))
 	{
 		debug_err("%s (line %d) cannot add x=%s and htlc_total=%s",
 			__PRETTY_FUNCTION__,__LINE__,
 			type_to_string(tmpctx,struct amount_msat,&x),
-			type_to_string(tmpctx,struct amount_msat,&ce->half[dir].htlc_total));
+			type_to_string(tmpctx,struct amount_msat,&ce->half[scidd->dir].htlc_total));
 	}
-	chan_extra_can_send_(ce,dir,x);
+	chan_extra_can_send_(ce,scidd->dir,x);
 }
 
-/* Update the knowledge that this (channel,direction) cannot send x msat.*/
+/* Update the knowledge that this (channel,direction) cannot send.*/
 void chan_extra_cannot_send(
-		struct payment *p,
+		struct pay_flow *pf,
 		struct chan_extra_map *chan_extra_map,
-		struct short_channel_id scid,
-		int dir,
-		struct amount_msat x)
+		const struct short_channel_id_dir *scidd,
+		struct amount_msat sent)
 {
+	struct amount_msat oldmin, oldmax, x;
 	struct chan_extra *ce = chan_extra_map_get(chan_extra_map,
-						   scid);
+						   scidd->scid);
 	if(!ce)
 	{
 		debug_err("%s (line %d) unexpected chan_extra ce is NULL",
 			__PRETTY_FUNCTION__,__LINE__);
 	}
 
-	/* If a channel cannot send x it means that the upper bound for the
-	 * liquidity is MAX_L < x + htlc_total */
-	if(!amount_msat_add(&x,x,ce->half[dir].htlc_total))
+	/* Note: sent is already included in htlc_total! */
+	if(!amount_msat_sub(&x,ce->half[scidd->dir].htlc_total,AMOUNT_MSAT(1)))
 	{
-		debug_err("%s (line %d) cannot add x=%s and htlc_total=%s",
+		debug_err("%s (line %d) unexpected htlc_total=%s is less than 0msat",
 			__PRETTY_FUNCTION__,__LINE__,
-			type_to_string(tmpctx,struct amount_msat,&x),
-			type_to_string(tmpctx,struct amount_msat,&ce->half[dir].htlc_total));
-	}
-
-	if(!amount_msat_sub(&x,x,AMOUNT_MSAT(1)))
-	{
-		debug_err("%s (line %d) unexpected x=%s is less than 0msat",
-			__PRETTY_FUNCTION__,__LINE__,
-			type_to_string(tmpctx,struct amount_msat,&x)
+			type_to_string(tmpctx,struct amount_msat,
+				       &ce->half[scidd->dir].htlc_total)
 			);
 		x = AMOUNT_MSAT(0);
 	}
 
+	oldmin = ce->half[scidd->dir].known_min;
+	oldmax = ce->half[scidd->dir].known_max;
+
 	/* If we "knew" the capacity was at least this, we just showed we're wrong! */
-	if (amount_msat_less_eq(x, ce->half[dir].known_min)) {
-		debug_paynote(p, "Expected scid=%s, dir=%d min %s, but %s failed!  Setting min to 0",
-			      type_to_string(tmpctx,struct short_channel_id,&scid),
-			      dir,
-			      type_to_string(tmpctx,struct amount_msat,&ce->half[dir].known_min),
-			      type_to_string(tmpctx,struct amount_msat,&x));
-		ce->half[dir].known_min = AMOUNT_MSAT(0);
+	if (amount_msat_less(x, ce->half[scidd->dir].known_min)) {
+		/* Skip to half of x, since we don't know (rounds down) */
+		ce->half[scidd->dir].known_min = amount_msat_div(x, 2);
 	}
-	ce->half[dir].known_max = amount_msat_min(ce->half[dir].known_max,x);
 
-	debug_paynote(p,"Update chan knowledge scid=%s, dir=%d: [%s,%s]",
-		type_to_string(tmpctx,struct short_channel_id,&scid),
-		dir,
-		type_to_string(tmpctx,struct amount_msat,&ce->half[dir].known_min),
-		type_to_string(tmpctx,struct amount_msat,&ce->half[dir].known_max));
+	ce->half[scidd->dir].known_max = amount_msat_min(ce->half[scidd->dir].known_max,x);
 
-	chan_extra_adjust_half(ce,!dir);
+	payflow_note(pf, LOG_INFORM,
+		     "Failure of %s for %s capacity [%s,%s] -> [%s,%s]",
+		     fmt_amount_msat(tmpctx, sent),
+		     type_to_string(tmpctx,struct short_channel_id_dir,scidd),
+		     fmt_amount_msat(tmpctx, oldmin),
+		     fmt_amount_msat(tmpctx, oldmax),
+		     fmt_amount_msat(tmpctx, ce->half[scidd->dir].known_min),
+		     fmt_amount_msat(tmpctx, ce->half[scidd->dir].known_max));
+
+	chan_extra_adjust_half(ce,!scidd->dir);
 }
 /* Update the knowledge that this (channel,direction) has liquidity x.*/
 static void chan_extra_set_liquidity_(
@@ -220,25 +261,33 @@ static void chan_extra_set_liquidity_(
 }
 void chan_extra_set_liquidity(
 		struct chan_extra_map *chan_extra_map,
-		struct short_channel_id scid,
-		int dir,
+		const struct short_channel_id_dir *scidd,
 		struct amount_msat x)
 {
 	struct chan_extra *ce = chan_extra_map_get(chan_extra_map,
-						   scid);
+						   scidd->scid);
 	if(!ce)
 	{
 		debug_err("%s unexpected chan_extra ce is NULL",
 			__PRETTY_FUNCTION__);
 	}
-	chan_extra_set_liquidity_(ce,dir,x);
+	chan_extra_set_liquidity_(ce,scidd->dir,x);
 }
 /* Update the knowledge that this (channel,direction) has sent x msat.*/
-static void chan_extra_sent_success_(
-		struct chan_extra *ce,
-		int dir,
+void chan_extra_sent_success(
+		struct pay_flow *pf,
+		struct chan_extra_map *chan_extra_map,
+		const struct short_channel_id_dir *scidd,
 		struct amount_msat x)
 {
+	struct chan_extra *ce = chan_extra_map_get(chan_extra_map,
+						   scidd->scid);
+	if(!ce)
+	{
+		debug_err("%s unexpected chan_extra ce is NULL",
+			__PRETTY_FUNCTION__);
+	}
+
 	if(amount_msat_greater(x,ce->capacity))
 	{
 		debug_err("%s unexpected capacity=%s is less than x=%s",
@@ -251,30 +300,24 @@ static void chan_extra_sent_success_(
 
 	struct amount_msat new_a, new_b;
 
-	if(!amount_msat_sub(&new_a,ce->half[dir].known_min,x))
+	if(!amount_msat_sub(&new_a,ce->half[scidd->dir].known_min,x))
 		new_a = AMOUNT_MSAT(0);
-	if(!amount_msat_sub(&new_b,ce->half[dir].known_max,x))
+	if(!amount_msat_sub(&new_b,ce->half[scidd->dir].known_max,x))
 		new_b = AMOUNT_MSAT(0);
 
-	ce->half[dir].known_min = new_a;
-	ce->half[dir].known_max = new_b;
+	payflow_note(pf, LOG_DBG,
+		     "Success of %s for %s capacity [%s,%s] -> [%s,%s]",
+		     fmt_amount_msat(tmpctx, x),
+		     type_to_string(tmpctx,struct short_channel_id_dir,scidd),
+		     fmt_amount_msat(tmpctx, ce->half[scidd->dir].known_min),
+		     fmt_amount_msat(tmpctx, ce->half[scidd->dir].known_max),
+		     fmt_amount_msat(tmpctx, new_a),
+		     fmt_amount_msat(tmpctx, new_b));
 
-	chan_extra_adjust_half(ce,!dir);
-}
-void chan_extra_sent_success(
-		struct chan_extra_map *chan_extra_map,
-		struct short_channel_id scid,
-		int dir,
-		struct amount_msat x)
-{
-	struct chan_extra *ce = chan_extra_map_get(chan_extra_map,
-						   scid);
-	if(!ce)
-	{
-		debug_err("%s unexpected chan_extra ce is NULL",
-			__PRETTY_FUNCTION__);
-	}
-	chan_extra_sent_success_(ce,dir,x);
+	ce->half[scidd->dir].known_min = new_a;
+	ce->half[scidd->dir].known_max = new_b;
+
+	chan_extra_adjust_half(ce,!scidd->dir);
 }
 /* Forget a bit about this (channel,direction) state. */
 static void chan_extra_relax_(
@@ -298,19 +341,18 @@ static void chan_extra_relax_(
 }
 void chan_extra_relax(
 		struct chan_extra_map *chan_extra_map,
-		struct short_channel_id scid,
-		int dir,
+		const struct short_channel_id_dir *scidd,
 		struct amount_msat x,
 		struct amount_msat y)
 {
 	struct chan_extra *ce = chan_extra_map_get(chan_extra_map,
-						   scid);
+						   scidd->scid);
 	if(!ce)
 	{
 		debug_err("%s unexpected chan_extra ce is NULL",
 			__PRETTY_FUNCTION__);
 	}
-	chan_extra_relax_(ce,dir,x,y);
+	chan_extra_relax_(ce,scidd->dir,x,y);
 }
 
 /* Forget the channel information by a fraction of the capacity. */
@@ -334,15 +376,14 @@ void chan_extra_relax_fraction(
 /* Returns either NULL, or an entry from the hash */
 struct chan_extra_half *
 get_chan_extra_half_by_scid(struct chan_extra_map *chan_extra_map,
-			    const struct short_channel_id scid,
-			    int dir)
+			    const struct short_channel_id_dir *scidd)
 {
 	struct chan_extra *ce;
 
-	ce = chan_extra_map_get(chan_extra_map, scid);
+	ce = chan_extra_map_get(chan_extra_map, scidd->scid);
 	if (!ce)
 		return NULL;
-	return &ce->half[dir];
+	return &ce->half[scidd->dir];
 }
 /* Helper if we have a gossmap_chan */
 struct chan_extra_half *
@@ -351,9 +392,11 @@ get_chan_extra_half_by_chan(const struct gossmap *gossmap,
 			    const struct gossmap_chan *chan,
 			    int dir)
 {
-	return get_chan_extra_half_by_scid(chan_extra_map,
-					   gossmap_chan_scid(gossmap, chan),
-					   dir);
+	struct short_channel_id_dir scidd;
+
+	scidd.scid = gossmap_chan_scid(gossmap, chan);
+	scidd.dir = dir;
+	return get_chan_extra_half_by_scid(chan_extra_map, &scidd);
 }
 
 
@@ -371,9 +414,12 @@ get_chan_extra_half_by_chan_verify(
 		int dir)
 {
 
-	const struct short_channel_id scid = gossmap_chan_scid(gossmap,chan);
+	struct short_channel_id_dir scidd;
+
+	scidd.scid = gossmap_chan_scid(gossmap,chan);
+	scidd.dir = dir;
 	struct chan_extra_half *h = get_chan_extra_half_by_scid(
-					chan_extra_map,scid,dir);
+					chan_extra_map,&scidd);
 	if (!h) {
 		struct amount_sat cap;
 		struct amount_msat cap_msat;
@@ -386,7 +432,7 @@ get_chan_extra_half_by_chan_verify(
 				__PRETTY_FUNCTION__,
 				__LINE__);
 		}
-		h = & new_chan_extra(chan_extra_map,scid,cap_msat)->half[dir];
+		h = & new_chan_extra(chan_extra_map,scidd.scid,cap_msat)->half[scidd.dir];
 
 	}
 	return h;

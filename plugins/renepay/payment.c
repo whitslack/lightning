@@ -65,11 +65,46 @@ struct payment *payment_new(const tal_t *ctx,
 	p->groupid=1;
 
  	p->local_gossmods = gossmap_localmods_new(p);
-	p->disabled = tal_arr(p,struct short_channel_id,0);
+	p->disabled_scids = tal_arr(p,struct short_channel_id,0);
 	p->next_partid=1;
 	p->progress_deadline = NULL;
 
 	return p;
+}
+
+/* Disable this scid for this payment, and tell me why! */
+void payflow_disable_chan(struct pay_flow *pf,
+			  struct short_channel_id scid,
+			  enum log_level lvl,
+			  const char *fmt, ...)
+{
+	va_list ap;
+	const char *str;
+
+	va_start(ap, fmt);
+	str = tal_vfmt(tmpctx, fmt, ap);
+	va_end(ap);
+	payflow_note(pf, lvl, "disabling %s: %s",
+		     type_to_string(tmpctx, struct short_channel_id, &scid),
+		     str);
+	tal_arr_expand(&pf->payment->disabled_scids, scid);
+}
+
+void payment_disable_chan(struct payment *p,
+			  struct short_channel_id scid,
+			  enum log_level lvl,
+			  const char *fmt, ...)
+{
+	va_list ap;
+	const char *str;
+
+	va_start(ap, fmt);
+	str = tal_vfmt(tmpctx, fmt, ap);
+	va_end(ap);
+	payment_note(p, lvl, "disabling %s: %s",
+		     type_to_string(tmpctx, struct short_channel_id, &scid),
+		     str);
+	tal_arr_expand(&p->disabled_scids, scid);
 }
 
 struct amount_msat payment_sent(const struct payment *p)
@@ -98,7 +133,9 @@ struct amount_msat payment_fees(const struct payment *p)
 	return fees;
 }
 
-void payment_note(struct payment *p, const char *fmt, ...)
+void payment_note(struct payment *p,
+		  enum log_level lvl,
+		  const char *fmt, ...)
 {
 	va_list ap;
 	const char *str;
@@ -107,10 +144,27 @@ void payment_note(struct payment *p, const char *fmt, ...)
 	str = tal_vfmt(p->paynotes, fmt, ap);
 	va_end(ap);
 	tal_arr_expand(&p->paynotes, str);
-	debug_info("%s",str);
+	/* Log at debug, unless it's weird... */
+	plugin_log(pay_plugin->plugin,
+		   lvl < LOG_UNUSUAL ? LOG_DBG : lvl, "%s", str);
 
 	if (p->cmd)
-		plugin_notify_message(p->cmd, LOG_INFORM, "%s", str);
+		plugin_notify_message(p->cmd, lvl, "%s", str);
+}
+
+void payflow_note(struct pay_flow *pf,
+		  enum log_level lvl,
+		  const char *fmt, ...)
+{
+	va_list ap;
+	const char *str;
+
+	va_start(ap, fmt);
+	str = tal_vfmt(tmpctx, fmt, ap);
+	va_end(ap);
+
+	payment_note(pf->payment, lvl, "  Flow %"PRIu64": %s",
+		     pf->key.partid, str);
 }
 
 void payment_assert_delivering_incomplete(const struct payment *p)
@@ -163,6 +217,8 @@ struct command_result *payment_fail(
 	enum jsonrpc_errcode code,
 	const char *fmt, ...)
 {
+	struct command *cmd;
+
 	/* We usually get called because a flow failed, but we
 	 * can also get called because we couldn't route any more
 	 * or some strange error. */
@@ -177,9 +233,14 @@ struct command_result *payment_fail(
 	char *message = tal_vfmt(tmpctx,fmt,args);
 	va_end(args);
 
-	debug_paynote(payment,"%s",message);
+	/* Don't bother notifying command, it's about to get failure */
+	cmd = payment->cmd;
+	payment->cmd = NULL;
+	payment_note(payment, LOG_DBG, "%s", message);
+	/* Restore to keep destructor happy! */
+	payment->cmd = cmd;
 
-	return command_fail(payment->cmd,code,"%s",message);
+	return command_fail(cmd,code,"%s",message);
 }
 
 u64 payment_parts(const struct payment *payment)
