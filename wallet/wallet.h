@@ -372,6 +372,29 @@ struct wallet_payment {
 	struct sha256 *local_offer_id;
 };
 
+struct wallet_payment *wallet_payment_new(const tal_t *ctx,
+					  u64 dbid,
+					  u32 timestamp,
+					  const struct sha256 *payment_hash,
+					  u64 partid,
+					  u64 groupid,
+					  enum payment_status status,
+					  /* The destination may not be known if we used `sendonion` */
+					  const struct node_id *destination TAKES,
+					  struct amount_msat msatoshi,
+					  struct amount_msat msatoshi_sent,
+					  struct amount_msat total_msat,
+					  /* If and only if PAYMENT_COMPLETE */
+					  const struct preimage *payment_preimage TAKES,
+					  const struct secret *path_secrets TAKES,
+					  const struct node_id *route_nodes TAKES,
+					  const struct short_channel_id *route_channels TAKES,
+					  const char *invstring TAKES,
+					  const char *label TAKES,
+					  const char *description TAKES,
+					  const u8 *failonion TAKES,
+					  const struct sha256 *local_invreq_id);
+
 struct outpoint {
 	struct bitcoin_outpoint outpoint;
 	u32 blockheight;
@@ -1353,10 +1376,22 @@ void wallet_datastore_update(struct wallet *w,
 void wallet_datastore_remove(struct wallet *w, const char **key);
 
 /**
+ * Get a single entry from the datastore
+ * @ctx: the tal ctx to allocate off
+ * @w: the wallet
+ * @key: the key
+ * @generation: the generation or NULL (set if returns non-NULL)
+ */
+u8 *wallet_datastore_get(const tal_t *ctx,
+			 struct wallet *w,
+			 const char **key,
+			 u64 *generation);
+
+/**
  * Iterate through the datastore.
  * @ctx: the tal ctx to allocate off
  * @w: the wallet
- * @startkey: NULL, or the first key to start with
+ * @startkey: NULL, or the subkey to iterate
  * @key: the first key (if returns non-NULL)
  * @data: the first data (if returns non-NULL)
  * @generation: the first generation (if returns non-NULL)
@@ -1374,7 +1409,7 @@ struct db_stmt *wallet_datastore_first(const tal_t *ctx,
 /**
  * Iterate through the datastore.
  * @ctx: the tal ctx to allocate off
- * @w: the wallet
+ * @startkey: NULL, or the subkey to iterate
  * @stmt: the previous statement.
  * @key: the key (if returns non-NULL)
  * @data: the data (if returns non-NULL)
@@ -1384,11 +1419,16 @@ struct db_stmt *wallet_datastore_first(const tal_t *ctx,
  * If you choose not to call wallet_datastore_next() you must free it!
  */
 struct db_stmt *wallet_datastore_next(const tal_t *ctx,
-				      struct wallet *w,
+				      const char **startkey,
 				      struct db_stmt *stmt,
 				      const char ***key,
 				      const u8 **data,
 				      u64 *generation);
+
+/* Does k1 match k2 as far as k2 goes? */
+bool datastore_key_startswith(const char **k1, const char **k2);
+/* Does k1 match k2? */
+bool datastore_key_eq(const char **k1, const char **k2);
 
 /* Make a PSBT from these utxos, or enhance @base if non-NULL. */
 struct wally_psbt *psbt_using_utxos(const tal_t *ctx,

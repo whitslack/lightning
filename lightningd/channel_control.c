@@ -10,7 +10,7 @@
 #include <common/wire_error.h>
 #include <connectd/connectd_wiregen.h>
 #include <errno.h>
-#include <hsmd/capabilities.h>
+#include <hsmd/permissions.h>
 #include <lightningd/chaintopology.h>
 #include <lightningd/channel.h>
 #include <lightningd/channel_control.h>
@@ -82,6 +82,12 @@ static void try_update_blockheight(struct lightningd *ld,
 
 	log_debug(channel->log, "attempting update blockheight %s",
 		  type_to_string(tmpctx, struct channel_id, &channel->cid));
+
+	if (!topology_synced(ld->topology)) {
+		log_debug(channel->log, "chain not synced,"
+			  " not updating blockheight");
+		return;
+	}
 
 	/* If they're offline, check that we're not too far behind anyway */
 	if (!channel->owner) {
@@ -630,15 +636,15 @@ bool peer_start_channeld(struct channel *channel,
 	struct secret last_remote_per_commit_secret;
 	secp256k1_ecdsa_signature *remote_ann_node_sig, *remote_ann_bitcoin_sig;
 	struct penalty_base *pbases;
-	u32 min_feerate, max_feerate;
+	u32 min_feerate, max_feerate, curr_blockheight;
 
 	hsmfd = hsm_get_client_fd(ld, &channel->peer->id,
 				  channel->dbid,
-				  HSM_CAP_SIGN_GOSSIP
-				  | HSM_CAP_ECDH
-				  | HSM_CAP_COMMITMENT_POINT
-				  | HSM_CAP_SIGN_REMOTE_TX
-				  | HSM_CAP_SIGN_ONCHAIN_TX);
+				  HSM_PERM_SIGN_GOSSIP
+				  | HSM_PERM_ECDH
+				  | HSM_PERM_COMMITMENT_POINT
+				  | HSM_PERM_SIGN_REMOTE_TX
+				  | HSM_PERM_SIGN_ONCHAIN_TX);
 
 	channel_set_owner(channel,
 			  new_channel_subd(channel, ld,
@@ -742,6 +748,24 @@ bool peer_start_channeld(struct channel *channel,
 		max_feerate = 0xFFFFFFFF;
 	}
 
+	/* Make sure we don't go backsards on blockheights */
+	curr_blockheight = get_block_height(ld->topology);
+	if (curr_blockheight < get_blockheight(channel->blockheight_states,
+					       channel->opener, LOCAL)) {
+
+		u32 last_height = get_blockheight(channel->blockheight_states,
+						  channel->opener, LOCAL);
+
+		log_debug(channel->log,
+			  "current blockheight is (%d),"
+			  " last saved (%d). setting to last saved. %s",
+			  curr_blockheight,
+			  last_height,
+			  !topology_synced(ld->topology) ? "(not synced)" : "");
+
+		curr_blockheight = last_height;
+	}
+
 	initmsg = towire_channeld_init(tmpctx,
 				       chainparams,
 				       ld->our_features,
@@ -749,7 +773,7 @@ bool peer_start_channeld(struct channel *channel,
 				       &channel->funding,
 				       channel->funding_sats,
 				       channel->minimum_depth,
-				       get_block_height(ld->topology),
+				       curr_blockheight,
 				       channel->blockheight_states,
 				       channel->lease_expiry,
 				       &channel->our_config,

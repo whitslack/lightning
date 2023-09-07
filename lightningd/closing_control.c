@@ -20,7 +20,7 @@
 #include <connectd/connectd_wiregen.h>
 #include <errno.h>
 #include <gossipd/gossipd_wiregen.h>
-#include <hsmd/capabilities.h>
+#include <hsmd/permissions.h>
 #include <inttypes.h>
 #include <lightningd/bitcoind.h>
 #include <lightningd/chaintopology.h>
@@ -51,14 +51,15 @@ struct close_command {
 
 /* Resolve a single close command. */
 static void
-resolve_one_close_command(struct close_command *cc, bool cooperative)
+resolve_one_close_command(struct close_command *cc, bool cooperative,
+			  const struct bitcoin_tx *close_tx)
 {
 	struct json_stream *result = json_stream_success(cc->cmd);
 
-	json_add_tx(result, "tx", cc->channel->last_tx);
-	if (!invalid_last_tx(cc->channel->last_tx)) {
+	json_add_tx(result, "tx", close_tx);
+	if (!invalid_last_tx(close_tx)) {
 		struct bitcoin_txid txid;
-		bitcoin_txid(cc->channel->last_tx, &txid);
+		bitcoin_txid(close_tx, &txid);
 		json_add_txid(result, "txid", &txid);
 	}
 	if (cooperative)
@@ -69,24 +70,31 @@ resolve_one_close_command(struct close_command *cc, bool cooperative)
 	was_pending(command_success(cc->cmd, result));
 }
 
-/* Resolve a close command for a channel that will be closed soon: returns
- * the cmd_id of one, if any (allocated off ctx). */
-const char *resolve_close_command(const tal_t *ctx,
-				  struct lightningd *ld, struct channel *channel,
-				  bool cooperative)
+const char *cmd_id_from_close_command(const tal_t *ctx,
+				      struct lightningd *ld, struct channel *channel)
+{
+	struct close_command *cc;
+
+	list_for_each(&ld->close_commands, cc, list) {
+		if (cc->channel != channel)
+			continue;
+		return tal_strdup(ctx, cc->cmd->id);
+	}
+	return NULL;
+}
+
+/* Resolve a close command for a channel that will be closed soon. */
+void resolve_close_command(struct lightningd *ld, struct channel *channel,
+			   bool cooperative, const struct bitcoin_tx *close_tx)
 {
 	struct close_command *cc;
 	struct close_command *n;
-	const char *cmd_id = NULL;
 
 	list_for_each_safe(&ld->close_commands, cc, n, list) {
 		if (cc->channel != channel)
 			continue;
-		if (!cmd_id)
-			cmd_id = tal_strdup(ctx, cc->cmd->id);
-		resolve_one_close_command(cc, cooperative);
+		resolve_one_close_command(cc, cooperative, close_tx);
 	}
-	return cmd_id;
 }
 
 /* Destroy the close command structure in reaction to the
@@ -355,9 +363,8 @@ static unsigned closing_msg(struct subd *sd, const u8 *msg, const int *fds UNUSE
 void peer_start_closingd(struct channel *channel, struct peer_fd *peer_fd)
 {
 	u8 *initmsg;
-	u32 min_feerate, feerate, *max_feerate;
+	u32 min_feerate, feerate, max_feerate;
 	struct amount_msat their_msat;
-	struct amount_sat feelimit;
 	int hsmfd;
 	struct lightningd *ld = channel->peer->ld;
 	u32 final_commit_feerate;
@@ -371,8 +378,8 @@ void peer_start_closingd(struct channel *channel, struct peer_fd *peer_fd)
 	}
 
 	hsmfd = hsm_get_client_fd(ld, &channel->peer->id, channel->dbid,
-				  HSM_CAP_SIGN_CLOSING_TX
-				  | HSM_CAP_COMMITMENT_POINT);
+				  HSM_PERM_SIGN_CLOSING_TX
+				  | HSM_PERM_COMMITMENT_POINT);
 
 	channel_set_owner(channel,
 			  new_channel_subd(channel, ld,
@@ -396,19 +403,15 @@ void peer_start_closingd(struct channel *channel, struct peer_fd *peer_fd)
 		return;
 	}
 
-	/* FIXME: This is the old BOLT 2 text, which restricted the closing
-	 * fee to cap at the final commitment fee.  We still do this for now.
-	 *
+	/* BOLT #2:
 	 * The sending node:
-	 *  - MUST set `fee_satoshis` less than or equal to the base
-	 *    fee of the final commitment transaction, as calculated in
-	 *    [BOLT #3](03-transactions.md#fee-calculation).
+	 *   - SHOULD set the initial `fee_satoshis` according to its estimate of cost of
+	 *   inclusion in a block.
+	 *   - SHOULD set `fee_range` according to the minimum and maximum fees it is
+	 *   prepared to pay for a close transaction.
 	 */
 	final_commit_feerate = get_feerate(channel->fee_states,
 					   channel->opener, LOCAL);
-	feelimit = commit_tx_base_fee(final_commit_feerate, 0,
-				      option_anchor_outputs,
-				      option_anchors_zero_fee_htlc_tx);
 
 	/* If we can't determine feerate, start at half unilateral feerate. */
 	feerate = mutual_close_feerate(ld->topology);
@@ -418,30 +421,20 @@ void peer_start_closingd(struct channel *channel, struct peer_fd *peer_fd)
 			feerate = get_feerate_floor(ld->topology);
 	}
 
-	/* We use a feerate if anchor_outputs, otherwise max fee is set by
-	 * the final unilateral. */
-	if (option_anchor_outputs || option_anchors_zero_fee_htlc_tx) {
-		max_feerate = tal(tmpctx, u32);
-		/* Aim for reasonable max, but use final if we don't know. */
-		*max_feerate = unilateral_feerate(ld->topology, false);
-		if (!*max_feerate)
-			*max_feerate = final_commit_feerate;
-		/* No other limit on fees */
-		feelimit = channel->funding_sats;
-	} else
-		max_feerate = NULL;
+	/* Aim for reasonable max, but use final if we don't know. */
+	max_feerate = unilateral_feerate(ld->topology, false);
+	if (!max_feerate)
+		max_feerate = final_commit_feerate;
 
 	min_feerate = feerate_min(ld, NULL);
 
 	/* If they specified feerates in `close`, they apply now! */
 	if (channel->closing_feerate_range) {
 		min_feerate = channel->closing_feerate_range[0];
-		max_feerate = &channel->closing_feerate_range[1];
+		max_feerate = channel->closing_feerate_range[1];
 	} else if (channel->ignore_fee_limits || ld->config.ignore_fee_limits) {
-		min_feerate = 1;
-		tal_free(max_feerate);
-		max_feerate = tal(tmpctx, u32);
-		*max_feerate = 0xFFFFFFFF;
+		min_feerate = 253;
+		max_feerate = 0xFFFFFFFF;
 	}
 
 	/* BOLT #3:
@@ -498,7 +491,6 @@ void peer_start_closingd(struct channel *channel, struct peer_fd *peer_fd)
 				       amount_msat_to_sat_round_down(their_msat),
 				       channel->our_config.dust_limit,
 				       min_feerate, feerate, max_feerate,
-				       feelimit,
 				       local_wallet_index,
 				       local_wallet_ext_key,
 				       channel->shutdown_scriptpubkey[LOCAL],

@@ -1194,6 +1194,13 @@ def test_daemon_option(node_factory):
         assert 'No child process' not in f.read()
 
 
+def test_cli_no_argument():
+    """If no arguments are provided, should display help and exit."""
+    out = subprocess.run(['cli/lightning-cli'], stdout=subprocess.PIPE)
+    assert out.returncode in [0, 2]  # returns 2 if lightning-rpc not available
+    assert "Usage: cli/lightning-cli <command> [<params>...]" in out.stdout.decode()
+
+
 @pytest.mark.developer("needs DEVELOPER=1")
 def test_blockchaintrack(node_factory, bitcoind):
     """Check that we track the blockchain correctly across reorgs
@@ -1325,9 +1332,7 @@ def test_funding_reorg_remote_lags(node_factory, bitcoind):
     bitcoind.generate_block(1)
     l1.daemon.wait_for_log(r'Peer transient failure .* short_channel_id changed to 104x1x0 \(was 103x1x0\)')
 
-    wait_for(lambda: only_one(l2.rpc.listpeerchannels()['channels'])['status'] == [
-        'CHANNELD_NORMAL:Reconnected, and reestablished.',
-        'CHANNELD_NORMAL:Channel ready for use. They need our announcement signatures.'])
+    l2.daemon.wait_for_logs([r'Peer transient failure in CHANNELD_NORMAL: channeld WARNING: Bad node_signature*'])
 
     # Unblinding l2 brings it back in sync, restarts channeld and sends its announce sig
     l2.daemon.rpcproxy.mock_rpc('getblockhash', None)
@@ -1343,6 +1348,68 @@ def test_funding_reorg_remote_lags(node_factory, bitcoind):
     bitcoind.generate_block(1, True)
     l1.daemon.wait_for_log(r'Deleting channel')
     l2.daemon.wait_for_log(r'Deleting channel')
+
+
+@unittest.skipIf(os.getenv('TEST_DB_PROVIDER', 'sqlite3') != 'sqlite3', "deletes database, which is assumed sqlite3")
+def test_recover(node_factory, bitcoind):
+    """Test the recover option
+    """
+    # Start the node with --recovery with valid codex32 secret
+    l1 = node_factory.get_node(start=False,
+                               options={"recover": "cl10leetsllhdmn9m42vcsamx24zrxgs3qrl7ahwvhw4fnzrhve25gvezzyqqjdsjnzedu43ns"})
+
+    os.unlink(os.path.join(l1.daemon.lightning_dir, TEST_NETWORK, "hsm_secret"))
+    l1.daemon.start()
+
+    cmd_line = ["tools/hsmtool", "getcodexsecret", os.path.join(l1.daemon.lightning_dir, TEST_NETWORK, "hsm_secret")]
+    out = subprocess.check_output(cmd_line + ["leet", "0"]).decode('utf-8')
+    assert out == "cl10leetsllhdmn9m42vcsamx24zrxgs3qrl7ahwvhw4fnzrhve25gvezzyqqjdsjnzedu43ns\n"
+
+    # Check bad ids.
+    out = subprocess.run(cmd_line + ["lee", "0"], stderr=subprocess.PIPE, timeout=TIMEOUT)
+    assert 'Invalid id: must be 4 characters' in out.stderr.decode('utf-8')
+    assert out.returncode == 2
+
+    out = subprocess.run(cmd_line + ["Leet", "0"], stderr=subprocess.PIPE, timeout=TIMEOUT)
+    assert 'Invalid id: must be lower-case' in out.stderr.decode('utf-8')
+    assert out.returncode == 2
+
+    out = subprocess.run(cmd_line + ["💔", "0"], stderr=subprocess.PIPE, timeout=TIMEOUT)
+    assert 'Invalid id: must be ASCII' in out.stderr.decode('utf-8')
+    assert out.returncode == 2
+
+    for bad_bech32 in ['b', 'o', 'i', '1']:
+        out = subprocess.run(cmd_line + [bad_bech32 + "eet", "0"], stderr=subprocess.PIPE, timeout=TIMEOUT)
+        assert 'Invalid id: must be valid bech32 string' in out.stderr.decode('utf-8')
+        assert out.returncode == 2
+
+    basedir = l1.daemon.opts.get("lightning-dir")
+    with open(os.path.join(basedir, TEST_NETWORK, 'hsm_secret'), 'rb') as f:
+        buff = f.read()
+
+    # Check the node secret
+    assert buff.hex() == "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100"
+    l1.stop()
+
+    os.unlink(os.path.join(l1.daemon.lightning_dir, TEST_NETWORK, "lightningd.sqlite3"))
+
+    # Node should throw error to recover flag if HSM already exists.
+    l1.daemon.opts['recover'] = "cl10leetsllhdmn9m42vcsamx24zrxgs3qrl7ahwvhw4fnzrhve25gvezzyqqjdsjnzedu43ns"
+    l1.daemon.start(wait_for_initialized=False, stderr_redir=True)
+
+    # Will exit with failure code.
+    assert l1.daemon.wait() == 1
+    assert l1.daemon.is_in_stderr(r"hsm_secret already exists!")
+
+    os.unlink(os.path.join(l1.daemon.lightning_dir, TEST_NETWORK, "hsm_secret"))
+
+    l1.daemon.opts.update({"recover": "CL10LEETSLLHDMN9M42VCSAMX24ZRXGS3QQAT3LTDVAKMT73"})
+    l1.daemon.start(wait_for_initialized=False, stderr_redir=True)
+    assert l1.daemon.wait() == 1
+    assert l1.daemon.is_in_stderr(r"Expected 32 Byte secret: ffeeddccbbaa99887766554433221100")
+
+    l1.daemon.opts.pop("recover")
+    l1.start()
 
 
 def test_rescan(node_factory, bitcoind):
@@ -2960,6 +3027,16 @@ def test_log_filter(node_factory):
     with open(log2, "r") as f:
         lines = f.readlines()
     assert all([' {}-'.format(l1.info['id']) in l for l in lines])
+
+
+def test_log_filter_bug(node_factory):
+    """Test the log-level option with overriding to a more verbose setting"""
+    log_plugin = os.path.join(os.getcwd(), 'tests/plugins/log.py')
+    l1 = node_factory.get_node(options={'plugin': log_plugin,
+                                        'log-level': ['info', 'debug:plugin-log']})
+    l1.daemon.logsearch_start = 0
+    l1.daemon.wait_for_log("printing debug log")
+    l1.daemon.wait_for_log("printing info log")
 
 
 def test_force_feerates(node_factory):

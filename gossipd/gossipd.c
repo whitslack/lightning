@@ -419,6 +419,9 @@ update_node_annoucement:
 	maybe_send_own_node_announce(daemon, false);
 }
 
+/* Statistically, how many peers to we tell about each channel? */
+#define GOSSIP_SPAM_REDUNDANCY 5
+
 /* BOLT #7:
  *   - if the `gossip_queries` feature is negotiated:
  *     - MUST NOT relay any gossip messages it did not generate itself,
@@ -430,15 +433,16 @@ update_node_annoucement:
 static void dump_our_gossip(struct daemon *daemon, struct peer *peer)
 {
 	struct node *me;
-	struct chan_map_iter i;
-	struct chan *chan;
+	struct chan_map_iter it;
+	const struct chan *chan, **chans = tal_arr(tmpctx, const struct chan *, 0);
+	size_t num_to_send;
 
 	/* Find ourselves; if no channels, nothing to send */
 	me = get_node(daemon->rstate, &daemon->id);
 	if (!me)
 		return;
 
-	for (chan = first_chan(me, &i); chan; chan = next_chan(me, &i)) {
+	for (chan = first_chan(me, &it); chan; chan = next_chan(me, &it)) {
 		/* Don't leak private channels, unless it's with you! */
 		if (!is_chan_public(chan)) {
 			int dir = half_chan_idx(me, chan);
@@ -451,6 +455,26 @@ static void dump_our_gossip(struct daemon *daemon, struct peer *peer)
 			}
 			continue;
 		}
+
+		tal_arr_expand(&chans, chan);
+	}
+
+	/* Just in case we have many peers and not all are connecting or
+	 * some other corner case, send everything to first few. */
+	if (peer_node_id_map_count(daemon->peers) <= GOSSIP_SPAM_REDUNDANCY)
+		num_to_send = tal_count(chans);
+	else {
+		if (tal_count(chans) < GOSSIP_SPAM_REDUNDANCY)
+			num_to_send = tal_count(chans);
+		else {
+			/* Pick victims at random */
+			tal_arr_randomize(chans, const struct chan *);
+			num_to_send = GOSSIP_SPAM_REDUNDANCY;
+		}
+	}
+
+	for (size_t i = 0; i < num_to_send; i++) {
+		chan = chans[i];
 
 		/* Send channel_announce */
 		queue_peer_from_store(peer, &chan->bcast);
@@ -751,6 +775,42 @@ static void gossip_refresh_network(struct daemon *daemon)
 	route_prune(daemon->rstate);
 }
 
+static void tell_master_local_cupdates(struct daemon *daemon)
+{
+	struct chan_map_iter i;
+	struct chan *c;
+	struct node *me;
+
+	me = get_node(daemon->rstate, &daemon->id);
+	if (!me)
+		return;
+
+	for (c = first_chan(me, &i); c; c = next_chan(me, &i)) {
+		struct half_chan *hc;
+		int direction;
+		const u8 *cupdate;
+
+		/* We don't provide update_channel for unannounced channels */
+		if (!is_chan_public(c))
+			continue;
+
+		if (!local_direction(daemon->rstate, c, &direction))
+			continue;
+
+		hc = &c->half[direction];
+		if (!is_halfchan_defined(hc))
+			continue;
+
+		cupdate = gossip_store_get(tmpctx,
+					   daemon->rstate->gs,
+					   hc->bcast.index);
+		daemon_conn_send(daemon->master,
+				 take(towire_gossipd_init_cupdate(NULL,
+								  &c->scid,
+								  cupdate)));
+	}
+}
+
 /* Disables all channels connected to our node. */
 static void gossip_disable_local_channels(struct daemon *daemon)
 {
@@ -854,6 +914,10 @@ static void gossip_init(struct daemon *daemon, const u8 *msg)
 					   connectd_req,
 					   maybe_send_query_responses, daemon);
 	tal_add_destructor(daemon->connectd, master_or_connectd_gone);
+
+	/* Tell it about all our local (public) channel_update messages,
+	 * so it doesn't unnecessarily regenerate them. */
+	tell_master_local_cupdates(daemon);
 
 	/* OK, we are ready. */
 	daemon_conn_send(daemon->master,
@@ -1147,6 +1211,7 @@ static struct io_plan *recv_req(struct io_conn *conn,
 #endif /* !DEVELOPER */
 
 	/* We send these, we don't receive them */
+	case WIRE_GOSSIPD_INIT_CUPDATE:
 	case WIRE_GOSSIPD_INIT_REPLY:
 	case WIRE_GOSSIPD_GET_TXOUT:
 	case WIRE_GOSSIPD_DEV_MEMLEAK_REPLY:

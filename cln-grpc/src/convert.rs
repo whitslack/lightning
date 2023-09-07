@@ -1474,6 +1474,8 @@ impl From<responses::ListpaysPays> for pb::ListpaysPays {
             bolt11: c.bolt11, // Rule #2 for type string?
             description: c.description, // Rule #2 for type string?
             bolt12: c.bolt12, // Rule #2 for type string?
+            amount_msat: c.amount_msat.map(|f| f.into()), // Rule #2 for type msat?
+            amount_sent_msat: c.amount_sent_msat.map(|f| f.into()), // Rule #2 for type msat?
             preimage: c.preimage.map(|v| v.to_vec()), // Rule #2 for type secret?
             number_of_parts: c.number_of_parts, // Rule #2 for type u64?
             erroronion: c.erroronion.map(|v| hex::decode(v).unwrap()), // Rule #2 for type hex?
@@ -1577,6 +1579,16 @@ impl From<responses::PreapprovekeysendResponse> for pb::PreapprovekeysendRespons
 impl From<responses::PreapproveinvoiceResponse> for pb::PreapproveinvoiceResponse {
     fn from(c: responses::PreapproveinvoiceResponse) -> Self {
         Self {
+        }
+    }
+}
+
+#[allow(unused_variables)]
+impl From<responses::StaticbackupResponse> for pb::StaticbackupResponse {
+    fn from(c: responses::StaticbackupResponse) -> Self {
+        Self {
+            // Field: StaticBackup.scb[]
+            scb: c.scb.into_iter().map(|i| hex::decode(i).unwrap()).collect(), // Rule #3 for type hex
         }
     }
 }
@@ -2263,6 +2275,14 @@ impl From<requests::PreapproveinvoiceRequest> for pb::PreapproveinvoiceRequest {
     }
 }
 
+#[allow(unused_variables)]
+impl From<requests::StaticbackupRequest> for pb::StaticbackupRequest {
+    fn from(c: requests::StaticbackupRequest) -> Self {
+        Self {
+        }
+    }
+}
+
 
 #[allow(unused_variables)]
 impl From<pb::GetinfoRequest> for requests::GetinfoRequest {
@@ -2926,6 +2946,14 @@ impl From<pb::PreapproveinvoiceRequest> for requests::PreapproveinvoiceRequest {
     fn from(c: pb::PreapproveinvoiceRequest) -> Self {
         Self {
             bolt11: c.bolt11, // Rule #1 for type string?
+        }
+    }
+}
+
+#[allow(unused_variables)]
+impl From<pb::StaticbackupRequest> for requests::StaticbackupRequest {
+    fn from(c: pb::StaticbackupRequest) -> Self {
+        Self {
         }
     }
 }

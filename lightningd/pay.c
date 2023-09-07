@@ -1,4 +1,5 @@
 #include "config.h"
+#include <ccan/json_escape/json_escape.h>
 #include <ccan/mem/mem.h>
 #include <ccan/tal/str/str.h>
 #include <common/bolt12_merkle.h>
@@ -11,9 +12,11 @@
 #include <common/type_to_string.h>
 #include <lightningd/chaintopology.h>
 #include <lightningd/channel.h>
+#include <lightningd/invoice.h>
 #include <lightningd/notification.h>
 #include <lightningd/pay.h>
 #include <lightningd/peer_control.h>
+#include <wallet/invoices.h>
 
 /* Routing failure object */
 struct routing_failure {
@@ -324,22 +327,24 @@ static void tell_waiters_success(struct lightningd *ld,
 	notify_sendpay_success(ld, payment);
 }
 
-void payment_succeeded(struct lightningd *ld, struct htlc_out *hout,
+void payment_succeeded(struct lightningd *ld,
+		       const struct sha256 *payment_hash,
+		       u64 partid, u64 groupid,
 		       const struct preimage *rval)
 {
 	struct wallet_payment *payment;
 
-	wallet_payment_set_status(ld->wallet, &hout->payment_hash,
-				  hout->partid, hout->groupid,
+	wallet_payment_set_status(ld->wallet, payment_hash,
+				  partid, groupid,
 				  PAYMENT_COMPLETE, rval);
 	payment = wallet_payment_by_hash(tmpctx, ld->wallet,
-					 &hout->payment_hash,
-					 hout->partid, hout->groupid);
+					 payment_hash,
+					 partid, groupid);
 	assert(payment);
 
 	if (payment->local_offer_id)
 		wallet_offer_mark_used(ld->wallet->db, payment->local_offer_id);
-	tell_waiters_success(ld, &hout->payment_hash, payment);
+	tell_waiters_success(ld, payment_hash, payment);
 }
 
 /* Return a struct routing_failure for an immediate failure
@@ -874,34 +879,24 @@ found:
 	return channel;
 }
 
-/* destination/route_channels/route_nodes are NULL (and path_secrets may be NULL)
- * if we're sending a raw onion. */
-static struct command_result *
-send_payment_core(struct lightningd *ld,
-		  struct command *cmd,
-		  const struct sha256 *rhash,
-		  u64 partid,
-		  u64 group,
-		  const struct route_hop *first_hop,
-		  struct amount_msat msat,
-		  struct amount_msat total_msat,
-		  const char *label TAKES,
-		  const char *invstring TAKES,
-		  const char *description TAKES,
-		  const struct onionpacket *packet,
-		  const struct node_id *destination,
-		  struct node_id *route_nodes TAKES,
-		  struct short_channel_id *route_channels TAKES,
-		  struct secret *path_secrets,
-		  const struct sha256 *local_offer_id)
+/* Check if payment already in progress.  Returns NULL if all good;
+ * sets old_payment to a previous attempt if there is one (otherwise
+ * NULL). */
+static struct command_result *check_progress(struct lightningd *ld,
+					     struct command *cmd,
+					     const struct sha256 *rhash,
+					     struct amount_msat msat,
+					     struct amount_msat total_msat,
+					     u64 partid,
+					     u64 group,
+					     const struct node_id *destination,
+					     const struct wallet_payment **old_payment)
 {
-	const struct wallet_payment **payments, *old_payment = NULL;
-	struct channel *channel;
-	const u8 *failmsg;
-	struct htlc_out *hout;
-	struct routing_failure *fail;
-	struct amount_msat msat_already_pending = AMOUNT_MSAT(0);
+	const struct wallet_payment **payments;
 	bool have_complete = false;
+	struct amount_msat msat_already_pending = AMOUNT_MSAT(0);
+
+	*old_payment = NULL;
 
 	/* Now, do we already have one or more payments? */
 	payments = wallet_payment_list(tmpctx, ld->wallet, rhash);
@@ -1016,7 +1011,7 @@ send_payment_core(struct lightningd *ld,
 
 		case PAYMENT_FAILED:
 			if (payments[i]->partid == partid)
-				old_payment = payments[i];
+				*old_payment = payments[i];
  		}
 		/* There is no way for us to add a payment with the
 		 * same (payment_hash, partid, groupid) tuple since
@@ -1033,7 +1028,6 @@ send_payment_core(struct lightningd *ld,
 			    type_to_string(tmpctx, struct sha256, rhash), group,
 			    partid);
 		}
-
 	}
 
 	/* If any part has succeeded, you can't start a new one! */
@@ -1058,10 +1052,47 @@ send_payment_core(struct lightningd *ld,
 						   &total_msat));
 	}
 
-	struct command_result *offer_err;
-	offer_err = check_offer_usage(cmd, local_offer_id);
-	if (offer_err)
-		return offer_err;
+	return NULL;
+}
+
+/* destination/route_channels/route_nodes are NULL (and path_secrets may be NULL)
+ * if we're sending a raw onion. */
+static struct command_result *
+send_payment_core(struct lightningd *ld,
+		  struct command *cmd,
+		  const struct sha256 *rhash,
+		  u64 partid,
+		  u64 group,
+		  const struct route_hop *first_hop,
+		  struct amount_msat msat,
+		  struct amount_msat total_msat,
+		  const char *label TAKES,
+		  const char *invstring TAKES,
+		  const char *description TAKES,
+		  const struct onionpacket *packet,
+		  const struct node_id *destination,
+		  struct node_id *route_nodes TAKES,
+		  struct short_channel_id *route_channels TAKES,
+		  struct secret *path_secrets,
+		  const struct sha256 *local_offer_id)
+{
+	const struct wallet_payment *old_payment;
+	struct channel *channel;
+	const u8 *failmsg;
+	struct htlc_out *hout;
+	struct routing_failure *fail;
+	struct command_result *ret;
+	struct wallet_payment *payment;
+
+	/* Reconcile this with previous attempts */
+	ret = check_progress(ld, cmd, rhash, msat, total_msat, partid, group, destination,
+			     &old_payment);
+	if (ret)
+		return ret;
+
+	ret = check_offer_usage(cmd, local_offer_id);
+	if (ret)
+		return ret;
 
 	channel = find_channel_for_htlc_add(ld, &first_hop->node_id,
 					    &first_hop->scid, &msat);
@@ -1107,37 +1138,26 @@ send_payment_core(struct lightningd *ld,
 	}
 
 	/* If hout fails, payment should be freed too. */
-	struct wallet_payment *payment = tal(hout, struct wallet_payment);
-	payment->id = 0;
-	payment->payment_hash = *rhash;
-	payment->partid = partid;
-	payment->groupid = group;
-	payment->destination = tal_dup_or_null(payment, struct node_id,
-					       destination);
-	payment->status = PAYMENT_PENDING;
-	payment->msatoshi = msat;
-	payment->msatoshi_sent = first_hop->amount;
-	payment->total_msat = total_msat;
-	payment->timestamp = time_now().ts.tv_sec;
-	payment->payment_preimage = NULL;
-	payment->path_secrets = tal_steal(payment, path_secrets);
-	payment->route_nodes = tal_steal(payment, route_nodes);
-	payment->route_channels = tal_steal(payment, route_channels);
-	payment->failonion = NULL;
-	if (label != NULL)
-		payment->label = tal_strdup(payment, label);
-	else
-		payment->label = NULL;
-	if (invstring != NULL)
-		payment->invstring = tal_strdup(payment, invstring);
-	else
-		payment->invstring = NULL;
-	if (description != NULL)
-		payment->description = tal_strdup(payment, description);
-	else
-		payment->description = NULL;
-	payment->local_offer_id = tal_dup_or_null(payment, struct sha256,
-						  local_offer_id);
+	payment = wallet_payment_new(hout,
+				     0, /* ID is not in db yet */
+				     time_now().ts.tv_sec,
+				     rhash,
+				     partid,
+				     group,
+				     PAYMENT_PENDING,
+				     destination,
+				     msat,
+				     first_hop->amount,
+				     total_msat,
+				     NULL,
+				     path_secrets,
+				     route_nodes,
+				     route_channels,
+				     invstring,
+				     label,
+				     description,
+				     NULL,
+				     local_offer_id);
 
 	/* We write this into db when HTLC is actually sent. */
 	wallet_payment_setup(ld->wallet, payment);
@@ -1307,7 +1327,7 @@ static struct command_result *json_sendonion(struct command *cmd,
 		   p_opt("shared_secrets", param_secrets_array, &path_secrets),
 		   p_opt_def("partid", param_u64, &partid, 0),
 		   /* FIXME: parameter should be invstring now */
-		   p_opt("bolt11", param_string, &invstring),
+		   p_opt("bolt11", param_invstring, &invstring),
 		   p_opt_def("amount_msat|msatoshi", param_msat, &msat, AMOUNT_MSAT(0)),
 		   p_opt("destination", param_node_id, &destination),
 		   p_opt("localofferid", param_sha256, &local_offer_id),
@@ -1375,9 +1395,9 @@ static struct command_result *param_route_hops(struct command *cmd,
 	size_t i;
 	const jsmntok_t *t;
 
-	if (tok->type != JSMN_ARRAY || tok->size == 0)
+	if (tok->type != JSMN_ARRAY)
 		return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
-				    "%s must be an (non-empty) array", name);
+				    "%s must be an array", name);
 
 	*hops = tal_arr(cmd, struct route_hop, tok->size);
 	json_for_each_arr(i, t, tok) {
@@ -1406,6 +1426,105 @@ static struct command_result *param_route_hops(struct command *cmd,
 	}
 
 	return NULL;
+}
+
+/* We're paying ourselves! */
+static struct command_result *self_payment(struct lightningd *ld,
+					   struct command *cmd,
+					   const struct sha256 *rhash,
+					   u64 partid,
+					   u64 groupid,
+					   struct amount_msat msat,
+					   const char *label TAKES,
+					   const char *invstring TAKES,
+					   const char *description TAKES,
+					   const struct sha256 *local_offer_id,
+					   const struct secret *payment_secret,
+					   const u8 *payment_metadata)
+{
+	struct wallet_payment *payment;
+	const struct invoice_details *inv;
+	u64 inv_dbid;
+	const char *err;
+
+	payment = wallet_payment_new(tmpctx,
+				     0, /* ID is not in db yet */
+				     time_now().ts.tv_sec,
+				     rhash,
+				     partid,
+				     groupid,
+				     PAYMENT_PENDING,
+				     &ld->id,
+				     msat,
+				     msat,
+				     msat,
+				     NULL,
+				     NULL,
+				     NULL,
+				     NULL,
+				     invstring,
+				     label,
+				     description,
+				     NULL,
+				     local_offer_id);
+
+	/* We write this into db immediately, but we're expected to do
+	 * it in two stages like a normal payment. */
+	wallet_payment_setup(ld->wallet, payment);
+	payment_store(ld, payment);
+
+	/* Now, resolved the invoice */
+	inv = invoice_check_payment(tmpctx, ld, rhash, msat, payment_secret, &err);
+	if (!inv) {
+		struct routing_failure *fail;
+		wallet_payment_set_status(ld->wallet, rhash, partid, groupid,
+					  PAYMENT_FAILED, NULL);
+
+		/* tell_waiters_failed expects one of these! */
+		fail = tal(payment, struct routing_failure);
+		fail->failcode = WIRE_INCORRECT_OR_UNKNOWN_PAYMENT_DETAILS;
+		fail->erring_node = &ld->id;
+		fail->erring_index = 0;
+		fail->erring_channel = NULL;
+		fail->msg = NULL;
+
+		/* Only some of these fields make sense for self payments */
+		wallet_payment_set_failinfo(ld->wallet,
+					    rhash,
+					    partid, NULL,
+					    true,
+					    0,
+					    fail->failcode, fail->erring_node,
+					    NULL, NULL,
+					    err,
+					    0);
+		/* We do this even though there really can't be any waiters,
+		 * since we didn't block. */
+		tell_waiters_failed(ld, rhash, payment, PAY_DESTINATION_PERM_FAIL,
+				    NULL, fail, err);
+		return sendpay_fail(cmd, payment, PAY_DESTINATION_PERM_FAIL, NULL,
+				    fail, err);
+	}
+
+	/* These should not fail, given the above succeded! */
+	if (!invoices_find_by_rhash(ld->wallet->invoices, &inv_dbid, rhash)
+	    || !invoices_resolve(ld->wallet->invoices, inv_dbid, msat)) {
+		log_broken(ld->log, "Could not resolve invoice %"PRIu64"!?!", inv_dbid);
+		return sendpay_fail(cmd, payment, PAY_DESTINATION_PERM_FAIL, NULL, NULL, "broken");
+	}
+
+	log_info(ld->log, "Self-resolved invoice '%s' with amount %s",
+		 inv->label->s,
+		 type_to_string(tmpctx, struct amount_msat, &msat));
+	notify_invoice_payment(ld, msat, inv->r, inv->label);
+
+	/* Now resolve the payment */
+	payment_succeeded(ld, rhash, partid, groupid,  &inv->r);
+
+	/* Now the specific command which called this. */
+	payment->status = PAYMENT_COMPLETE;
+	payment->payment_preimage = tal_dup(payment, struct preimage, &inv->r);
+	return sendpay_success(cmd, payment);
 }
 
 static struct command_result *json_sendpay(struct command *cmd,
@@ -1443,13 +1562,25 @@ static struct command_result *json_sendpay(struct command *cmd,
 		return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
 				    "Must specify msatoshi with partid");
 
-	const struct amount_msat final_amount = route[tal_count(route)-1].amount;
-
 	/* If groupid was not provided default to incrementing from the previous one. */
 	if (group == NULL) {
 		group = tal(tmpctx, u64);
 		*group = wallet_payment_get_groupid(cmd->ld->wallet, rhash) + 1;
 	}
+
+	if (tal_count(route) == 0) {
+		if (!msat)
+			return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
+					    "Self-payment requires amount_msat");
+		if (*partid)
+			return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
+					    "Self-payment does not allow (non-zero) partid");
+		return self_payment(cmd->ld, cmd, rhash, *partid, *group, *msat,
+				    label, invstring, description, local_offer_id,
+				    payment_secret, payment_metadata);
+	}
+
+	const struct amount_msat final_amount = route[tal_count(route)-1].amount;
 
 	if (msat && !*partid && !amount_msat_eq(*msat, final_amount))
 		return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
@@ -1573,7 +1704,7 @@ static struct command_result *json_listsendpays(struct command *cmd,
 
 	if (!param(cmd, buffer, params,
 		   /* FIXME: parameter should be invstring now */
-		   p_opt("bolt11", param_string, &invstring),
+		   p_opt("bolt11", param_invstring, &invstring),
 		   p_opt("payment_hash", param_sha256, &rhash),
 		   p_opt("status", param_payment_status, &status),
 		   NULL))

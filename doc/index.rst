@@ -3,27 +3,9 @@ Core Lightning Documentation
 
 .. toctree::
    :maxdepth: 1
-   :caption: User Documentation
+   :caption: Main Documentation
 
-   INSTALL.md
-   TOR.md
-   FAQ <FAQ.md>
-   Backups <BACKUP.md>
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Integrator Documentation
-
-   Writing plugins <PLUGINS.md>
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Developer Documentation
-
-   HACKING.md
-   Coding Style Guideline <STYLE.md>
-   MAKING-RELEASES.md
-   CHANGELOG.md
+   https://docs.corelightning.org/docs
 
 .. toctree::
    :maxdepth: 1
@@ -108,6 +90,8 @@ Core Lightning Documentation
    lightning-preapproveinvoice <lightning-preapproveinvoice.7.md>
    lightning-preapprovekeysend <lightning-preapprovekeysend.7.md>
    lightning-recoverchannel <lightning-recoverchannel.7.md>
+   lightning-renepay <lightning-renepay.7.md>
+   lightning-renepaystatus <lightning-renepaystatus.7.md>
    lightning-reserveinputs <lightning-reserveinputs.7.md>
    lightning-sendcustommsg <lightning-sendcustommsg.7.md>
    lightning-sendinvoice <lightning-sendinvoice.7.md>

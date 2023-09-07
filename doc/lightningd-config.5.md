@@ -290,6 +290,10 @@ connections; default is not to activate the plugin at all.
 
 ### Lightning node customization options
 
+* **recover**=*codex32secret*
+
+  Restore the node from a 32-byte secret encoded as a codex32 secret string: this will fail if the `hsm_secret` file exists.  Your node will start the node in offline mode, for manual recovery.  The secret can be extracted from the `hsm_secret` using hsmtool(8).
+
 * **alias**=*NAME*
 
   Up to 32 bytes of UTF-8 characters to tag your node. Completely silly, since

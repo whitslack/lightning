@@ -1435,6 +1435,9 @@
         "SignpsbtResponse": {
             "SignPsbt.signed_psbt": 1
         },
+        "StaticbackupResponse": {
+            "StaticBackup.scb[]": 1
+        },
         "TxdiscardRequest": {
             "TxDiscard.txid": 1
         },
@@ -3671,6 +3674,14 @@
             "added": "pre-v0.10.1",
             "deprecated": null
         },
+        "ListPays.amount_msat": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "ListPays.amount_sent_msat": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
         "ListPays.bolt11": {
             "added": "pre-v0.10.1",
             "deprecated": false
@@ -3680,6 +3691,14 @@
             "deprecated": false
         },
         "ListPays.pays[]": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "ListPays.pays[].amount_msat": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "ListPays.pays[].amount_sent_msat": {
             "added": "pre-v0.10.1",
             "deprecated": false
         },
@@ -5104,6 +5123,14 @@
             "deprecated": false
         },
         "SignPsbt.signonly[]": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "StaticBackup": {
+            "added": "pre-v0.10.1",
+            "deprecated": null
+        },
+        "StaticBackup.scb[]": {
             "added": "pre-v0.10.1",
             "deprecated": false
         },
