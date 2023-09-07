@@ -1516,7 +1516,7 @@ static void register_opts(struct lightningd *ld)
 
 	opt_register_arg("--accept-htlc-tlv-types",
 			 opt_set_accept_extra_tlv_types, NULL, ld,
-			 "Comma separated list of extra HTLC TLV types to accept.");
+			 opt_hidden);
 	clnopt_witharg("--accept-htlc-tlv-type", OPT_MULTI|OPT_SHOWINT,
 		       opt_add_accept_htlc_tlv, NULL,
 		       &ld->accept_extra_tlv_types,
@@ -1567,7 +1567,6 @@ static void register_opts(struct lightningd *ld)
 		       ld,
 		       "Set to true to allow database upgrades even on non-final releases (WARNING: you won't be able to downgrade!)");
 	opt_register_logging(ld);
-	opt_register_version();
 
 #if DEVELOPER
 	dev_register_opts(ld);

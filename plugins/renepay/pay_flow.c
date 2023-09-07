@@ -1,6 +1,5 @@
 /* Routines to get suitable pay_flow array from pay constraints */
 #include "config.h"
-#include <ccan/json_out/json_out.h>
 #include <ccan/tal/str/str.h>
 #include <common/gossmap.h>
 #include <common/pseudorand.h>
@@ -39,11 +38,10 @@ static void remove_htlc_payflow(
 		struct chan_extra_map *chan_extra_map,
 		struct pay_flow *pf)
 {
-	for (size_t i = 0; i < tal_count(pf->path_scids); i++) {
+	for (size_t i = 0; i < tal_count(pf->path_scidds); i++) {
 		struct chan_extra_half *h = get_chan_extra_half_by_scid(
 							       chan_extra_map,
-							       pf->path_scids[i],
-							       pf->path_dirs[i]);
+							       &pf->path_scidds[i]);
 		if(!h)
 		{
 			plugin_err(pay_plugin->plugin,
@@ -75,11 +73,10 @@ static void commit_htlc_payflow(
 		struct chan_extra_map *chan_extra_map,
 		const struct pay_flow *pf)
 {
-	for (size_t i = 0; i < tal_count(pf->path_scids); i++) {
+	for (size_t i = 0; i < tal_count(pf->path_scidds); i++) {
 		struct chan_extra_half *h = get_chan_extra_half_by_scid(
 							       chan_extra_map,
-							       pf->path_scids[i],
-							       pf->path_dirs[i]);
+							       &pf->path_scidds[i]);
 		if(!h)
 		{
 			plugin_err(pay_plugin->plugin,
@@ -223,11 +220,12 @@ static u32 *shadow_additions(const tal_t *ctx,
 		shadow_delay = shadow_one_flow(gossmap, flows[i],
 					       &shadow_fee);
 		if (flow_delay(flows[i]) + shadow_delay > p->maxdelay) {
-			debug_paynote(p, "No shadow for flow %zu/%zu:"
-				" delay would add %u to %"PRIu64", exceeding max delay.",
-				i, tal_count(flows),
-				shadow_delay,
-				flow_delay(flows[i]));
+			payment_note(p, LOG_UNUSUAL,
+				     "No shadow for flow %zu/%zu:"
+				     " delay would add %u to %"PRIu64", exceeding max delay.",
+				     i, tal_count(flows),
+				     shadow_delay,
+				     flow_delay(flows[i]));
 			continue;
 		}
 
@@ -238,7 +236,8 @@ static u32 *shadow_additions(const tal_t *ctx,
 		if (is_entire_payment && tal_count(flows) == 1) {
 			if (!add_to_amounts(gossmap, flows[i], p->maxspend,
 					    shadow_fee)) {
-				debug_paynote(p, "No shadow fee for flow %zu/%zu:"
+				payment_note(p, LOG_UNUSUAL,
+					     "No shadow fee for flow %zu/%zu:"
 					" fee would add %s to %s, exceeding budget %s.",
 					i, tal_count(flows),
 					type_to_string(tmpctx, struct amount_msat,
@@ -248,14 +247,15 @@ static u32 *shadow_additions(const tal_t *ctx,
 					type_to_string(tmpctx, struct amount_msat,
 						       &p->maxspend));
 			} else {
-				debug_paynote(p, "No MPP, so added %s shadow fee",
+				payment_note(p, LOG_DBG,
+					"No MPP, so added %s shadow fee",
 					type_to_string(tmpctx, struct amount_msat,
 						       &shadow_fee));
 			}
 		}
 
 		final_cltvs[i] += shadow_delay;
-		debug_paynote(p, "Shadow route on flow %zu/%zu added %u block delay. now %u",
+		payment_note(p, LOG_DBG, "Shadow route on flow %zu/%zu added %u block delay. now %u",
 			i, tal_count(flows), shadow_delay, final_cltvs[i]);
 	}
 
@@ -265,6 +265,23 @@ static u32 *shadow_additions(const tal_t *ctx,
 static void destroy_payment_flow(struct pay_flow *pf)
 {
 	list_del_from(&pf->payment->flows, &pf->list);
+}
+
+/* Print out flow, and any information we already know */
+static const char *flow_path_annotated(const tal_t *ctx,
+				       const struct pay_flow *flow)
+{
+	char *s = tal_strdup(ctx, "");
+	for (size_t i = 0; i < tal_count(flow->path_scidds); i++) {
+		tal_append_fmt(&s, "-%s%s->",
+			       type_to_string(tmpctx,
+					      struct short_channel_id_dir,
+					      &flow->path_scidds[i]),
+			       fmt_chan_extra_details(tmpctx,
+						      pay_plugin->chan_extra_map,
+						      &flow->path_scidds[i]));
+	}
+	return s;
 }
 
 /* Calculates delays and converts to scids, and links to the payment.
@@ -289,14 +306,15 @@ static void convert_and_attach_flows(struct payment *payment,
 		pf->key.payment_hash = payment->payment_hash;
 
 		/* Convert gossmap_chan into scids and nodes */
-		pf->path_scids = tal_arr(pf, struct short_channel_id, plen);
+		pf->path_scidds = tal_arr(pf, struct short_channel_id_dir, plen);
 		pf->path_nodes = tal_arr(pf, struct node_id, plen);
 		for (size_t j = 0; j < plen; j++) {
 			struct gossmap_node *n;
 			n = gossmap_nth_node(gossmap, f->path[j], !f->dirs[j]);
 			gossmap_node_get_id(gossmap, n, &pf->path_nodes[j]);
-			pf->path_scids[j]
+			pf->path_scidds[j].scid
 				= gossmap_chan_scid(gossmap, f->path[j]);
+			pf->path_scidds[j].dir = f->dirs[j];
 		}
 
 		/* Calculate cumulative delays (backwards) */
@@ -307,11 +325,19 @@ static void convert_and_attach_flows(struct payment *payment,
 				+ f->path[j]->half[f->dirs[j]].delay;
 		}
 		pf->amounts = tal_steal(pf, f->amounts);
-		pf->path_dirs = tal_steal(pf, f->dirs);
 		pf->success_prob = f->success_prob;
 
 		/* Payment keeps a list of its flows. */
 		list_add(&payment->flows, &pf->list);
+
+		/* First time they see this: annotate important points */
+		payflow_note(pf, LOG_INFORM,
+			     "amount=%s prob=%.3lf fees=%s delay=%u path=%s",
+			     fmt_amount_msat(tmpctx, payflow_delivered(pf)),
+			     pf->success_prob,
+			     fmt_amount_msat(tmpctx, payflow_fee(pf)),
+			     pf->cltv_delays[0] - pf->cltv_delays[plen-1],
+			     flow_path_annotated(tmpctx, pf));
 
 		/* Increase totals for payment */
 		amount_msat_accumulate(&payment->total_sent, pf->amounts[0]);
@@ -381,12 +407,7 @@ static bool disable_htlc_violations_oneflow(struct payment *p,
 			continue;
 
 		scid = gossmap_chan_scid(gossmap, flow->path[i]);
-		debug_paynote(p, "...disabling channel %s: %s",
-			type_to_string(tmpctx, struct short_channel_id, &scid),
-			reason);
-
-		/* Add this for future searches for this payment. */
-		tal_arr_expand(&p->disabled, scid);
+		payment_disable_chan(p, scid, LOG_INFORM, "%s", reason);
 		/* Add to existing bitmap */
 		bitmap_set_bit(disabled,
 			       gossmap_chan_idx(gossmap, flow->path[i]));
@@ -423,16 +444,14 @@ const char *add_payflows(const tal_t *ctx,
 	bitmap *disabled;
 	const struct gossmap_node *src, *dst;
 
-	disabled = make_disabled_bitmap(tmpctx, pay_plugin->gossmap, p->disabled);
+	disabled = make_disabled_bitmap(tmpctx, pay_plugin->gossmap, p->disabled_scids);
 	src = gossmap_find_node(pay_plugin->gossmap, &pay_plugin->my_id);
 	if (!src) {
-		debug_paynote(p, "We don't have any channels?");
 		*ecode = PAY_ROUTE_NOT_FOUND;
 		return tal_fmt(ctx, "We don't have any channels.");
 	}
 	dst = gossmap_find_node(pay_plugin->gossmap, &p->destination);
 	if (!dst) {
-		debug_paynote(p, "No trace of destination in network gossip");
 		*ecode = PAY_ROUTE_NOT_FOUND;
 		return tal_fmt(ctx, "Destination is unknown in the network gossip.");
 	}
@@ -454,10 +473,6 @@ const char *add_payflows(const tal_t *ctx,
 				p->base_fee_penalty,
 				p->prob_cost_factor);
 		if (!flows) {
-			debug_paynote(p,
-				      "minflow couldn't find a feasible flow for %s",
-				      type_to_string(tmpctx,struct amount_msat,&amount));
-
 			*ecode = PAY_ROUTE_NOT_FOUND;
 			return tal_fmt(ctx,
 				       "minflow couldn't find a feasible flow for %s",
@@ -469,7 +484,7 @@ const char *add_payflows(const tal_t *ctx,
 		fee = flow_set_fee(flows);
 		delay = flows_worst_delay(flows) + p->final_cltv;
 
-		debug_paynote(p,
+		payment_note(p, LOG_INFORM,
 			      "we have computed a set of %ld flows with probability %.3lf, fees %s and delay %ld",
 			      tal_count(flows),
 			      prob,
@@ -479,9 +494,6 @@ const char *add_payflows(const tal_t *ctx,
 		too_expensive = amount_msat_greater(fee, feebudget);
 		if (too_expensive)
 		{
-			debug_paynote(p, "Flows too expensive, fee = %s (max %s)",
-				type_to_string(tmpctx, struct amount_msat, &fee),
-				type_to_string(tmpctx, struct amount_msat, &feebudget));
 			*ecode = PAY_ROUTE_TOO_EXPENSIVE;
 			return tal_fmt(ctx,
 				       "Fee exceeds our fee budget, "
@@ -491,12 +503,8 @@ const char *add_payflows(const tal_t *ctx,
 		}
 		too_delayed = (delay > p->maxdelay);
 		if (too_delayed) {
-			debug_paynote(p, "Flows too delayed, delay = %"PRIu64" (max %u)",
-				delay, p->maxdelay);
-
 			/* FIXME: What is a sane limit? */
 			if (p->delay_feefactor > 1000) {
-				debug_paynote(p, "Giving up!");
 				*ecode = PAY_ROUTE_TOO_EXPENSIVE;
 				return tal_fmt(ctx,
 					       "CLTV delay exceeds our CLTV budget, "
@@ -505,8 +513,10 @@ const char *add_payflows(const tal_t *ctx,
 			}
 
 			p->delay_feefactor *= 2;
-			debug_paynote(p, "Doubling delay_feefactor to %f",
-				p->delay_feefactor);
+			payment_note(p, LOG_INFORM,
+				     "delay %"PRIu64" exceeds our max %u, so doubling delay_feefactor to %f",
+				     delay, p->maxdelay,
+				     p->delay_feefactor);
 
 			continue; // retry
 		}
@@ -540,83 +550,28 @@ const char *add_payflows(const tal_t *ctx,
 const char *flow_path_to_str(const tal_t *ctx, const struct pay_flow *flow)
 {
 	char *s = tal_strdup(ctx, "");
-	for (size_t i = 0; i < tal_count(flow->path_scids); i++) {
+	for (size_t i = 0; i < tal_count(flow->path_scidds); i++) {
 		tal_append_fmt(&s, "-%s->",
 			       type_to_string(tmpctx, struct short_channel_id,
-					      &flow->path_scids[i]));
+					      &flow->path_scidds[i].scid));
 	}
 	return s;
-}
-
-const char* fmt_payflows(const tal_t *ctx,
-			 struct pay_flow ** flows)
-{
-	struct json_out *jout = json_out_new(ctx);
-	json_out_start(jout, NULL, '{');
-	json_out_start(jout,"Pay_flows",'[');
-
-	for(size_t i=0;i<tal_count(flows);++i)
-	{
-		struct pay_flow *f = flows[i];
-		json_out_start(jout,NULL,'{');
-
-		json_out_add(jout,"success_prob",false,"%.2lf",f->success_prob);
-
-		json_out_start(jout,"path_scids",'[');
-		for(size_t j=0;j<tal_count(f->path_scids);++j)
-		{
-			json_out_add(jout,NULL,true,"%s",
-				type_to_string(ctx,struct short_channel_id,&f->path_scids[j]));
-		}
-		json_out_end(jout,']');
-
-		json_out_start(jout,"path_dirs",'[');
-		for(size_t j=0;j<tal_count(f->path_dirs);++j)
-		{
-			json_out_add(jout,NULL,false,"%d",f->path_dirs[j]);
-		}
-		json_out_end(jout,']');
-
-		json_out_start(jout,"amounts",'[');
-		for(size_t j=0;j<tal_count(f->amounts);++j)
-		{
-			json_out_add(jout,NULL,true,"%s",
-				type_to_string(ctx,struct amount_msat,&f->amounts[j]));
-		}
-		json_out_end(jout,']');
-
-		json_out_start(jout,"cltv_delays",'[');
-		for(size_t j=0;j<tal_count(f->cltv_delays);++j)
-		{
-			json_out_add(jout,NULL,false,"%d",f->cltv_delays[j]);
-		}
-		json_out_end(jout,']');
-
-		json_out_start(jout,"path_nodes",'[');
-		for(size_t j=0;j<tal_count(f->path_nodes);++j)
-		{
-			json_out_add(jout,NULL,true,"%s",
-				type_to_string(ctx,struct node_id,&f->path_nodes[j]));
-		}
-		json_out_end(jout,']');
-
-		json_out_end(jout,'}');
-	}
-
-	json_out_end(jout,']');
-	json_out_end(jout, '}');
- 	json_out_direct(jout, 1)[0] = '\n';
- 	json_out_direct(jout, 1)[0] = '\0';
- 	json_out_finished(jout);
-
-	size_t len;
-	return json_out_contents(jout,&len);
 }
 
 /* How much does this flow deliver to destination? */
 struct amount_msat payflow_delivered(const struct pay_flow *flow)
 {
 	return flow->amounts[tal_count(flow->amounts)-1];
+}
+
+/* How much does this flow pay in fees? */
+struct amount_msat payflow_fee(const struct pay_flow *pf)
+{
+	struct amount_msat fee;
+
+	if (!amount_msat_sub(&fee, pf->amounts[0], payflow_delivered(pf)))
+		abort();
+	return fee;
 }
 
 static struct pf_result *pf_resolve(struct pay_flow *pf,

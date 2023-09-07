@@ -470,7 +470,7 @@ def test_plugin_connected_hook_chaining(node_factory):
     try:
         l3.connect(l1)
     except RpcError as err:
-        assert "disconnected during connection" in err.error
+        assert "disconnected during connection" in err.error['message']
 
     l1.daemon.wait_for_logs([
         f"peer_connected_logger_a {l3id}",
@@ -3199,10 +3199,22 @@ def test_autoclean(node_factory):
 
     l3.rpc.setconfig('autoclean-cycle', 10)
 
-    # First it expires.
-    wait_for(lambda: only_one(l3.rpc.listinvoices('inv1')['invoices'])['status'] == 'expired')
-    # Now will get autocleaned
-    wait_for(lambda: l3.rpc.listinvoices('inv1')['invoices'] == [])
+    # It will always go unpaid->expired->deleted, but we might miss it!
+    was_expired = False
+    while True:
+        # Is it deleted yet?
+        invs = l3.rpc.listinvoices('inv1')['invoices']
+        if invs == []:
+            break
+        if was_expired:
+            assert only_one(invs)['status'] == 'expired'
+        else:
+            if only_one(invs)['status'] == 'expired':
+                was_expired = True
+            else:
+                assert only_one(invs)['status'] == 'unpaid'
+        time.sleep(1)
+
     assert l3.rpc.autoclean_status()['autoclean']['expiredinvoices']['cleaned'] == 1
 
     # Keeps settings across restarts
@@ -3450,7 +3462,7 @@ def test_sql(node_factory, bitcoind):
               'lease-fee-base-sat': '2000msat',
               'channel-fee-max-base-msat': '500sat',
               'channel-fee-max-proportional-thousandths': 200,
-              'sqlfilename': 'sql.sqlite3',
+              'dev-sqlfilename': 'sql.sqlite3',
               'may_reconnect': True}
     l2opts.update(opts)
     l1, l2, l3 = node_factory.line_graph(3, wait_for_announce=True,
@@ -4164,7 +4176,7 @@ def test_sql(node_factory, bitcoind):
     l2.stop()
     l2.daemon.opts["alias"] = "TESTALIAS"
     # Don't try to reuse the same db file!
-    del l2.daemon.opts["sqlfilename"]
+    del l2.daemon.opts["dev-sqlfilename"]
     l2.start()
     # DEV appends stuff to alias!
     alias = l2.rpc.getinfo()['alias']
