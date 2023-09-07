@@ -39,10 +39,10 @@ jobs:
           git fetch origin ${{ github.base_ref }}
           git rebase origin/${{ github.base_ref }}
 
-      - name: Set up Python 3.7
+      - name: Set up Python 3.8
         uses: actions/setup-python@v4
         with:
-          python-version: 3.7
+          python-version: 3.8
 
       - name: Install dependencies
         run: |
@@ -51,6 +51,8 @@ jobs:
           # Export and then use pip to install into the current env
           poetry export -o /tmp/requirements.txt --without-hashes --with dev
           pip install -r /tmp/requirements.txt
+          # Make sure we have clnrest requirements, for check-manpages
+          pip install -r plugins/clnrest/requirements.txt
           # We're going to check BOLT quotes, so get the latest version
           git clone https://github.com/lightning/bolts.git ../${BOLTDIR}
       - name: Configure
@@ -80,6 +82,7 @@ jobs:
             DEVELOPER: 0
             VALGRIND: 1
             COMPILER: gcc
+            COPTFLAGS_VAR: COPTFLAGS="-O3 -Werror"
           # While we're at it let's try to compile with clang
           - CFG: clang-dev1
             DEVELOPER: 1
@@ -95,10 +98,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Set up Python 3.7
+      - name: Set up Python 3.8
         uses: actions/setup-python@v4
         with:
-          python-version: 3.7
+          python-version: 3.8
 
       - name: Install dependencies
         run: |
@@ -118,7 +121,7 @@ jobs:
           pip3 install --user pip wheel poetry
           poetry export -o requirements.txt --with dev --without-hashes
           python3 -m pip install -r requirements.txt
-          ./configure --enable-debugbuild CC="$COMPILER"
+          ./configure --enable-debugbuild CC="$COMPILER" ${{ matrix.COPTFLAGS_VAR }}
 
           make -j $(nproc) testpack.tar.bz2
 
@@ -126,7 +129,7 @@ jobs:
           mv testpack.tar.bz2 cln-${CFG}.tar.bz2
       - name: Check rust packages
         run: cargo test --all
-      - uses: actions/upload-artifact@v2.2.4
+      - uses: actions/upload-artifact@v3
         with:
           name: cln-${{ matrix.CFG }}.tar.bz2
           path: cln-${{ matrix.CFG }}.tar.bz2
@@ -155,10 +158,10 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Set up Python 3.7
+      - name: Set up Python 3.8
         uses: actions/setup-python@v4
         with:
-          python-version: 3.7
+          python-version: 3.8
 
       - name: Install dependencies
         run: |
@@ -192,10 +195,10 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Set up Python 3.7
+      - name: Set up Python 3.8
         uses: actions/setup-python@v4
         with:
-          python-version: 3.7
+          python-version: 3.8
 
       - name: Install dependencies
         run: |
@@ -273,10 +276,10 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Set up Python 3.7
+      - name: Set up Python 3.8
         uses: actions/setup-python@v4
         with:
-          python-version: 3.7
+          python-version: 3.8
 
       - name: Install dependencies
         run: |
@@ -350,10 +353,10 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Set up Python 3.7
+      - name: Set up Python 3.8
         uses: actions/setup-python@v4
         with:
-          python-version: 3.7
+          python-version: 3.8
 
       - name: Install dependencies
         run: |
@@ -399,7 +402,7 @@ jobs:
           - NAME: ASan/UBSan (01/10)
             PYTEST_OPTS: --test-group=1  --test-group-count=10
           - NAME: ASan/UBSan (02/10)
-            PYTEST_OPTS: --test-group=2  --test-group-count=10
+            PYTEST_OPTS: --test-group=2  --test-group-count=10 -n 1
           - NAME: ASan/UBSan (03/10)
             PYTEST_OPTS: --test-group=3  --test-group-count=10
           - NAME: ASan/UBSan (04/10)
@@ -420,10 +423,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Set up Python 3.7
+      - name: Set up Python 3.8
         uses: actions/setup-python@v4
         with:
-          python-version: 3.7
+          python-version: 3.8
 
       - name: Install dependencies
         run: |

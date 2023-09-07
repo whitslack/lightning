@@ -8,6 +8,8 @@ if [ "$1" = "--inside-docker" ]; then
     PLTFM="$3"
     git clone /src /build
     cd /build
+    pip3 install -r plugins/clnrest/requirements.txt
+    pip3 install ./contrib/pyln-client
     ./configure
     make VERSION="$VER"
     make install DESTDIR=/"$VER-$PLTFM" RUST_PROFILE=release
@@ -150,7 +152,7 @@ for target in $TARGETS; do
         echo "Fedora Image Built"
         ;;
     Ubuntu)
-		for d in bionic focal jammy; do
+		for d in focal jammy; do
             # Capitalize the first letter of distro
             D=$(echo "$d" | awk '{print toupper(substr($0,1,1))substr($0,2)}')
 			echo "Building Ubuntu $D Image"
@@ -197,7 +199,7 @@ if [ -z "${TARGETS##* deb *}" ]; then
     BLDDIR="${TMPDIR}/clightning-${VERSION}"
     ARCH="$(dpkg-architecture -q DEB_BUILD_ARCH)"
 
-    for SUITE in bionic focal hirsute xenial hirsute impish; do
+    for SUITE in focal hirsute xenial hirsute impish; do
 
 	mkdir -p "${BLDDIR}"
 	echo "Building ${BARE_VERSION} in ${TMPDIR}"
@@ -244,15 +246,17 @@ if [ -z "${TARGETS##* docker *}" ]; then
         git clone --recursive . "${TMPDIR}"
         (
         cd "${TMPDIR}"
-        git checkout "v${BARE_VERSION}"
+        if ! $FORCE_UNCLEAN; then
+            git checkout "v${BARE_VERSION}"
+        fi
         case "$d" in
             "arm32v7")
                 cp "${SRCDIR}/contrib/docker/Dockerfile.$d" "${TMPDIR}/"
-                docker buildx build --load --platform linux/arm64 -t "elementsproject/lightningd:$VERSION-$d" -f Dockerfile.$d "${TMPDIR}"
+                docker buildx build --load --platform linux/arm/v7 -t "elementsproject/lightningd:$VERSION-$d" -f Dockerfile.$d "${TMPDIR}"
                 ;;
             "arm64v8")
                 cp "${SRCDIR}/contrib/docker/Dockerfile.$d" "${TMPDIR}/"
-                docker buildx build --load --platform linux/arm/v7 -t "elementsproject/lightningd:$VERSION-$d" -f Dockerfile.$d "${TMPDIR}"
+                docker buildx build --load --platform linux/arm64 -t "elementsproject/lightningd:$VERSION-$d" -f Dockerfile.$d "${TMPDIR}"
                 ;;
             *)
                 cp "${SRCDIR}/Dockerfile" "${TMPDIR}/"

@@ -88,6 +88,9 @@ bool utf8_check(const void *buf, size_t buflen);
 /* Check it's UTF-8, return copy (or same if TAKES), or NULL if not valid. */
 char *utf8_str(const tal_t *ctx, const u8 *buf TAKES, size_t buflen);
 
+/* Strdup, or pass through NULL */
+char *tal_strdup_or_null(const tal_t *ctx, const char *str);
+
 /* Use the POSIX C locale. */
 void setup_locale(void);
 
@@ -145,5 +148,14 @@ extern const tal_t *wally_tal_ctx;
 /* Like mkstemp but resolves template relative to $TMPDIR (or /tmp if unset).
  * Returns created temporary path name at *created if successful. */
 int tmpdir_mkstemp(const tal_t *ctx, const char *template TAKES, char **created);
+
+/**
+ * tal_strlowering - return the same string by in lower case.
+ * @ctx: the context to tal from (often NULL)
+ * @string: the string that is going to be lowered (can be take())
+ *
+ * FIXME: move this in ccan
+ */
+char *str_lowering(const void *ctx, const char *string TAKES);
 
 #endif /* LIGHTNING_COMMON_UTILS_H */

@@ -134,10 +134,10 @@ struct lightningd {
 	/* Where each configuration setting came from */
 	struct configvar **configvars;
 
-	/* This log_book is owned by all the struct logs */
+	/* This log_book is owned by all the struct loggers */
 	struct log_book *log_book;
 	/* Log for general stuff. */
-	struct log *log;
+	struct logger *log;
 	const char **logfiles;
 
 	/* This is us. */
@@ -264,6 +264,9 @@ struct lightningd {
 
 	/* Announce names in config as DNS records (recently BOLT 7 addition) */
 	bool announce_dns;
+
+	/* Contains the codex32 string used with --recover flag */
+	char *recover;
 
 #if DEVELOPER
 	/* If we want to debug a subdaemon/plugin. */

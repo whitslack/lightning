@@ -9,6 +9,7 @@
 #include <ccan/tal/path/path.h>
 #include <ccan/tal/str/str.h>
 #include <common/bech32.h>
+#include <common/codex32.h>
 #include <common/configdir.h>
 #include <common/derive_basepoints.h>
 #include <common/descriptor_checksum.h>
@@ -44,6 +45,7 @@ static void show_usage(const char *progname)
 	printf("	- checkhsm <path/to/new/hsm_secret>\n");
 	printf("	- dumponchaindescriptors <path/to/hsm_secret> [network]\n");
 	printf("	- makerune <path/to/hsm_secret>\n");
+	printf("	- getcodexsecret <path/to/hsm_secret> <id>\n");
 	exit(0);
 }
 
@@ -241,6 +243,22 @@ static int decrypt_hsm(const char *hsm_secret_path)
 	tal_free(dir);
 
 	printf("Successfully decrypted hsm_secret, be careful now :-).\n");
+	return 0;
+}
+
+static int make_codexsecret(const char *hsm_secret_path,
+			    const char *id)
+{
+	struct secret hsm_secret;
+	char *bip93;
+	const char *err;
+	get_hsm_secret(&hsm_secret, hsm_secret_path);
+
+	err = codex32_secret_encode(tmpctx, "cl", id, 0, hsm_secret.data, 32, &bip93);
+	if (err)
+		errx(ERROR_USAGE, "%s", err);
+
+	printf("%s\n", bip93);
 	return 0;
 }
 
@@ -529,13 +547,11 @@ static int generate_hsm(const char *hsm_secret_path)
 }
 
 static int dumponchaindescriptors(const char *hsm_secret_path, const char *old_passwd UNUSED,
-				  const bool is_testnet)
+				  const u32 version)
 {
 	struct secret hsm_secret;
 	u8 bip32_seed[BIP32_ENTROPY_LEN_256];
 	u32 salt = 0;
-	u32 version = is_testnet ?
-		BIP32_VER_TEST_PRIVATE : BIP32_VER_MAIN_PRIVATE;
 	struct ext_key master_extkey;
 	char *enc_xpub, *descriptor;
 	struct descriptor_checksum checksum;
@@ -709,7 +725,7 @@ int main(int argc, char *argv[])
 
 	if (streq(method, "dumponchaindescriptors")) {
 		char *net = NULL;
-		bool is_testnet;
+		u32 version;
 
 		if (argc < 3)
 			show_usage(argv[0]);
@@ -717,16 +733,16 @@ int main(int argc, char *argv[])
 		if (argc > 3)
 			net = argv[3];
 
-		if (net && streq(net, "testnet"))
-			is_testnet = true;
+		if (net && (streq(net, "testnet") || streq(net, "signet")))
+			version = BIP32_VER_TEST_PRIVATE;
 		else if (net && !streq(net, "bitcoin"))
 			errx(ERROR_USAGE, "Network '%s' not supported."
 					  " Supported networks: bitcoin (default),"
-					  " testnet", net);
+					  " testnet and signet", net);
 		else
-			is_testnet = false;
+			version = BIP32_VER_MAIN_PRIVATE;
 
-		return dumponchaindescriptors(argv[2], NULL, is_testnet);
+		return dumponchaindescriptors(argv[2], NULL, version);
 	}
 
 	if (streq(method, "checkhsm")) {
@@ -741,5 +757,10 @@ int main(int argc, char *argv[])
 		return make_rune(argv[2]);
 	}
 
+	if(streq(method, "getcodexsecret")) {
+		if (argc < 2)
+			show_usage(argv[0]);
+		return make_codexsecret(argv[2], argv[3]);
+	}
 	show_usage(argv[0]);
 }

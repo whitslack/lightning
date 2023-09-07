@@ -6,7 +6,6 @@ from pathlib import Path
 from pyln.client import RpcError
 from pyln.testing.btcproxy import BitcoinRpcProxy
 from pyln.testing.gossip import GossipStore
-from pyln.testing import grpc
 from collections import OrderedDict
 from decimal import Decimal
 from pyln.client import LightningRpc
@@ -820,6 +819,7 @@ class LightningNode(object):
             self._create_jsonrpc_rpc(jsonschemas)
 
     def _create_grpc_rpc(self):
+        from pyln.testing import grpc
         self.grpc_port = reserve_unused_port()
         d = self.lightning_dir / TEST_NETWORK
         d.mkdir(parents=True, exist_ok=True)
@@ -1281,7 +1281,8 @@ class LightningNode(object):
         # Hack so we can mutate the txid: pass it in a list
         def rbf_or_txid_broadcast(txids):
             # RBF onchain txid d4b597505b543a4b8b42ab4d481fd7a533febb7e7df150ca70689e6d046612f7 (fee 6564sat) with txid 979878b8f855d3895d1cd29bd75a60b21492c4842e38099186a8e649bee02c7c (fee 8205sat)
-            line = self.daemon.is_in_log("RBF (onchain|HTLC) txid {}".format(txids[-1]))
+            # We can have noop RBFs: ignore those (increases are logged INFO level)
+            line = self.daemon.is_in_log(" INFO    .*RBF (onchain|HTLC) txid {}".format(txids[-1]))
             if line is not None:
                 newtxid = re.search(r'with txid ([0-9a-fA-F]*)', line).group(1)
                 txids.append(newtxid)
@@ -1538,7 +1539,8 @@ class NodeFactory(object):
         )
 
         # Regtest estimatefee are unusable, so override.
-        node.set_feerates(feerates, False)
+        if feerates is not None:
+            node.set_feerates(feerates, False)
 
         self.nodes.append(node)
         self.reserved_ports.append(port)

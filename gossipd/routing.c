@@ -22,6 +22,11 @@
 /* 365.25 * 24 * 60 / 10 */
 #define BLOCKS_PER_YEAR 52596
 
+struct pending_spam_node_announce {
+	u8 *node_announcement;
+	u32 index;
+};
+
 struct pending_node_announce {
 	struct routing_state *rstate;
 	struct node_id nodeid;
@@ -31,6 +36,8 @@ struct pending_node_announce {
 	u32 index;
 	/* If non-NULL this is peer to credit it with */
 	struct node_id *source_peer;
+	/* required for loading gossip store */
+	struct pending_spam_node_announce spam;
 };
 
 /* As per the below BOLT #7 quote, we delay forgetting a channel until 12
@@ -465,6 +472,7 @@ static void force_node_announce_rexmit(struct routing_state *rstate,
 					     node->bcast.timestamp,
 					     false,
 					     false,
+					     false,
 					     NULL);
 	if (node->rgraph.index == initial_bcast_index){
 		node->rgraph.index = node->bcast.index;
@@ -478,6 +486,7 @@ static void force_node_announce_rexmit(struct routing_state *rstate,
 						      node->rgraph.timestamp,
 						      false,
 						      true,
+						      false,
 						      NULL);
 	}
 }
@@ -774,6 +783,8 @@ static void catch_node_announcement(const tal_t *ctx,
 		pna->index = 0;
 		pna->refcount = 0;
 		pna->source_peer = NULL;
+		pna->spam.node_announcement = NULL;
+		pna->spam.index = 0;
 		pending_node_map_add(rstate->pending_node_map, pna);
 	}
 	pna->refcount++;
@@ -802,6 +813,22 @@ static void process_pending_node_announcement(struct routing_state *rstate,
 				       tal_hex(tmpctx, pna->node_announcement));
 		/* Never send this again. */
 		pna->node_announcement = tal_free(pna->node_announcement);
+	}
+	if (pna->spam.node_announcement) {
+		SUPERVERBOSE(
+		    "Processing deferred node_announcement for node %s",
+		    type_to_string(pna, struct node_id, nodeid));
+
+		/* Can fail it timestamp is now too old */
+		if (!routing_add_node_announcement(rstate,
+						   pna->spam.node_announcement,
+						   pna->spam.index,
+						   NULL, NULL,
+						   true))
+			status_unusual("pending node_announcement %s too old?",
+				       tal_hex(tmpctx, pna->spam.node_announcement));
+		/* Never send this again. */
+		pna->spam.node_announcement = tal_free(pna->spam.node_announcement);
 	}
 
 	/* We don't need to catch any more node_announcements, since we've
@@ -845,6 +872,7 @@ static void add_channel_announce_to_broadcast(struct routing_state *rstate,
 		chan->bcast.index = gossip_store_add(rstate->gs,
 						     channel_announce,
 						     chan->bcast.timestamp,
+						     false,
 						     false,
 						     false,
 						     addendum);
@@ -1315,6 +1343,16 @@ static void delete_spam_update(struct routing_state *rstate,
 	hc->rgraph.timestamp = hc->bcast.timestamp;
 }
 
+static bool is_chan_dying(struct routing_state *rstate,
+			  const struct short_channel_id *scid)
+{
+	for (size_t i = 0; i < tal_count(rstate->dying_channels); i++) {
+		if (short_channel_id_eq(&rstate->dying_channels[i].scid, scid))
+			return true;
+	}
+	return false;
+}
+
 bool routing_add_channel_update(struct routing_state *rstate,
 				const u8 *update TAKES,
 				u32 index,
@@ -1339,6 +1377,7 @@ bool routing_add_channel_update(struct routing_state *rstate,
 	struct amount_sat sat;
 	bool spam;
 	bool zombie;
+	bool dying;
 
 	/* Make sure we own msg, even if we don't save it. */
 	if (taken(update))
@@ -1360,6 +1399,7 @@ bool routing_add_channel_update(struct routing_state *rstate,
 		uc = NULL;
 		sat = chan->sat;
 		zombie = is_chan_zombie(chan);
+		dying = is_chan_dying(rstate, &short_channel_id);
 	} else {
 		/* Maybe announcement was waiting for this update? */
 		uc = get_unupdated_channel(rstate, &short_channel_id);
@@ -1369,6 +1409,7 @@ bool routing_add_channel_update(struct routing_state *rstate,
 		sat = uc->sat;
 		/* When loading zombies from the store. */
 		zombie = force_zombie_flag;
+		dying = false;
 	}
 
 	/* Reject update if the `htlc_maximum_msat` is greater
@@ -1531,7 +1572,7 @@ bool routing_add_channel_update(struct routing_state *rstate,
 		chan->bcast.index =
 			gossip_store_add(rstate->gs, zombie_announcement,
 					 chan->bcast.timestamp,
-					 false, false, zombie_addendum);
+					 false, false, false, zombie_addendum);
 		/* Deletion of the old addendum is optional. */
 		/* This opposing channel_update has been stashed away.  Now that
 		 * there are two valid updates, this one gets restored. */
@@ -1554,12 +1595,12 @@ bool routing_add_channel_update(struct routing_state *rstate,
 		chan->half[!direction].bcast.index =
 			gossip_store_add(rstate->gs, zombie_update[0],
 					 chan->half[!direction].bcast.timestamp,
-					 false, false, NULL);
+					 false, false, false, NULL);
 		if (zombie_update[1])
 			chan->half[!direction].rgraph.index =
 				gossip_store_add(rstate->gs, zombie_update[1],
 						 chan->half[!direction].rgraph.timestamp,
-						 false, true, NULL);
+						 false, true, false, NULL);
 		else
 			chan->half[!direction].rgraph.index = chan->half[!direction].bcast.index;
 
@@ -1577,7 +1618,7 @@ bool routing_add_channel_update(struct routing_state *rstate,
 	} else {
 		hc->rgraph.index
 			= gossip_store_add(rstate->gs, update, timestamp,
-					   zombie, spam, NULL);
+					   zombie, spam, dying, NULL);
 		if (hc->bcast.timestamp > rstate->last_timestamp
 		    && hc->bcast.timestamp < time_now().ts.tv_sec)
 			rstate->last_timestamp = hc->bcast.timestamp;
@@ -1596,8 +1637,9 @@ bool routing_add_channel_update(struct routing_state *rstate,
 	}
 
 	status_peer_debug(source_peer,
-			  "Received %schannel_update for channel %s/%d now %s",
+			  "Received %schannel_update for %schannel %s/%d now %s",
 			  ignore_timestamp ? "(forced) " : "",
+			  dying ? "dying ": "",
 			  type_to_string(tmpctx, struct short_channel_id,
 					 &short_channel_id),
 			  channel_flags & 0x01,
@@ -1804,12 +1846,20 @@ bool routing_add_node_announcement(struct routing_state *rstate,
 
 		SUPERVERBOSE("Deferring node_announcement for node %s",
 			     type_to_string(tmpctx, struct node_id, &node_id));
-		pna->timestamp = timestamp;
-		pna->index = index;
-		tal_free(pna->node_announcement);
-		tal_free(pna->source_peer);
-		pna->node_announcement = tal_dup_talarr(pna, u8, msg);
-		pna->source_peer = tal_dup_or_null(pna, struct node_id, source_peer);
+		/* a pending spam node announcement is possible when loading
+		 * from the store */
+		if (index && force_spam_flag) {
+			tal_free(pna->spam.node_announcement);
+			pna->spam.node_announcement = tal_dup_talarr(pna, u8, msg);
+			pna->spam.index = index;
+		} else {
+			tal_free(pna->node_announcement);
+			tal_free(pna->source_peer);
+			pna->node_announcement = tal_dup_talarr(pna, u8, msg);
+			pna->source_peer = tal_dup_or_null(pna, struct node_id, source_peer);
+			pna->timestamp = timestamp;
+			pna->index = index;
+		}
 		return true;
 	}
 
@@ -1899,7 +1949,7 @@ bool routing_add_node_announcement(struct routing_state *rstate,
 	} else {
 		node->rgraph.index
 			= gossip_store_add(rstate->gs, msg, timestamp,
-					   false, spam, NULL);
+					   false, spam, false, NULL);
 		if (node->bcast.timestamp > rstate->last_timestamp
 		    && node->bcast.timestamp < time_now().ts.tv_sec)
 			rstate->last_timestamp = node->bcast.timestamp;
@@ -2131,7 +2181,7 @@ bool routing_add_private_channel(struct routing_state *rstate,
 		u8 *msg = towire_gossip_store_private_channel(tmpctx,
 							      capacity,
 							      chan_ann);
-		index = gossip_store_add(rstate->gs, msg, 0, false, false,
+		index = gossip_store_add(rstate->gs, msg, 0, false, false, false,
 					 NULL);
 	}
 	chan->bcast.index = index;
@@ -2277,7 +2327,18 @@ void routing_channel_spent(struct routing_state *rstate,
 
 	/* Save to gossip_store in case we restart */
 	msg = towire_gossip_store_chan_dying(tmpctx, &chan->scid, deadline);
-	index = gossip_store_add(rstate->gs, msg, 0, false, false, NULL);
+	index = gossip_store_add(rstate->gs, msg, 0, false, false, false, NULL);
+
+	/* Mark it dying, so we don't gossip it */
+	gossip_store_mark_dying(rstate->gs, &chan->bcast,
+				WIRE_CHANNEL_ANNOUNCEMENT);
+	for (int dir = 0; dir < ARRAY_SIZE(chan->half); dir++) {
+		if (is_halfchan_defined(&chan->half[dir])) {
+			gossip_store_mark_dying(rstate->gs,
+						&chan->half[dir].bcast,
+						WIRE_CHANNEL_UPDATE);
+		}
+	}
 
 	/* Remember locally so we can kill it in 12 blocks */
 	status_debug("channel %s closing soon due"

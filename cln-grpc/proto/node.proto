@@ -55,6 +55,7 @@ service Node {
 	rpc GetRoute(GetrouteRequest) returns (GetrouteResponse) {}
 	rpc ListForwards(ListforwardsRequest) returns (ListforwardsResponse) {}
 	rpc ListPays(ListpaysRequest) returns (ListpaysResponse) {}
+	rpc ListHtlcs(ListhtlcsRequest) returns (ListhtlcsResponse) {}
 	rpc Ping(PingRequest) returns (PingResponse) {}
 	rpc SendCustomMsg(SendcustommsgRequest) returns (SendcustommsgResponse) {}
 	rpc SetChannel(SetchannelRequest) returns (SetchannelResponse) {}
@@ -63,6 +64,7 @@ service Node {
 	rpc Stop(StopRequest) returns (StopResponse) {}
 	rpc PreApproveKeysend(PreapprovekeysendRequest) returns (PreapprovekeysendResponse) {}
 	rpc PreApproveInvoice(PreapproveinvoiceRequest) returns (PreapproveinvoiceResponse) {}
+	rpc StaticBackup(StaticbackupRequest) returns (StaticbackupResponse) {}
 }
 
 message GetinfoRequest {
@@ -1106,6 +1108,7 @@ message ListpeerchannelsChannels {
 	optional bool peer_connected = 2;
 	optional ListpeerchannelsChannelsState state = 3;
 	optional bytes scratch_txid = 4;
+	optional bool ignore_fee_limits = 54;
 	optional ListpeerchannelsChannelsFeerate feerate = 6;
 	optional string owner = 7;
 	optional string short_channel_id = 8;
@@ -1605,9 +1608,34 @@ message ListpaysPays {
 	optional string bolt11 = 6;
 	optional string description = 11;
 	optional string bolt12 = 7;
+	optional Amount amount_msat = 8;
+	optional Amount amount_sent_msat = 9;
 	optional bytes preimage = 13;
 	optional uint64 number_of_parts = 14;
 	optional bytes erroronion = 10;
+}
+
+message ListhtlcsRequest {
+	optional string id = 1;
+}
+
+message ListhtlcsResponse {
+	repeated ListhtlcsHtlcs htlcs = 1;
+}
+
+message ListhtlcsHtlcs {
+	// ListHtlcs.htlcs[].direction
+	enum ListhtlcsHtlcsDirection {
+		OUT = 0;
+		IN = 1;
+	}
+	string short_channel_id = 1;
+	uint64 id = 2;
+	uint32 expiry = 3;
+	Amount amount_msat = 4;
+	ListhtlcsHtlcsDirection direction = 5;
+	bytes payment_hash = 6;
+	HtlcState state = 7;
 }
 
 message PingRequest {
@@ -1636,6 +1664,7 @@ message SetchannelRequest {
 	optional Amount htlcmin = 4;
 	optional Amount htlcmax = 5;
 	optional uint32 enforcedelay = 6;
+	optional bool ignorefeelimits = 7;
 }
 
 message SetchannelResponse {
@@ -1648,6 +1677,7 @@ message SetchannelChannels {
 	optional string short_channel_id = 3;
 	Amount fee_base_msat = 4;
 	uint32 fee_proportional_millionths = 5;
+	optional bool ignore_fee_limits = 10;
 	Amount minimum_htlc_out_msat = 6;
 	optional string warning_htlcmin_too_low = 7;
 	Amount maximum_htlc_out_msat = 8;
@@ -1692,4 +1722,11 @@ message PreapproveinvoiceRequest {
 }
 
 message PreapproveinvoiceResponse {
+}
+
+message StaticbackupRequest {
+}
+
+message StaticbackupResponse {
+	repeated bytes scb = 1;
 }

@@ -11,6 +11,7 @@ from utils import (
     first_scid
 )
 
+import bitcoin
 import os
 import queue
 import pytest
@@ -538,6 +539,9 @@ def test_penalty_inhtlc(node_factory, bitcoind, executor, chainparams, anchors):
     # Payment should now complete.
     t.result(timeout=10)
 
+    # Make sure both sides completely settled.
+    wait_for(lambda: all([only_one(n.rpc.listpeerchannels()['channels'])['htlcs'] == [] for n in (l1, l2)]))
+
     # Now we really mess things up!
     bitcoind.rpc.sendrawtransaction(tx)
     bitcoind.generate_block(1)
@@ -669,8 +673,7 @@ def test_penalty_outhtlc(node_factory, bitcoind, executor, chainparams, anchors)
     t.result(timeout=10)
 
     # Make sure both sides got revoke_and_ack for final.
-    l1.daemon.wait_for_log('peer_in WIRE_REVOKE_AND_ACK')
-    l2.daemon.wait_for_log('peer_in WIRE_REVOKE_AND_ACK')
+    wait_for(lambda: all([only_one(n.rpc.listpeerchannels()['channels'])['htlcs'] == [] for n in (l1, l2)]))
 
     # Now we really mess things up!
     bitcoind.rpc.sendrawtransaction(tx)
@@ -993,7 +996,7 @@ def test_channel_lease_unilat_closes(node_factory, bitcoind):
     # This can timeout, so do it in easy stages.
     for i in range(16):
         bitcoind.generate_block(4032 // 16)
-    sync_blockheight(bitcoind, [l2, l3])
+        sync_blockheight(bitcoind, [l2, l3])
 
     l2.rpc.withdraw(l2.rpc.newaddr()['bech32'], "all", utxos=[utxo1])
 
@@ -1656,21 +1659,12 @@ def test_penalty_rbf_normal(node_factory, bitcoind, executor, chainparams, ancho
     assert blocks1 == 0
     assert blocks2 == 0
 
-    def get_rbf_txid(node, txid):
-        line = node.daemon.wait_for_log("RBF onchain .*{}".format(txid))
-        newtxid = re.search(r'with txid ([0-9a-fA-F]*)', line).group(1)
-        return newtxid
-
     # Now the censoring miners generate some blocks.
     for depth in range(2, 10):
         bitcoind.generate_block(1)
         # l2 should RBF, twice even, one for the l1 main output,
         # one for the l1 HTLC output.
-        # Don't assume a specific order!
-        start = l2.daemon.logsearch_start
-        txid1 = get_rbf_txid(l2, txid1)
-        l2.daemon.logsearch_start = start
-        txid2 = get_rbf_txid(l2, txid2)
+        l2.daemon.wait_for_logs(['RBF onchain txid'] * 2)
 
     # Now that the transactions have high fees, independent miners
     # realize they can earn potentially more money by grabbing the
@@ -1682,14 +1676,12 @@ def test_penalty_rbf_normal(node_factory, bitcoind, executor, chainparams, ancho
     bitcoind.generate_block(1, needfeerate=10000000)
 
     # This triggers the final RBF attempt
-    start = l2.daemon.logsearch_start
-    txid1 = get_rbf_txid(l2, txid1)
-    l2.daemon.logsearch_start = start
-    txid2 = get_rbf_txid(l2, txid2)
+    l2.daemon.wait_for_logs(['RBF onchain txid'] * 2)
+
+    # FIXME: Some of those RBFs may not be accepted by bitcoind, we don't bother with txid checks
 
     # Now the non-censoring miners overpower the censoring miners.
-    # FIXME: Some of those RBFs may not be accepted by bitcoind, so just check number in mempool.
-    bitcoind.generate_block(1, wait_for_mempool=len([txid1, txid2]))
+    bitcoind.generate_block(1, wait_for_mempool=2)
     sync_blockheight(bitcoind, [l2])
 
     # And l2 should consider it resolved now.
@@ -3359,13 +3351,15 @@ Try a range of future segwit versions as shutdown scripts.  We create many nodes
 
 
 @pytest.mark.developer("needs to set dev-disconnect")
-def test_closing_higherfee(node_factory, bitcoind, executor):
-    """With anchor outputs we can ask for a *higher* fee than the last commit tx"""
+@pytest.mark.parametrize("anchors", [False, True])
+def test_closing_higherfee(node_factory, bitcoind, executor, anchors):
+    """We can ask for a *higher* fee than the last commit tx"""
 
     opts = {'may_reconnect': True,
             'dev-no-reconnect': None,
-            'experimental-anchors': None,
             'feerates': (7500, 7500, 7500, 7500)}
+    if anchors:
+        opts['experimental-anchors'] = None
 
     # We change the feerate before it starts negotiating close, so it aims
     # for *higher* than last commit tx.
@@ -3384,7 +3378,7 @@ def test_closing_higherfee(node_factory, bitcoind, executor):
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
 
     # This causes us to *exceed* previous requirements!
-    l1.daemon.wait_for_log(r'deriving max fee from rate 30000 -> .*sat \(not 1000000sat\)')
+    l1.daemon.wait_for_log(r'deriving max fee from rate 30000 -> .*sat')
 
     # This will fail because l1 restarted!
     with pytest.raises(RpcError, match=r'Connection to RPC server lost.'):
@@ -3682,6 +3676,10 @@ We send an HTLC, and peer unilaterally closes: do we close upstream?
     with pytest.raises(RpcError, match=r'WIRE_TEMPORARY_CHANNEL_FAILURE \(reply from remote\)'):
         l1.rpc.waitsendpay(ph2, timeout=TIMEOUT)
 
+    # An important response to the timeout is to force a reconnect,
+    # since the problem may be TCP connectivity.
+    assert only_one(l2.rpc.listpeerchannels(l3.info['id'])['channels'])['peer_connected'] is False
+
     # Make close unilaterally.
     l3.rpc.close(l2.info['id'], 1)
 
@@ -3801,3 +3799,118 @@ def test_closing_anchorspend_htlc_tx_rbf(node_factory, bitcoind):
 
     # And this will mine it!
     bitcoind.generate_block(1, needfeerate=4990)
+
+
+@pytest.mark.developer("needs dev_disconnect")
+@pytest.mark.parametrize("anchors", [False, True])
+def test_htlc_no_force_close(node_factory, bitcoind, anchors):
+    """l2<->l3 force closes while an HTLC is in flight from l1, but l2 can't timeout because the feerate has spiked.  It should do so anyway."""
+    opts = [{}, {}, {'disconnect': ['-WIRE_UPDATE_FULFILL_HTLC']}]
+    if anchors:
+        for opt in opts:
+            opt['experimental-anchors'] = None
+
+    l1, l2, l3 = node_factory.line_graph(3, opts=opts)
+
+    MSATS = 12300000
+    inv = l3.rpc.invoice(MSATS, 'label', 'description')
+
+    route = [{'amount_msat': MSATS + 1 + MSATS * 10 // 1000000,
+              'id': l2.info['id'],
+              'delay': 16,
+              'channel': first_scid(l1, l2)},
+             {'amount_msat': MSATS,
+              'id': l3.info['id'],
+              'delay': 10,
+              'channel': first_scid(l2, l3)}]
+    l1.rpc.sendpay(route, inv['payment_hash'],
+                   payment_secret=inv['payment_secret'])
+    l3.daemon.wait_for_log('dev_disconnect')
+
+    htlc_txs = []
+
+    # l3 drops to chain, holding htlc (but we stop it xmitting txs)
+    def censoring_sendrawtx(r):
+        htlc_txs.append(r['params'][0])
+        return {'id': r['id'], 'result': {}}
+
+    l3.daemon.rpcproxy.mock_rpc('sendrawtransaction', censoring_sendrawtx)
+
+    # l3 gets upset, drops to chain when there are < 4 blocks remaining.
+    # But tx doesn't get mined...
+    bitcoind.generate_block(8)
+    l3.daemon.wait_for_log("Peer permanent failure in CHANNELD_NORMAL: Fulfilled HTLC 0 SENT_REMOVE_.* cltv 114 hit deadline")
+
+    # l2 closes drops the commitment tx at block 115 (one block after timeout)
+    bitcoind.generate_block(4)
+    l2.daemon.wait_for_log("Peer permanent failure in CHANNELD_NORMAL: Offered HTLC 0 SENT_ADD_ACK_REVOCATION cltv 114 hit deadline")
+    l1.set_feerates((15000, 15000, 15000, 15000))
+
+    # Two more blocks, with no htlc tx.
+    bitcoind.generate_block(1, wait_for_mempool=1)
+    # Make sure l2 sees it onchain!
+    wait_for(lambda: only_one(l2.rpc.listpeerchannels(l3.info['id'])['channels'])['state'] == 'ONCHAIN')
+    # Don't let l2's htlc timeout tx get mined either!
+    bitcoind.generate_block(1, needfeerate=9999999)
+
+    # l2 will have abandoned l2->l3 HTLC to close l1->l2.
+    l2.daemon.wait_for_log(r'Abandoning unresolved onchain HTLC at block 117 \(expired at 114\) to avoid peer closing incoming HTLC at block 120')
+
+    # l1 should not have force-closed, htlc should be finished by l2.
+    assert not l1.daemon.is_in_log('Peer permanent failure in CHANNELD_NORMAL')
+    wait_for(lambda: only_one(l1.rpc.listpeerchannels()['channels'])['htlcs'] == [])
+
+    # Now, surprise!  l3 fulfills htlc (l2 loses out!)
+    assert htlc_txs != []
+    for tx in htlc_txs:
+        try:
+            bitcoind.rpc.sendrawtransaction(tx)
+        except bitcoin.rpc.VerifyError:
+            pass
+
+    # l2 should note this, but not crash, at least.
+    bitcoind.generate_block(1, wait_for_mempool=1)
+    sync_blockheight(bitcoind, [l1, l2, l3])
+
+    # FIXME: l2 should complain!
+
+
+@pytest.mark.developer("needs dev-no-reconnect")
+def test_closing_tx_valid(node_factory, bitcoind):
+    l1, l2 = node_factory.line_graph(2, opts={'may_reconnect': True,
+                                              'dev-no-reconnect': None})
+
+    # First, mutual close.
+    close = l1.rpc.close(l2.info['id'])
+
+    wait_for(lambda: len(bitcoind.rpc.getrawmempool()) == 1)
+    assert only_one(bitcoind.rpc.getrawmempool()) == close['txid']
+    assert bitcoind.rpc.getrawtransaction(close['txid']) == close['tx']
+    bitcoind.generate_block(1)
+    # Change output and the closed channel output.
+    wait_for(lambda: len(l1.rpc.listfunds()['outputs']) == 2)
+
+    # Now, unilateral close.
+    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
+    l1.rpc.fundchannel(l2.info['id'], 10**6)
+    bitcoind.generate_block(1, wait_for_mempool=1)
+
+    l1.rpc.disconnect(l2.info['id'], force=True)
+    close = l1.rpc.close(l2.info['id'], 1)
+
+    wait_for(lambda: len(bitcoind.rpc.getrawmempool()) == 1)
+    assert only_one(bitcoind.rpc.getrawmempool()) == close['txid']
+    assert bitcoind.rpc.getrawtransaction(close['txid']) == close['tx']
+
+
+@pytest.mark.developer("needs dev-no-reconnect")
+@unittest.skipIf(TEST_NETWORK != 'regtest', 'elementsd does not provide feerates on regtest')
+def test_closing_minfee(node_factory, bitcoind):
+    l1, l2 = node_factory.line_graph(2, opts={'feerates': None})
+
+    l1.rpc.pay(l2.rpc.invoice(10000000, 'test', 'test')['bolt11'])
+
+    wait_for(lambda: only_one(l1.rpc.listpeerchannels()['channels'])['htlcs'] == [])
+
+    txid = l1.rpc.close(l2.info['id'])['txid']
+    bitcoind.generate_block(1, wait_for_mempool=txid)

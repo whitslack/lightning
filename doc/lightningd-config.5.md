@@ -155,11 +155,11 @@ binary.
 
   Specify pid file to write to.
 
-* **log-level**=*LEVEL*\[:*SUBSYSTEM*\]
+* **log-level**=*LEVEL*\[:*SUBSYSTEM*\]\[:*PATH*\]
 
   What log level to print out: options are io, debug, info, unusual,
 broken.  If *SUBSYSTEM* is supplied, this sets the logging level
-for any subsystem (or *nodeid*) containing that string. This option may be specified multiple times.
+for any subsystem (or *nodeid*) containing that string. If *PATH* is supplied, it means this log-level filter is only applied to that `log-file`, which is useful for creating logs to capture a specific subsystem.  This option may be specified multiple times.
 Subsystems include:
 
   * *lightningd*: The main lightning daemon
@@ -195,8 +195,7 @@ Subsystems include:
   So, **log-level=debug:plugin** would set debug level logging on all
 plugins and the plugin manager.  **log-level=io:chan#55** would set
 IO logging on channel number 55 (or 550, for that matter).
-**log-level=debug:024b9a1fa8** would set debug logging for that channel
-(or any node id containing that string).
+**log-level=debug:024b9a1fa8:/tmp/024b9a1fa8.debug.log** would set debug logging for that channel only on the **log-file=/tmp/024b9a1fa8.debug.log** (or any node id containing that string).
 
 * **log-prefix**=*PREFIX*
 
@@ -291,6 +290,10 @@ connections; default is not to activate the plugin at all.
 
 ### Lightning node customization options
 
+* **recover**=*codex32secret*
+
+  Restore the node from a 32-byte secret encoded as a codex32 secret string: this will fail if the `hsm_secret` file exists.  Your node will start the node in offline mode, for manual recovery.  The secret can be extracted from the `hsm_secret` using hsmtool(8).
+
 * **alias**=*NAME*
 
   Up to 32 bytes of UTF-8 characters to tag your node. Completely silly, since
@@ -333,7 +336,8 @@ falls below this.
   Allow nodes which establish channels to us to set any fee they want.
 This may result in a channel which cannot be closed, should fees
 increase, but make channels far more reliable since we never close it
-due to unreasonable fees.
+due to unreasonable fees.  Note that this can be set on a per-channel
+basis with lightning-setchannel(7).
 
 * **commit-time**=*MILLISECONDS*
 
@@ -374,7 +378,7 @@ use the RPC call lightning-setchannel(7).
   Note: You also need to open TCP port 9735 on your router towords your node.
   Note: Will always be disabled if you use 'always-use-proxy'.
 
-* **announce-addr-discovered-port**
+* **announce-addr-discovered-port**=*PORT*
   Sets the public TCP port to use for announcing dynamically discovered IPs.
   If unset, this defaults to the selected networks lightning port,
   which is 9735 on mainnet.
@@ -434,11 +438,11 @@ the outgoing is redeemed.
 might need to redeem this on-chain, so this is the number of blocks we
 have to do that.
 
-* **accept-htlc-tlv-types**=*types*
+* **accept-htlc-tlv-type**=*types*
 
   Normally HTLC onions which contain unknown even fields are rejected.
-This option specifies that these (comma-separated) types are to be
-accepted, and ignored.
+This option specifies that this type is to be accepted, and ignored.  Can be
+specified multuple times. (Added in v23.08).
 
 * **min-emergency-msat**=*msat*
 
@@ -618,6 +622,23 @@ all DNS lookups, to avoid leaking information.
   Set a Tor control password, which may be needed for *autotor:* to
 authenticate to the Tor control port.
 
+* **rest-port**=*PORT* [plugin `clnrest.py`]
+
+  Sets the REST server port to listen to (3010 is common).  If this is not specified, the clnrest.py plugin will be disabled.
+
+* **rest-protocol**=*PROTOCOL* [plugin `clnrest.py`]
+
+  Specifies the REST server protocol. Default is HTTPS.
+
+* **rest-host**=*HOST* [plugin `clnrest.py`]
+
+  Defines the REST server host. Default is 127.0.0.1.
+
+* **rest-certs**=*PATH*  [plugin `clnrest.py`]
+
+  Defines the path for HTTPS cert & key. Default path is same as RPC file path to utilize gRPC's client certificate. If it is missing at the configured location, new identity (`client.pem` and `client-key.pem`) will be generated.
+
+
 ### Lightning Plugins
 
 lightningd(8) supports plugins, which offer additional configuration
@@ -707,12 +728,14 @@ about whether to add funds or not to a proposed channel is handled
 automatically by a plugin that implements the appropriate logic for
 your needs. The default behavior is to not contribute funds.
 
-* **experimental-websocket-port**=*PORT*
+* **experimental-websocket-port**=*PORT* (deprecated in v23.08)
 
   Specifying this enables support for accepting incoming WebSocket
 connections on that port, on any IPv4 and IPv6 addresses you listen
 to ([bolt][bolt] #891).  The normal protocol is expected to be sent over WebSocket binary
 frames once the connection is upgraded.
+
+  You should use `bind=ws::<portnum>` instead to create a WebSocket listening port.
 
 * **experimental-peer-storage**
 

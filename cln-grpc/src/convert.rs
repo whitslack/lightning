@@ -1002,6 +1002,7 @@ impl From<responses::ListpeerchannelsChannels> for pb::ListpeerchannelsChannels 
             peer_connected: c.peer_connected, // Rule #2 for type boolean?
             state: c.state.map(|v| v as i32),
             scratch_txid: c.scratch_txid.map(|v| hex::decode(v).unwrap()), // Rule #2 for type txid?
+            ignore_fee_limits: c.ignore_fee_limits, // Rule #2 for type boolean?
             feerate: c.feerate.map(|v| v.into()),
             owner: c.owner, // Rule #2 for type string?
             short_channel_id: c.short_channel_id.map(|v| v.to_string()), // Rule #2 for type short_channel_id?
@@ -1475,6 +1476,8 @@ impl From<responses::ListpaysPays> for pb::ListpaysPays {
             bolt11: c.bolt11, // Rule #2 for type string?
             description: c.description, // Rule #2 for type string?
             bolt12: c.bolt12, // Rule #2 for type string?
+            amount_msat: c.amount_msat.map(|f| f.into()), // Rule #2 for type msat?
+            amount_sent_msat: c.amount_sent_msat.map(|f| f.into()), // Rule #2 for type msat?
             preimage: c.preimage.map(|v| v.to_vec()), // Rule #2 for type secret?
             number_of_parts: c.number_of_parts, // Rule #2 for type u64?
             erroronion: c.erroronion.map(|v| hex::decode(v).unwrap()), // Rule #2 for type hex?
@@ -1488,6 +1491,31 @@ impl From<responses::ListpaysResponse> for pb::ListpaysResponse {
         Self {
             // Field: ListPays.pays[]
             pays: c.pays.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListpaysPays
+        }
+    }
+}
+
+#[allow(unused_variables)]
+impl From<responses::ListhtlcsHtlcs> for pb::ListhtlcsHtlcs {
+    fn from(c: responses::ListhtlcsHtlcs) -> Self {
+        Self {
+            short_channel_id: c.short_channel_id.to_string(), // Rule #2 for type short_channel_id
+            id: c.id, // Rule #2 for type u64
+            expiry: c.expiry, // Rule #2 for type u32
+            amount_msat: Some(c.amount_msat.into()), // Rule #2 for type msat
+            direction: c.direction as i32,
+            payment_hash: c.payment_hash.to_vec(), // Rule #2 for type hash
+            state: c.state as i32,
+        }
+    }
+}
+
+#[allow(unused_variables)]
+impl From<responses::ListhtlcsResponse> for pb::ListhtlcsResponse {
+    fn from(c: responses::ListhtlcsResponse) -> Self {
+        Self {
+            // Field: ListHtlcs.htlcs[]
+            htlcs: c.htlcs.into_iter().map(|i| i.into()).collect(), // Rule #3 for type ListhtlcsHtlcs
         }
     }
 }
@@ -1519,6 +1547,7 @@ impl From<responses::SetchannelChannels> for pb::SetchannelChannels {
             short_channel_id: c.short_channel_id.map(|v| v.to_string()), // Rule #2 for type short_channel_id?
             fee_base_msat: Some(c.fee_base_msat.into()), // Rule #2 for type msat
             fee_proportional_millionths: c.fee_proportional_millionths, // Rule #2 for type u32
+            ignore_fee_limits: c.ignore_fee_limits, // Rule #2 for type boolean?
             minimum_htlc_out_msat: Some(c.minimum_htlc_out_msat.into()), // Rule #2 for type msat
             warning_htlcmin_too_low: c.warning_htlcmin_too_low, // Rule #2 for type string?
             maximum_htlc_out_msat: Some(c.maximum_htlc_out_msat.into()), // Rule #2 for type msat
@@ -1577,6 +1606,16 @@ impl From<responses::PreapprovekeysendResponse> for pb::PreapprovekeysendRespons
 impl From<responses::PreapproveinvoiceResponse> for pb::PreapproveinvoiceResponse {
     fn from(c: responses::PreapproveinvoiceResponse) -> Self {
         Self {
+        }
+    }
+}
+
+#[allow(unused_variables)]
+impl From<responses::StaticbackupResponse> for pb::StaticbackupResponse {
+    fn from(c: responses::StaticbackupResponse) -> Self {
+        Self {
+            // Field: StaticBackup.scb[]
+            scb: c.scb.into_iter().map(|i| hex::decode(i).unwrap()).collect(), // Rule #3 for type hex
         }
     }
 }
@@ -2182,6 +2221,15 @@ impl From<requests::ListpaysRequest> for pb::ListpaysRequest {
 }
 
 #[allow(unused_variables)]
+impl From<requests::ListhtlcsRequest> for pb::ListhtlcsRequest {
+    fn from(c: requests::ListhtlcsRequest) -> Self {
+        Self {
+            id: c.id, // Rule #2 for type string?
+        }
+    }
+}
+
+#[allow(unused_variables)]
 impl From<requests::PingRequest> for pb::PingRequest {
     fn from(c: requests::PingRequest) -> Self {
         Self {
@@ -2212,6 +2260,7 @@ impl From<requests::SetchannelRequest> for pb::SetchannelRequest {
             htlcmin: c.htlcmin.map(|f| f.into()), // Rule #2 for type msat?
             htlcmax: c.htlcmax.map(|f| f.into()), // Rule #2 for type msat?
             enforcedelay: c.enforcedelay, // Rule #2 for type u32?
+            ignorefeelimits: c.ignorefeelimits, // Rule #2 for type boolean?
         }
     }
 }
@@ -2258,6 +2307,14 @@ impl From<requests::PreapproveinvoiceRequest> for pb::PreapproveinvoiceRequest {
     fn from(c: requests::PreapproveinvoiceRequest) -> Self {
         Self {
             bolt11: c.bolt11, // Rule #2 for type string?
+        }
+    }
+}
+
+#[allow(unused_variables)]
+impl From<requests::StaticbackupRequest> for pb::StaticbackupRequest {
+    fn from(c: requests::StaticbackupRequest) -> Self {
+        Self {
         }
     }
 }
@@ -2848,6 +2905,15 @@ impl From<pb::ListpaysRequest> for requests::ListpaysRequest {
 }
 
 #[allow(unused_variables)]
+impl From<pb::ListhtlcsRequest> for requests::ListhtlcsRequest {
+    fn from(c: pb::ListhtlcsRequest) -> Self {
+        Self {
+            id: c.id, // Rule #1 for type string?
+        }
+    }
+}
+
+#[allow(unused_variables)]
 impl From<pb::PingRequest> for requests::PingRequest {
     fn from(c: pb::PingRequest) -> Self {
         Self {
@@ -2878,6 +2944,7 @@ impl From<pb::SetchannelRequest> for requests::SetchannelRequest {
             htlcmin: c.htlcmin.map(|a| a.into()), // Rule #1 for type msat?
             htlcmax: c.htlcmax.map(|a| a.into()), // Rule #1 for type msat?
             enforcedelay: c.enforcedelay, // Rule #1 for type u32?
+            ignorefeelimits: c.ignorefeelimits, // Rule #1 for type boolean?
         }
     }
 }
@@ -2924,6 +2991,14 @@ impl From<pb::PreapproveinvoiceRequest> for requests::PreapproveinvoiceRequest {
     fn from(c: pb::PreapproveinvoiceRequest) -> Self {
         Self {
             bolt11: c.bolt11, // Rule #1 for type string?
+        }
+    }
+}
+
+#[allow(unused_variables)]
+impl From<pb::StaticbackupRequest> for requests::StaticbackupRequest {
+    fn from(c: pb::StaticbackupRequest) -> Self {
+        Self {
         }
     }
 }

@@ -1194,6 +1194,13 @@ def test_daemon_option(node_factory):
         assert 'No child process' not in f.read()
 
 
+def test_cli_no_argument():
+    """If no arguments are provided, should display help and exit."""
+    out = subprocess.run(['cli/lightning-cli'], stdout=subprocess.PIPE)
+    assert out.returncode in [0, 2]  # returns 2 if lightning-rpc not available
+    assert "Usage: cli/lightning-cli <command> [<params>...]" in out.stdout.decode()
+
+
 @pytest.mark.developer("needs DEVELOPER=1")
 def test_blockchaintrack(node_factory, bitcoind):
     """Check that we track the blockchain correctly across reorgs
@@ -1325,9 +1332,7 @@ def test_funding_reorg_remote_lags(node_factory, bitcoind):
     bitcoind.generate_block(1)
     l1.daemon.wait_for_log(r'Peer transient failure .* short_channel_id changed to 104x1x0 \(was 103x1x0\)')
 
-    wait_for(lambda: only_one(l2.rpc.listpeerchannels()['channels'])['status'] == [
-        'CHANNELD_NORMAL:Reconnected, and reestablished.',
-        'CHANNELD_NORMAL:Channel ready for use. They need our announcement signatures.'])
+    l2.daemon.wait_for_logs([r'Peer transient failure in CHANNELD_NORMAL: channeld WARNING: Bad node_signature*'])
 
     # Unblinding l2 brings it back in sync, restarts channeld and sends its announce sig
     l2.daemon.rpcproxy.mock_rpc('getblockhash', None)
@@ -1343,6 +1348,68 @@ def test_funding_reorg_remote_lags(node_factory, bitcoind):
     bitcoind.generate_block(1, True)
     l1.daemon.wait_for_log(r'Deleting channel')
     l2.daemon.wait_for_log(r'Deleting channel')
+
+
+@unittest.skipIf(os.getenv('TEST_DB_PROVIDER', 'sqlite3') != 'sqlite3', "deletes database, which is assumed sqlite3")
+def test_recover(node_factory, bitcoind):
+    """Test the recover option
+    """
+    # Start the node with --recovery with valid codex32 secret
+    l1 = node_factory.get_node(start=False,
+                               options={"recover": "cl10leetsllhdmn9m42vcsamx24zrxgs3qrl7ahwvhw4fnzrhve25gvezzyqqjdsjnzedu43ns"})
+
+    os.unlink(os.path.join(l1.daemon.lightning_dir, TEST_NETWORK, "hsm_secret"))
+    l1.daemon.start()
+
+    cmd_line = ["tools/hsmtool", "getcodexsecret", os.path.join(l1.daemon.lightning_dir, TEST_NETWORK, "hsm_secret")]
+    out = subprocess.check_output(cmd_line + ["leet", "0"]).decode('utf-8')
+    assert out == "cl10leetsllhdmn9m42vcsamx24zrxgs3qrl7ahwvhw4fnzrhve25gvezzyqqjdsjnzedu43ns\n"
+
+    # Check bad ids.
+    out = subprocess.run(cmd_line + ["lee", "0"], stderr=subprocess.PIPE, timeout=TIMEOUT)
+    assert 'Invalid id: must be 4 characters' in out.stderr.decode('utf-8')
+    assert out.returncode == 2
+
+    out = subprocess.run(cmd_line + ["Leet", "0"], stderr=subprocess.PIPE, timeout=TIMEOUT)
+    assert 'Invalid id: must be lower-case' in out.stderr.decode('utf-8')
+    assert out.returncode == 2
+
+    out = subprocess.run(cmd_line + ["💔", "0"], stderr=subprocess.PIPE, timeout=TIMEOUT)
+    assert 'Invalid id: must be ASCII' in out.stderr.decode('utf-8')
+    assert out.returncode == 2
+
+    for bad_bech32 in ['b', 'o', 'i', '1']:
+        out = subprocess.run(cmd_line + [bad_bech32 + "eet", "0"], stderr=subprocess.PIPE, timeout=TIMEOUT)
+        assert 'Invalid id: must be valid bech32 string' in out.stderr.decode('utf-8')
+        assert out.returncode == 2
+
+    basedir = l1.daemon.opts.get("lightning-dir")
+    with open(os.path.join(basedir, TEST_NETWORK, 'hsm_secret'), 'rb') as f:
+        buff = f.read()
+
+    # Check the node secret
+    assert buff.hex() == "ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100"
+    l1.stop()
+
+    os.unlink(os.path.join(l1.daemon.lightning_dir, TEST_NETWORK, "lightningd.sqlite3"))
+
+    # Node should throw error to recover flag if HSM already exists.
+    l1.daemon.opts['recover'] = "cl10leetsllhdmn9m42vcsamx24zrxgs3qrl7ahwvhw4fnzrhve25gvezzyqqjdsjnzedu43ns"
+    l1.daemon.start(wait_for_initialized=False, stderr_redir=True)
+
+    # Will exit with failure code.
+    assert l1.daemon.wait() == 1
+    assert l1.daemon.is_in_stderr(r"hsm_secret already exists!")
+
+    os.unlink(os.path.join(l1.daemon.lightning_dir, TEST_NETWORK, "hsm_secret"))
+
+    l1.daemon.opts.update({"recover": "CL10LEETSLLHDMN9M42VCSAMX24ZRXGS3QQAT3LTDVAKMT73"})
+    l1.daemon.start(wait_for_initialized=False, stderr_redir=True)
+    assert l1.daemon.wait() == 1
+    assert l1.daemon.is_in_stderr(r"Expected 32 Byte secret: ffeeddccbbaa99887766554433221100")
+
+    l1.daemon.opts.pop("recover")
+    l1.start()
 
 
 def test_rescan(node_factory, bitcoind):
@@ -1555,11 +1622,14 @@ def test_feerates(node_factory, anchors):
     # Now try setting them, one at a time.
     # Set CONSERVATIVE/2 feerate, for max
     l1.set_feerates((15000, 0, 0, 0), True)
-    wait_for(lambda: l1.rpc.feerates('perkw')['perkw']['max_acceptable'] == 15000 * 10)
+    # Make sure it's digested the bcli plugin results.
+    wait_for(lambda: len(l1.rpc.feerates('perkw')['perkw']['estimates']) == 1)
     feerates = l1.rpc.feerates('perkw')
     # We only get the warning if *no* feerates are avail.
     assert 'warning_missing_feerates' not in feerates
     assert 'perkb' not in feerates
+    assert feerates['perkw']['max_acceptable'] == 15000 * 10
+
     # With only one data point, this is a terrible guess!
     assert feerates['perkw']['min_acceptable'] == 15000 // 2
     assert feerates['perkw']['estimates'] == [{'blockcount': 2,
@@ -1568,6 +1638,8 @@ def test_feerates(node_factory, anchors):
 
     # Set ECONOMICAL/6 feerate, for unilateral_close and htlc_resolution
     l1.set_feerates((15000, 11000, 0, 0), True)
+    # Make sure it's digested the bcli plugin results.
+    wait_for(lambda: len(l1.rpc.feerates('perkw')['perkw']['estimates']) == 2)
     feerates = l1.rpc.feerates('perkw')
     assert feerates['perkw']['unilateral_close'] == 11000
     assert 'warning_missing_feerates' not in feerates
@@ -1584,6 +1656,8 @@ def test_feerates(node_factory, anchors):
 
     # Set ECONOMICAL/12 feerate, for all but min (so, no mutual_close feerate)
     l1.set_feerates((15000, 11000, 6250, 0), True)
+    # Make sure it's digested the bcli plugin results.
+    wait_for(lambda: len(l1.rpc.feerates('perkw')['perkw']['estimates']) == 3)
     feerates = l1.rpc.feerates('perkb')
     assert feerates['perkb']['unilateral_close'] == 11000 * 4
     # We dont' extrapolate, so it uses the same for mutual_close
@@ -2718,7 +2792,7 @@ def test_restorefrompeer(node_factory, bitcoind):
     try:
         l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     except RpcError as err:
-        assert "disconnected during connection" in err.error
+        assert "disconnected during connection" in err.error['message']
 
     l1.daemon.wait_for_log('peer_in WIRE_YOUR_PEER_STORAGE')
 
@@ -2960,7 +3034,7 @@ def test_notimestamp_logging(node_factory):
     # Make sure this is specified *before* other options!
     l1.daemon.early_opts = ['--log-timestamps=false']
     l1.start()
-    assert l1.daemon.logs[0].startswith("DEBUG")
+    assert l1.daemon.logs[0].startswith("lightningd-1 DEBUG")
 
     assert l1.rpc.listconfigs()['configs']['log-timestamps']['value_bool'] is False
 
@@ -2981,9 +3055,40 @@ def test_getlog(node_factory):
 def test_log_filter(node_factory):
     """Test the log-level option with subsystem filters"""
     # This actually suppresses debug!
-    l1, l2 = node_factory.line_graph(2, opts=[{'log-level': ['debug', 'broken:022d223620']}, {}])
+    l1 = node_factory.get_node(options={'log-level': ['debug', 'broken:022d223620']})
+    l2 = node_factory.get_node(start=False)
 
+    log1 = os.path.join(l2.daemon.lightning_dir, "log")
+    log2 = os.path.join(l2.daemon.lightning_dir, "log2")
+    # We need to set log file before we set options on it.
+    l2.daemon.early_opts += [f'--log-file={l}' for l in [log2] + l2.daemon.opts['log-file']]
+    del l2.daemon.opts['log-file']
+    l2.daemon.opts['log-level'] = ["broken",  # broken messages go everywhere
+                                   f"debug::{log1}",  # debug to normal log
+                                   "debug::-",  # debug to stdout
+                                   f'io:0266e4598d1d3:{log2}']
+    l2.start()
+    node_factory.join_nodes([l1, l2])
+
+    # No debug messages in l1's log
     assert not l1.daemon.is_in_log(r'-chan#[0-9]*:')
+    # No mention of l2 at all (except spenderp mentions it)
+    assert not l1.daemon.is_in_log(l2.info['id'] + '-')
+
+    # Every message in log2 must be about l1...
+    with open(log2, "r") as f:
+        lines = f.readlines()
+    assert all([' {}-'.format(l1.info['id']) in l for l in lines])
+
+
+def test_log_filter_bug(node_factory):
+    """Test the log-level option with overriding to a more verbose setting"""
+    log_plugin = os.path.join(os.getcwd(), 'tests/plugins/log.py')
+    l1 = node_factory.get_node(options={'plugin': log_plugin,
+                                        'log-level': ['info', 'debug:plugin-log']})
+    l1.daemon.logsearch_start = 0
+    l1.daemon.wait_for_log("printing debug log")
+    l1.daemon.wait_for_log("printing info log")
 
 
 def test_force_feerates(node_factory):

@@ -127,6 +127,9 @@ int segwit_addr_decode(
     const char* addr
 )
 { fprintf(stderr, "segwit_addr_decode called!\n"); abort(); }
+/* Generated stub for to_canonical_invstr */
+const char *to_canonical_invstr(const tal_t *ctx UNNEEDED, const char *invstring UNNEEDED)
+{ fprintf(stderr, "to_canonical_invstr called!\n"); abort(); }
 /* Generated stub for towire */
 void towire(u8 **pptr UNNEEDED, const void *data UNNEEDED, size_t len UNNEEDED)
 { fprintf(stderr, "towire called!\n"); abort(); }

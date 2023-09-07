@@ -61,6 +61,7 @@ pub enum Request {
 	GetRoute(requests::GetrouteRequest),
 	ListForwards(requests::ListforwardsRequest),
 	ListPays(requests::ListpaysRequest),
+	ListHtlcs(requests::ListhtlcsRequest),
 	Ping(requests::PingRequest),
 	SendCustomMsg(requests::SendcustommsgRequest),
 	SetChannel(requests::SetchannelRequest),
@@ -69,6 +70,7 @@ pub enum Request {
 	Stop(requests::StopRequest),
 	PreApproveKeysend(requests::PreapprovekeysendRequest),
 	PreApproveInvoice(requests::PreapproveinvoiceRequest),
+	StaticBackup(requests::StaticbackupRequest),
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -122,6 +124,7 @@ pub enum Response {
 	GetRoute(responses::GetrouteResponse),
 	ListForwards(responses::ListforwardsResponse),
 	ListPays(responses::ListpaysResponse),
+	ListHtlcs(responses::ListhtlcsResponse),
 	Ping(responses::PingResponse),
 	SendCustomMsg(responses::SendcustommsgResponse),
 	SetChannel(responses::SetchannelResponse),
@@ -130,6 +133,7 @@ pub enum Response {
 	Stop(responses::StopResponse),
 	PreApproveKeysend(responses::PreapprovekeysendResponse),
 	PreApproveInvoice(responses::PreapproveinvoiceResponse),
+	StaticBackup(responses::StaticbackupResponse),
 }
 
 
@@ -1358,6 +1362,22 @@ pub mod requests {
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct ListhtlcsRequest {
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub id: Option<String>,
+	}
+
+	impl From<ListhtlcsRequest> for Request {
+	    fn from(r: ListhtlcsRequest) -> Self {
+	        Request::ListHtlcs(r)
+	    }
+	}
+
+	impl IntoRequest for ListhtlcsRequest {
+	    type Response = super::responses::ListhtlcsResponse;
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct PingRequest {
 	    pub id: PublicKey,
 	    #[serde(skip_serializing_if = "Option::is_none")]
@@ -1405,6 +1425,8 @@ pub mod requests {
 	    pub htlcmax: Option<Amount>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub enforcedelay: Option<u32>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub ignorefeelimits: Option<bool>,
 	}
 
 	impl From<SetchannelRequest> for Request {
@@ -1495,6 +1517,20 @@ pub mod requests {
 
 	impl IntoRequest for PreapproveinvoiceRequest {
 	    type Response = super::responses::PreapproveinvoiceResponse;
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct StaticbackupRequest {
+	}
+
+	impl From<StaticbackupRequest> for Request {
+	    fn from(r: StaticbackupRequest) -> Self {
+	        Request::StaticBackup(r)
+	    }
+	}
+
+	impl IntoRequest for StaticbackupRequest {
+	    type Response = super::responses::StaticbackupResponse;
 	}
 
 }
@@ -3695,6 +3731,8 @@ pub mod responses {
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub scratch_txid: Option<String>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub ignore_fee_limits: Option<bool>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub feerate: Option<ListpeerchannelsChannelsFeerate>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub owner: Option<String>,
@@ -4580,6 +4618,10 @@ pub mod responses {
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub bolt12: Option<String>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub amount_msat: Option<Amount>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub amount_sent_msat: Option<Amount>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub preimage: Option<Secret>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub number_of_parts: Option<u64>,
@@ -4598,6 +4640,64 @@ pub mod responses {
 	    fn try_from(response: Response) -> Result<Self, Self::Error> {
 	        match response {
 	            Response::ListPays(response) => Ok(response),
+	            _ => Err(TryFromResponseError)
+	        }
+	    }
+	}
+
+	/// out if we offered this to the peer, in if they offered it
+	#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+	pub enum ListhtlcsHtlcsDirection {
+	    #[serde(rename = "out")]
+	    OUT,
+	    #[serde(rename = "in")]
+	    IN,
+	}
+
+	impl TryFrom<i32> for ListhtlcsHtlcsDirection {
+	    type Error = anyhow::Error;
+	    fn try_from(c: i32) -> Result<ListhtlcsHtlcsDirection, anyhow::Error> {
+	        match c {
+	    0 => Ok(ListhtlcsHtlcsDirection::OUT),
+	    1 => Ok(ListhtlcsHtlcsDirection::IN),
+	            o => Err(anyhow::anyhow!("Unknown variant {} for enum ListhtlcsHtlcsDirection", o)),
+	        }
+	    }
+	}
+
+	impl ToString for ListhtlcsHtlcsDirection {
+	    fn to_string(&self) -> String {
+	        match self {
+	            ListhtlcsHtlcsDirection::OUT => "OUT",
+	            ListhtlcsHtlcsDirection::IN => "IN",
+	        }.to_string()
+	    }
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct ListhtlcsHtlcs {
+	    pub short_channel_id: ShortChannelId,
+	    pub id: u64,
+	    pub expiry: u32,
+	    pub amount_msat: Amount,
+	    // Path `ListHtlcs.htlcs[].direction`
+	    pub direction: ListhtlcsHtlcsDirection,
+	    pub payment_hash: Sha256,
+	    // Path `ListHtlcs.htlcs[].state`
+	    pub state: HtlcState,
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct ListhtlcsResponse {
+	    pub htlcs: Vec<ListhtlcsHtlcs>,
+	}
+
+	impl TryFrom<Response> for ListhtlcsResponse {
+	    type Error = super::TryFromResponseError;
+
+	    fn try_from(response: Response) -> Result<Self, Self::Error> {
+	        match response {
+	            Response::ListHtlcs(response) => Ok(response),
 	            _ => Err(TryFromResponseError)
 	        }
 	    }
@@ -4643,6 +4743,8 @@ pub mod responses {
 	    pub short_channel_id: Option<ShortChannelId>,
 	    pub fee_base_msat: Amount,
 	    pub fee_proportional_millionths: u32,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub ignore_fee_limits: Option<bool>,
 	    pub minimum_htlc_out_msat: Amount,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub warning_htlcmin_too_low: Option<String>,
@@ -4741,6 +4843,22 @@ pub mod responses {
 	    fn try_from(response: Response) -> Result<Self, Self::Error> {
 	        match response {
 	            Response::PreApproveInvoice(response) => Ok(response),
+	            _ => Err(TryFromResponseError)
+	        }
+	    }
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct StaticbackupResponse {
+	    pub scb: Vec<String>,
+	}
+
+	impl TryFrom<Response> for StaticbackupResponse {
+	    type Error = super::TryFromResponseError;
+
+	    fn try_from(response: Response) -> Result<Self, Self::Error> {
+	        match response {
+	            Response::StaticBackup(response) => Ok(response),
 	            _ => Err(TryFromResponseError)
 	        }
 	    }

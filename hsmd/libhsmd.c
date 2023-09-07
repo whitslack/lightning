@@ -8,8 +8,8 @@
 #include <common/key_derive.h>
 #include <common/lease_rates.h>
 #include <common/type_to_string.h>
-#include <hsmd/capabilities.h>
 #include <hsmd/libhsmd.h>
+#include <hsmd/permissions.h>
 #include <inttypes.h>
 #include <secp256k1_ecdh.h>
 #include <secp256k1_schnorrsig.h>
@@ -79,35 +79,38 @@ bool hsmd_check_client_capabilities(struct hsmd_client *client,
 	 */
 	switch (t) {
 	case WIRE_HSMD_ECDH_REQ:
-		return (client->capabilities & HSM_CAP_ECDH) != 0;
+		return (client->capabilities & HSM_PERM_ECDH) != 0;
 
 	case WIRE_HSMD_CANNOUNCEMENT_SIG_REQ:
 	case WIRE_HSMD_CUPDATE_SIG_REQ:
 	case WIRE_HSMD_NODE_ANNOUNCEMENT_SIG_REQ:
-		return (client->capabilities & HSM_CAP_SIGN_GOSSIP) != 0;
+		return (client->capabilities & HSM_PERM_SIGN_GOSSIP) != 0;
 
 	case WIRE_HSMD_SIGN_DELAYED_PAYMENT_TO_US:
 	case WIRE_HSMD_SIGN_REMOTE_HTLC_TO_US:
 	case WIRE_HSMD_SIGN_PENALTY_TO_US:
 	case WIRE_HSMD_SIGN_LOCAL_HTLC_TX:
-		return (client->capabilities & HSM_CAP_SIGN_ONCHAIN_TX) != 0;
+		return (client->capabilities & HSM_PERM_SIGN_ONCHAIN_TX) != 0;
 
 	case WIRE_HSMD_GET_PER_COMMITMENT_POINT:
 	case WIRE_HSMD_CHECK_FUTURE_SECRET:
 	case WIRE_HSMD_READY_CHANNEL:
-		return (client->capabilities & HSM_CAP_COMMITMENT_POINT) != 0;
+		return (client->capabilities & HSM_PERM_COMMITMENT_POINT) != 0;
 
 	case WIRE_HSMD_SIGN_REMOTE_COMMITMENT_TX:
 	case WIRE_HSMD_SIGN_REMOTE_HTLC_TX:
 	case WIRE_HSMD_VALIDATE_COMMITMENT_TX:
 	case WIRE_HSMD_VALIDATE_REVOCATION:
-		return (client->capabilities & HSM_CAP_SIGN_REMOTE_TX) != 0;
+		return (client->capabilities & HSM_PERM_SIGN_REMOTE_TX) != 0;
 
 	case WIRE_HSMD_SIGN_MUTUAL_CLOSE_TX:
-		return (client->capabilities & HSM_CAP_SIGN_CLOSING_TX) != 0;
+		return (client->capabilities & HSM_PERM_SIGN_CLOSING_TX) != 0;
+
+	case WIRE_HSMD_SIGN_SPLICE_TX:
+		return (client->capabilities & HSM_PERM_SIGN_SPLICE_TX) != 0;
 
 	case WIRE_HSMD_SIGN_OPTION_WILL_FUND_OFFER:
-		return (client->capabilities & HSM_CAP_SIGN_WILL_FUND_OFFER) != 0;
+		return (client->capabilities & HSM_PERM_SIGN_WILL_FUND_OFFER) != 0;
 
 	case WIRE_HSMD_INIT:
 	case WIRE_HSMD_NEW_CHANNEL:
@@ -130,7 +133,7 @@ bool hsmd_check_client_capabilities(struct hsmd_client *client,
 	case WIRE_HSMD_SIGN_ANY_LOCAL_HTLC_TX:
 	case WIRE_HSMD_SIGN_ANCHORSPEND:
 	case WIRE_HSMD_SIGN_HTLC_TX_MINGLE:
-		return (client->capabilities & HSM_CAP_MASTER) != 0;
+		return (client->capabilities & HSM_PERM_MASTER) != 0;
 
 	/*~ These are messages sent by the HSM so we should never receive them. */
 	/* FIXME: Since we autogenerate these, we should really generate separate
@@ -1160,6 +1163,40 @@ static u8 *handle_sign_mutual_close_tx(struct hsmd_client *c, const u8 *msg_in)
 	return towire_hsmd_sign_tx_reply(NULL, &sig);
 }
 
+/* This is used by channeld to sign the final splice tx. */
+static u8 *handle_sign_splice_tx(struct hsmd_client *c, const u8 *msg_in)
+{
+	struct secret channel_seed;
+	struct bitcoin_tx *tx;
+	struct pubkey remote_funding_pubkey, local_funding_pubkey;
+	struct bitcoin_signature sig;
+	struct secrets secrets;
+	unsigned int input_index;
+	const u8 *funding_wscript;
+
+	if (!fromwire_hsmd_sign_splice_tx(tmpctx, msg_in,
+					  &tx,
+					  &remote_funding_pubkey,
+					  &input_index))
+		return hsmd_status_malformed_request(c, msg_in);
+
+	tx->chainparams = c->chainparams;
+	get_channel_seed(&c->id, c->dbid, &channel_seed);
+	derive_basepoints(&channel_seed,
+			  &local_funding_pubkey, NULL, &secrets, NULL);
+
+	funding_wscript = bitcoin_redeem_2of2(tmpctx,
+					      &local_funding_pubkey,
+					      &remote_funding_pubkey);
+
+	sign_tx_input(tx, input_index, NULL, funding_wscript,
+		      &secrets.funding_privkey,
+		      &local_funding_pubkey,
+		      SIGHASH_ALL, &sig);
+
+	return towire_hsmd_sign_tx_reply(NULL, &sig);
+}
+
 /*~ Originally, onchaind would ask for hsmd to sign txs directly, and then
  * tell lightningd to broadcast it.  With "bring-your-own-fees" HTLCs, this
  * changed, since we need to find a UTXO to attach to the transaction,
@@ -1899,6 +1936,8 @@ u8 *hsmd_handle_client_message(const tal_t *ctx, struct hsmd_client *client,
 		return handle_sign_withdrawal_tx(client, msg);
 	case WIRE_HSMD_SIGN_MUTUAL_CLOSE_TX:
 		return handle_sign_mutual_close_tx(client, msg);
+	case WIRE_HSMD_SIGN_SPLICE_TX:
+		return handle_sign_splice_tx(client, msg);
 	case WIRE_HSMD_SIGN_LOCAL_HTLC_TX:
 		return handle_sign_local_htlc_tx(client, msg);
 	case WIRE_HSMD_SIGN_REMOTE_HTLC_TX:

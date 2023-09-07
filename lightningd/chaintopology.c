@@ -10,6 +10,7 @@
 #include <common/json_command.h>
 #include <common/json_param.h>
 #include <common/timeout.h>
+#include <common/trace.h>
 #include <common/type_to_string.h>
 #include <db/exec.h>
 #include <lightningd/bitcoind.h>
@@ -186,8 +187,7 @@ static void rebroadcast_txs(struct chain_topology *topo)
 
 		tal_arr_expand(&txs->txs, fmt_bitcoin_tx(txs->txs, otx->tx));
 		tal_arr_expand(&txs->allowhighfees, otx->allowhighfees);
-		tal_arr_expand(&txs->cmd_id,
-			       otx->cmd_id ? tal_strdup(txs, otx->cmd_id) : NULL);
+		tal_arr_expand(&txs->cmd_id, tal_strdup_or_null(txs, otx->cmd_id));
 	}
 	tal_free(cleanup_ctx);
 
@@ -277,10 +277,7 @@ void broadcast_tx_(struct chain_topology *topo,
 	otx->cbarg = cbarg;
 	if (taken(otx->cbarg))
 		tal_steal(otx, otx->cbarg);
-	if (cmd_id)
-		otx->cmd_id = tal_strdup(otx, cmd_id);
-	else
-		otx->cmd_id = NULL;
+	otx->cmd_id = tal_strdup_or_null(otx, cmd_id);
 
 	/* Note that if the minimum block is N, we broadcast it when
 	 * we have block N-1! */
@@ -975,13 +972,22 @@ static void add_tip(struct chain_topology *topo, struct block *b)
 	b->prev = topo->tip;
 	topo->tip->next = b;	/* FIXME this doesn't seem to be used anywhere */
 	topo->tip = b;
+	trace_span_start("wallet_block_add", b);
 	wallet_block_add(topo->ld->wallet, b);
+	trace_span_end(b);
 
+	trace_span_start("topo_add_utxo", b);
 	topo_add_utxos(topo, b);
+	trace_span_end(b);
+
+	trace_span_start("topo_update_spends", b);
 	topo_update_spends(topo, b);
+	trace_span_end(b);
 
 	/* Only keep the transactions we care about. */
+	trace_span_start("filter_block_txs", b);
 	filter_block_txs(topo, b);
+	trace_span_end(b);
 
 	block_map_add(topo->block_map, b);
 	topo->max_blockheight = b->height;
@@ -1060,6 +1066,7 @@ static void get_new_block(struct bitcoind *bitcoind,
 	if (!blkid && !blk) {
 		/* No such block, we're done. */
 		updates_complete(topo);
+		trace_span_end(topo);
 		return;
 	}
 	assert(blkid && blk);
@@ -1079,6 +1086,7 @@ static void get_new_block(struct bitcoind *bitcoind,
 	}
 
 	/* Try for next one. */
+	trace_span_end(topo);
 	try_extend_tip(topo);
 }
 
@@ -1087,6 +1095,7 @@ static void try_extend_tip(struct chain_topology *topo)
 	topo->extend_timer = NULL;
 	if (topo->stopping)
 		return;
+	trace_span_start("extend_tip", topo);
 	bitcoind_getrawblockbyheight(topo->bitcoind, topo->tip->height + 1,
 				     get_new_block, topo);
 }
@@ -1142,30 +1151,25 @@ u32 feerate_min(struct lightningd *ld, bool *unknown)
 	 *
 	 * [1] https://github.com/ElementsProject/lightning/issues/6362
 	 * */
-	if (ld->config.ignore_fee_limits)
-		min = 1;
-	else {
-		min = 0xFFFFFFFF;
-		for (size_t i = 0; i < ARRAY_SIZE(topo->feerates); i++) {
-			for (size_t j = 0; j < tal_count(topo->feerates[i]); j++) {
-				if (topo->feerates[i][j].rate < min)
-					min = topo->feerates[i][j].rate;
-			}
+	min = 0xFFFFFFFF;
+	for (size_t i = 0; i < ARRAY_SIZE(topo->feerates); i++) {
+		for (size_t j = 0; j < tal_count(topo->feerates[i]); j++) {
+			if (topo->feerates[i][j].rate < min)
+				min = topo->feerates[i][j].rate;
 		}
-		if (min == 0xFFFFFFFF) {
-			if (unknown)
-				*unknown = true;
-			min = 0;
-		}
-
-		/* FIXME: This is what bcli used to do: halve the slow feerate! */
-		min /= 2;
-
-		/* We can't allow less than feerate_floor, since that won't relay */
-		if (min < get_feerate_floor(topo))
-			return get_feerate_floor(topo);
+	}
+	if (min == 0xFFFFFFFF) {
+		if (unknown)
+			*unknown = true;
+		min = 0;
 	}
 
+	/* FIXME: This is what bcli used to do: halve the slow feerate! */
+	min /= 2;
+
+	/* We can't allow less than feerate_floor, since that won't relay */
+	if (min < get_feerate_floor(topo))
+		return get_feerate_floor(topo);
 	return min;
 }
 
@@ -1176,9 +1180,6 @@ u32 feerate_max(struct lightningd *ld, bool *unknown)
 
 	if (unknown)
 		*unknown = false;
-
-	if (ld->config.ignore_fee_limits)
-		return UINT_MAX;
 
 	for (size_t i = 0; i < ARRAY_SIZE(topo->feerates); i++) {
 		for (size_t j = 0; j < tal_count(topo->feerates[i]); j++) {
@@ -1229,7 +1230,7 @@ static void destroy_chain_topology(struct chain_topology *topo)
 	}
 }
 
-struct chain_topology *new_topology(struct lightningd *ld, struct log *log)
+struct chain_topology *new_topology(struct lightningd *ld, struct logger *log)
 {
 	struct chain_topology *topo = tal(ld, struct chain_topology);
 

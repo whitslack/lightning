@@ -10,7 +10,7 @@
 #include <common/wire_error.h>
 #include <connectd/connectd_wiregen.h>
 #include <errno.h>
-#include <hsmd/capabilities.h>
+#include <hsmd/permissions.h>
 #include <lightningd/chaintopology.h>
 #include <lightningd/channel.h>
 #include <lightningd/channel_control.h>
@@ -24,10 +24,10 @@
 #include <lightningd/peer_fd.h>
 #include <wally_bip32.h>
 
-static void update_feerates(struct lightningd *ld, struct channel *channel)
+void channel_update_feerates(struct lightningd *ld, const struct channel *channel)
 {
 	u8 *msg;
-	u32 min_feerate;
+	u32 min_feerate, max_feerate;
 	bool anchors = channel_type_has_anchors(channel->type);
 	u32 feerate = unilateral_feerate(ld->topology, anchors);
 
@@ -40,6 +40,12 @@ static void update_feerates(struct lightningd *ld, struct channel *channel)
 		min_feerate = get_feerate_floor(ld->topology);
 	else
 		min_feerate = feerate_min(ld, NULL);
+	max_feerate = feerate_max(ld, NULL);
+
+	if (channel->ignore_fee_limits || ld->config.ignore_fee_limits) {
+		min_feerate = 1;
+		max_feerate = 0xFFFFFFFF;
+	}
 
 	log_debug(ld->log,
 		  "update_feerates: feerate = %u, min=%u, max=%u, penalty=%u",
@@ -50,7 +56,7 @@ static void update_feerates(struct lightningd *ld, struct channel *channel)
 
 	msg = towire_channeld_feerates(NULL, feerate,
 				       min_feerate,
-				       feerate_max(ld, NULL),
+				       max_feerate,
 				       penalty_feerate(ld->topology));
 	subd_send_msg(channel->owner, take(msg));
 }
@@ -65,7 +71,7 @@ static void try_update_feerates(struct lightningd *ld, struct channel *channel)
 	if (!channel->owner)
 		return;
 
-	update_feerates(ld, channel);
+	channel_update_feerates(ld, channel);
 }
 
 static void try_update_blockheight(struct lightningd *ld,
@@ -76,6 +82,12 @@ static void try_update_blockheight(struct lightningd *ld,
 
 	log_debug(channel->log, "attempting update blockheight %s",
 		  type_to_string(tmpctx, struct channel_id, &channel->cid));
+
+	if (!topology_synced(ld->topology)) {
+		log_debug(channel->log, "chain not synced,"
+			  " not updating blockheight");
+		return;
+	}
 
 	/* If they're offline, check that we're not too far behind anyway */
 	if (!channel->owner) {
@@ -624,15 +636,15 @@ bool peer_start_channeld(struct channel *channel,
 	struct secret last_remote_per_commit_secret;
 	secp256k1_ecdsa_signature *remote_ann_node_sig, *remote_ann_bitcoin_sig;
 	struct penalty_base *pbases;
-	u32 min_feerate;
+	u32 min_feerate, max_feerate, curr_blockheight;
 
 	hsmfd = hsm_get_client_fd(ld, &channel->peer->id,
 				  channel->dbid,
-				  HSM_CAP_SIGN_GOSSIP
-				  | HSM_CAP_ECDH
-				  | HSM_CAP_COMMITMENT_POINT
-				  | HSM_CAP_SIGN_REMOTE_TX
-				  | HSM_CAP_SIGN_ONCHAIN_TX);
+				  HSM_PERM_SIGN_GOSSIP
+				  | HSM_PERM_ECDH
+				  | HSM_PERM_COMMITMENT_POINT
+				  | HSM_PERM_SIGN_REMOTE_TX
+				  | HSM_PERM_SIGN_ONCHAIN_TX);
 
 	channel_set_owner(channel,
 			  new_channel_subd(channel, ld,
@@ -696,7 +708,7 @@ bool peer_start_channeld(struct channel *channel,
 	}
 
 	/* Warn once. */
-	if (ld->config.ignore_fee_limits)
+	if (channel->ignore_fee_limits || ld->config.ignore_fee_limits)
 		log_unusual(channel->log, "Ignoring fee limits!");
 
 	if (!wallet_remote_ann_sigs_load(tmpctx, channel->peer->ld->wallet,
@@ -729,6 +741,30 @@ bool peer_start_channeld(struct channel *channel,
 		min_feerate = get_feerate_floor(ld->topology);
 	else
 		min_feerate = feerate_min(ld, NULL);
+	max_feerate = feerate_max(ld, NULL);
+
+	if (channel->ignore_fee_limits || ld->config.ignore_fee_limits) {
+		min_feerate = 1;
+		max_feerate = 0xFFFFFFFF;
+	}
+
+	/* Make sure we don't go backsards on blockheights */
+	curr_blockheight = get_block_height(ld->topology);
+	if (curr_blockheight < get_blockheight(channel->blockheight_states,
+					       channel->opener, LOCAL)) {
+
+		u32 last_height = get_blockheight(channel->blockheight_states,
+						  channel->opener, LOCAL);
+
+		log_debug(channel->log,
+			  "current blockheight is (%d),"
+			  " last saved (%d). setting to last saved. %s",
+			  curr_blockheight,
+			  last_height,
+			  !topology_synced(ld->topology) ? "(not synced)" : "");
+
+		curr_blockheight = last_height;
+	}
 
 	initmsg = towire_channeld_init(tmpctx,
 				       chainparams,
@@ -737,14 +773,14 @@ bool peer_start_channeld(struct channel *channel,
 				       &channel->funding,
 				       channel->funding_sats,
 				       channel->minimum_depth,
-				       get_block_height(ld->topology),
+				       curr_blockheight,
 				       channel->blockheight_states,
 				       channel->lease_expiry,
 				       &channel->our_config,
 				       &channel->channel_info.their_config,
 				       channel->fee_states,
 				       min_feerate,
-				       feerate_max(ld, NULL),
+				       max_feerate,
 				       penalty_feerate(ld->topology),
 				       &channel->last_sig,
 				       &channel->channel_info.remote_fundingkey,

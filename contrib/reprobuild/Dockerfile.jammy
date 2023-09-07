@@ -17,7 +17,7 @@ RUN apt-get update \
 	file \
 	gettext \
 	git \
-        libsqlite3-dev \
+    libsqlite3-dev \
 	libpq-dev \
 	libsodium23 \
 	libtool \
@@ -61,6 +61,7 @@ WORKDIR /build
 
 CMD poetry export -o requirements.txt --without-hashes \
     && pip install -r requirements.txt \
+    && pip install -r plugins/clnrest/requirements.txt \
 	&& mkdir -p /repro \
 	&& cd /repro \
 	&& unzip /build/release/*.zip \

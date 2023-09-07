@@ -61,7 +61,7 @@ bool cupdate_different(struct gossip_store *gs UNNEEDED,
 { fprintf(stderr, "cupdate_different called!\n"); abort(); }
 /* Generated stub for gossip_store_add */
 u64 gossip_store_add(struct gossip_store *gs UNNEEDED, const u8 *gossip_msg UNNEEDED,
-		     u32 timestamp UNNEEDED, bool zombie UNNEEDED, bool spam UNNEEDED,
+		     u32 timestamp UNNEEDED, bool zombie UNNEEDED, bool spam UNNEEDED, bool dying UNNEEDED,
 		     const u8 *addendum UNNEEDED)
 { fprintf(stderr, "gossip_store_add called!\n"); abort(); }
 /* Generated stub for gossip_store_add_private_update */
@@ -94,6 +94,11 @@ void gossip_store_mark_channel_zombie(struct gossip_store *gs UNNEEDED,
 void gossip_store_mark_cupdate_zombie(struct gossip_store *gs UNNEEDED,
 				      struct broadcastable *bcast UNNEEDED)
 { fprintf(stderr, "gossip_store_mark_cupdate_zombie called!\n"); abort(); }
+/* Generated stub for gossip_store_mark_dying */
+void gossip_store_mark_dying(struct gossip_store *gs UNNEEDED,
+			     const struct broadcastable *bcast UNNEEDED,
+			     int type UNNEEDED)
+{ fprintf(stderr, "gossip_store_mark_dying called!\n"); abort(); }
 /* Generated stub for gossip_store_new */
 struct gossip_store *gossip_store_new(struct routing_state *rstate UNNEEDED)
 { fprintf(stderr, "gossip_store_new called!\n"); abort(); }
