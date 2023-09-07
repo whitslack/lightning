@@ -209,10 +209,10 @@ struct channel *new_unsaved_channel(struct peer *peer,
 	memset(&channel->billboard, 0, sizeof(channel->billboard));
 	channel->billboard.transient = tal_fmt(channel, "%s",
 					       "Empty channel init'd");
-	channel->log = new_log(channel, ld->log_book,
-			       &peer->id,
-			       "chan#%"PRIu64,
-			       channel->unsaved_dbid);
+	channel->log = new_logger(channel, ld->log_book,
+				  &peer->id,
+				  "chan#%"PRIu64,
+				  channel->unsaved_dbid);
 
 	channel->our_config.id = 0;
 	channel->open_attempt = NULL;
@@ -260,6 +260,7 @@ struct channel *new_unsaved_channel(struct peer *peer,
 	channel->future_per_commitment_point = NULL;
 
 	channel->lease_commit_sig = NULL;
+	channel->ignore_fee_limits = ld->config.ignore_fee_limits;
 
 	/* No shachain yet */
 	channel->their_shachain.id = 0;
@@ -332,7 +333,7 @@ struct channel *new_channel(struct peer *peer, u64 dbid,
 			    enum channel_state state,
 			    enum side opener,
 			    /* NULL or stolen */
-			    struct log *log,
+			    struct logger *log,
 			    const char *transient_billboard TAKES,
 			    u8 channel_flags,
 			    const struct channel_config *our_config,
@@ -389,7 +390,8 @@ struct channel *new_channel(struct peer *peer, u64 dbid,
 			    u32 lease_chan_max_msat,
 			    u16 lease_chan_max_ppt,
 			    struct amount_msat htlc_minimum_msat,
-			    struct amount_msat htlc_maximum_msat)
+			    struct amount_msat htlc_maximum_msat,
+			    bool ignore_fee_limits)
 {
 	struct channel *channel = tal(peer->ld, struct channel);
 	struct amount_msat htlc_min, htlc_max;
@@ -428,11 +430,11 @@ struct channel *new_channel(struct peer *peer, u64 dbid,
 		channel->scb = NULL;
 
 	if (!log) {
-		channel->log = new_log(channel,
-				       peer->ld->log_book,
-				       &channel->peer->id,
-				       "chan#%"PRIu64,
-				       dbid);
+		channel->log = new_logger(channel,
+					  peer->ld->log_book,
+					  &channel->peer->id,
+					  "chan#%"PRIu64,
+					  dbid);
 	} else
 		channel->log = tal_steal(channel, log);
 	channel->channel_flags = channel_flags;
@@ -526,6 +528,7 @@ struct channel *new_channel(struct peer *peer, u64 dbid,
 	channel->closer = closer;
 	channel->close_blockheight = NULL;
 	channel->state_change_cause = reason;
+	channel->ignore_fee_limits = ignore_fee_limits;
 
 	/* Make sure we see any spends using this key */
 	txfilter_add_scriptpubkey(peer->ld->owned_txfilter,

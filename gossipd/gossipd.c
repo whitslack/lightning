@@ -439,29 +439,33 @@ static void dump_our_gossip(struct daemon *daemon, struct peer *peer)
 		return;
 
 	for (chan = first_chan(me, &i); chan; chan = next_chan(me, &i)) {
-		int dir = half_chan_idx(me, chan);
-
+		/* Don't leak private channels, unless it's with you! */
 		if (!is_chan_public(chan)) {
-			/* Don't leak private channels, unless it's with you! */
-			if (!node_id_eq(&chan->nodes[!dir]->id, &peer->id))
-				continue;
-			/* There's no announce for this, of course! */
-			/* Private channel updates are wrapped in the store. */
-			else {
-				if (!is_halfchan_defined(&chan->half[dir]))
-					continue;
+			int dir = half_chan_idx(me, chan);
+
+			if (node_id_eq(&chan->nodes[!dir]->id, &peer->id)
+			    && is_halfchan_defined(&chan->half[dir])) {
+				/* There's no announce for this, of course! */
+				/* Private channel updates are wrapped in the store. */
 				queue_priv_update(peer, &chan->half[dir].bcast);
-				continue;
 			}
-		} else {
-			/* Send announce */
-			queue_peer_from_store(peer, &chan->bcast);
+			continue;
 		}
 
-		/* Send update if we have one */
-		if (is_halfchan_defined(&chan->half[dir]))
-			queue_peer_from_store(peer, &chan->half[dir].bcast);
+		/* Send channel_announce */
+		queue_peer_from_store(peer, &chan->bcast);
+
+		/* Send both channel_updates (if they exist): both help people
+		 * use our channel, so we care! */
+		for (int dir = 0; dir < 2; dir++) {
+			if (is_halfchan_defined(&chan->half[dir]))
+				queue_peer_from_store(peer, &chan->half[dir].bcast);
+		}
 	}
+
+	/* If we have one, we should send our own node_announcement */
+	if (me->bcast.index)
+		queue_peer_from_store(peer, &me->bcast);
 }
 
 /*~ This is where connectd tells us about a new peer we might want to

@@ -5,7 +5,7 @@
 #include <ccan/tal/str/str.h>
 #include <db/common.h>
 
-static void db_log_(struct log *log UNUSED, enum log_level level UNUSED, const struct node_id *node_id UNUSED, bool call_notifier UNUSED, const char *fmt UNUSED, ...)
+static void db_log_(struct logger *log UNUSED, enum log_level level UNUSED, const struct node_id *node_id UNUSED, bool call_notifier UNUSED, const char *fmt UNUSED, ...)
 {
 }
 #define log_ db_log_
@@ -81,6 +81,9 @@ bool channel_tell_depth(struct lightningd *ld UNNEEDED,
 /* Generated stub for channel_unsaved_close_conn */
 void channel_unsaved_close_conn(struct channel *channel UNNEEDED, const char *why UNNEEDED)
 { fprintf(stderr, "channel_unsaved_close_conn called!\n"); abort(); }
+/* Generated stub for channel_update_feerates */
+void channel_update_feerates(struct lightningd *ld UNNEEDED, const struct channel *channel UNNEEDED)
+{ fprintf(stderr, "channel_update_feerates called!\n"); abort(); }
 /* Generated stub for channel_update_reserve */
 void channel_update_reserve(struct channel *channel UNNEEDED,
 			    struct channel_config *their_config UNNEEDED,
@@ -235,84 +238,11 @@ void htlc_set_add(struct lightningd *ld UNNEEDED,
 		  struct amount_msat total_msat UNNEEDED,
 		  const struct secret *payment_secret UNNEEDED)
 { fprintf(stderr, "htlc_set_add called!\n"); abort(); }
-/* Generated stub for invoices_create */
-bool invoices_create(struct invoices *invoices UNNEEDED,
-		     struct invoice *pinvoice UNNEEDED,
-		     const struct amount_msat *msat TAKES UNNEEDED,
-		     const struct json_escape *label TAKES UNNEEDED,
-		     u64 expiry UNNEEDED,
-		     const char *b11enc UNNEEDED,
-		     const char *description UNNEEDED,
-		     const u8 *features UNNEEDED,
-		     const struct preimage *r UNNEEDED,
-		     const struct sha256 *rhash UNNEEDED,
-		     const struct sha256 *local_offer_id UNNEEDED)
-{ fprintf(stderr, "invoices_create called!\n"); abort(); }
-/* Generated stub for invoices_delete */
-bool invoices_delete(struct invoices *invoices UNNEEDED,
-		     struct invoice invoice UNNEEDED)
-{ fprintf(stderr, "invoices_delete called!\n"); abort(); }
-/* Generated stub for invoices_delete_description */
-bool invoices_delete_description(struct invoices *invoices UNNEEDED,
-				 struct invoice invoice UNNEEDED)
-{ fprintf(stderr, "invoices_delete_description called!\n"); abort(); }
-/* Generated stub for invoices_delete_expired */
-void invoices_delete_expired(struct invoices *invoices UNNEEDED,
-			     u64 max_expiry_time UNNEEDED)
-{ fprintf(stderr, "invoices_delete_expired called!\n"); abort(); }
-/* Generated stub for invoices_find_by_label */
-bool invoices_find_by_label(struct invoices *invoices UNNEEDED,
-			    struct invoice *pinvoice UNNEEDED,
-			    const struct json_escape *label UNNEEDED)
-{ fprintf(stderr, "invoices_find_by_label called!\n"); abort(); }
-/* Generated stub for invoices_find_by_rhash */
-bool invoices_find_by_rhash(struct invoices *invoices UNNEEDED,
-			    struct invoice *pinvoice UNNEEDED,
-			    const struct sha256 *rhash UNNEEDED)
-{ fprintf(stderr, "invoices_find_by_rhash called!\n"); abort(); }
-/* Generated stub for invoices_find_unpaid */
-bool invoices_find_unpaid(struct invoices *invoices UNNEEDED,
-			  struct invoice *pinvoice UNNEEDED,
-			  const struct sha256 *rhash UNNEEDED)
-{ fprintf(stderr, "invoices_find_unpaid called!\n"); abort(); }
-/* Generated stub for invoices_get_details */
-struct invoice_details *invoices_get_details(const tal_t *ctx UNNEEDED,
-					     struct invoices *invoices UNNEEDED,
-					     struct invoice invoice UNNEEDED)
-{ fprintf(stderr, "invoices_get_details called!\n"); abort(); }
-/* Generated stub for invoices_iterate */
-bool invoices_iterate(struct invoices *invoices UNNEEDED,
-		      struct invoice_iterator *it UNNEEDED)
-{ fprintf(stderr, "invoices_iterate called!\n"); abort(); }
-/* Generated stub for invoices_iterator_deref */
-const struct invoice_details *invoices_iterator_deref(
-	const tal_t *ctx UNNEEDED, struct invoices *invoices UNNEEDED,
-	const struct invoice_iterator *it UNNEEDED)
-{ fprintf(stderr, "invoices_iterator_deref called!\n"); abort(); }
 /* Generated stub for invoices_new */
 struct invoices *invoices_new(const tal_t *ctx UNNEEDED,
-			      struct db *db UNNEEDED,
+			      struct wallet *wallet UNNEEDED,
 			      struct timers *timers UNNEEDED)
 { fprintf(stderr, "invoices_new called!\n"); abort(); }
-/* Generated stub for invoices_resolve */
-bool invoices_resolve(struct invoices *invoices UNNEEDED,
-		      struct invoice invoice UNNEEDED,
-		      struct amount_msat received UNNEEDED)
-{ fprintf(stderr, "invoices_resolve called!\n"); abort(); }
-/* Generated stub for invoices_waitany */
-void invoices_waitany(const tal_t *ctx UNNEEDED,
-		      struct invoices *invoices UNNEEDED,
-		      u64 lastpay_index UNNEEDED,
-		      void (*cb)(const struct invoice * UNNEEDED, void*) UNNEEDED,
-		      void *cbarg UNNEEDED)
-{ fprintf(stderr, "invoices_waitany called!\n"); abort(); }
-/* Generated stub for invoices_waitone */
-void invoices_waitone(const tal_t *ctx UNNEEDED,
-		      struct invoices *invoices UNNEEDED,
-		      struct invoice invoice UNNEEDED,
-		      void (*cb)(const struct invoice * UNNEEDED, void*) UNNEEDED,
-		      void *cbarg UNNEEDED)
-{ fprintf(stderr, "invoices_waitone called!\n"); abort(); }
 /* Generated stub for is_hsm_secret_encrypted */
 int is_hsm_secret_encrypted(const char *path UNNEEDED)
 { fprintf(stderr, "is_hsm_secret_encrypted called!\n"); abort(); }
@@ -353,7 +283,7 @@ void json_add_hex_talarr(struct json_stream *result UNNEEDED,
 { fprintf(stderr, "json_add_hex_talarr called!\n"); abort(); }
 /* Generated stub for json_add_log */
 void json_add_log(struct json_stream *result UNNEEDED,
-		  const struct log_book *lr UNNEEDED,
+		  const struct log_book *log_book UNNEEDED,
 		  const struct node_id *node_id UNNEEDED,
 		  enum log_level minlevel UNNEEDED)
 { fprintf(stderr, "json_add_log called!\n"); abort(); }
@@ -494,7 +424,7 @@ void kill_uncommitted_channel(struct uncommitted_channel *uc UNNEEDED,
 			      const char *why UNNEEDED)
 { fprintf(stderr, "kill_uncommitted_channel called!\n"); abort(); }
 /* Generated stub for logv */
-void logv(struct log *log UNNEEDED, enum log_level level UNNEEDED, const struct node_id *node_id UNNEEDED,
+void logv(struct logger *logger UNNEEDED, enum log_level level UNNEEDED, const struct node_id *node_id UNNEEDED,
 	  bool call_notifier UNNEEDED, const char *fmt UNNEEDED, va_list ap UNNEEDED)
 { fprintf(stderr, "logv called!\n"); abort(); }
 /* Generated stub for new_channel_mvt_invoice_hin */
@@ -767,6 +697,9 @@ void subkey_from_hmac(const char *prefix UNNEEDED,
 		      const struct secret *base UNNEEDED,
 		      struct secret *key UNNEEDED)
 { fprintf(stderr, "subkey_from_hmac called!\n"); abort(); }
+/* Generated stub for to_canonical_invstr */
+const char *to_canonical_invstr(const tal_t *ctx UNNEEDED, const char *invstring UNNEEDED)
+{ fprintf(stderr, "to_canonical_invstr called!\n"); abort(); }
 /* Generated stub for topology_add_sync_waiter_ */
 void topology_add_sync_waiter_(const tal_t *ctx UNNEEDED,
 			       struct chain_topology *topo UNNEEDED,
@@ -985,7 +918,7 @@ bool fromwire_hsmd_get_channel_basepoints_reply(const void *p UNNEEDED,
 #define transaction_wrap(db, ...)					\
 	(db_begin_transaction(db), __VA_ARGS__, db_commit_transaction(db), wallet_err == NULL)
 
-struct log *new_log(const tal_t *ctx UNNEEDED, struct log_book *record UNNEEDED, const struct node_id *default_node_id UNNEEDED, const char *fmt UNNEEDED, ...)
+struct logger *new_logger(const tal_t *ctx UNNEEDED, struct log_book *record UNNEEDED, const struct node_id *default_node_id UNNEEDED, const char *fmt UNNEEDED, ...)
 {
 	return NULL;
 }
@@ -1629,7 +1562,7 @@ static int count_inflights(struct wallet *w, u64 channel_dbid)
 	stmt = db_prepare_v2(w->db, SQL("SELECT COUNT(1)"
 					" FROM channel_funding_inflights"
 					" WHERE channel_id = ?;"));
-	db_bind_u64(stmt, 0, channel_dbid);
+	db_bind_u64(stmt, channel_dbid);
 	db_query_prepared(stmt);
 	if (!db_step(stmt))
 		abort();
@@ -1733,7 +1666,8 @@ static bool test_channel_inflight_crud(struct lightningd *ld, const tal_t *ctx)
 			   lease_commit_sig,
 			   7777, 22,
 			   AMOUNT_MSAT(0),
-			   AMOUNT_MSAT(-1ULL));
+			   AMOUNT_MSAT(-1ULL),
+			   false);
 	db_begin_transaction(w->db);
 	CHECK(!wallet_err);
 	wallet_channel_insert(w, chan);

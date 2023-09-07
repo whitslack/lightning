@@ -198,7 +198,7 @@ static struct command_result *json_paystatus(struct command *cmd,
 
 	if (!param(cmd, buf, params,
 		   /* FIXME: rename to invstring */
-		   p_opt("bolt11", param_string, &invstring),
+		   p_opt("bolt11", param_invstring, &invstring),
 		   NULL))
 		return command_param_failed();
 
@@ -526,7 +526,7 @@ static struct command_result *json_listpays(struct command *cmd,
 	/* FIXME: would be nice to parse as a bolt11 so check worked in future */
 	if (!param(cmd, buf, params,
 		   /* FIXME: parameter should be invstring now */
-		   p_opt("bolt11", param_string, &invstring),
+		   p_opt("bolt11", param_invstring, &invstring),
 		   p_opt("payment_hash", param_sha256, &payment_hash),
 		   p_opt("status", param_string, &status_str),
 		   NULL))
@@ -912,26 +912,23 @@ struct payment_modifier *paymod_mods[] = {
 	&exemptfee_pay_mod,
 	&directpay_pay_mod,
 	&shadowroute_pay_mod,
-	/* NOTE: The order in which these three paymods are executed is
-	 * significant!
-	 * routehints *must* execute first before payee_incoming_limit
-	 * which *must* execute bfore presplit.
+	/* NOTE: The order in which these two paymods are executed is
+	 * significant! `routehints` *must* execute first before
+	 * payee_incoming_limit.
 	 *
 	 * FIXME: Giving an ordered list of paymods to the paymod
 	 * system is the wrong interface, given that the order in
-	 * which paymods execute is significant.
-	 * (This is typical of Entity-Component-System pattern.)
-	 * What should be done is that libplugin-pay should have a
-	 * canonical list of paymods in the order they execute
-	 * correctly, and whether they are default-enabled/default-disabled,
-	 * and then clients like `pay` and `keysend` will disable/enable
-	 * paymods that do not help them, instead of the current interface
-	 * where clients provide an *ordered* list of paymods they want to
-	 * use.
+	 * which paymods execute is significant.  (This is typical of
+	 * Entity-Component-System pattern.)  What should be done is
+	 * that libplugin-pay should have a canonical list of paymods
+	 * in the order they execute correctly, and whether they are
+	 * default-enabled/default-disabled, and then clients like
+	 * `pay` and `keysend` will disable/enable paymods that do not
+	 * help them, instead of the current interface where clients
+	 * provide an *ordered* list of paymods they want to use.
 	 */
 	&routehints_pay_mod,
 	&payee_incoming_limit_pay_mod,
-	&presplit_pay_mod,
 	&waitblockheight_pay_mod,
 	&retry_pay_mod,
 	&adaptive_splitter_pay_mod,
@@ -973,7 +970,7 @@ static struct command_result *json_pay(struct command *cmd,
 	 * initialized directly that way. */
 	if (!param(cmd, buf, params,
 		   /* FIXME: parameter should be invstring now */
-		   p_req("bolt11", param_string, &b11str),
+		   p_req("bolt11", param_invstring, &b11str),
 		   p_opt("amount_msat|msatoshi", param_msat, &msat),
 		   p_opt("label", param_string, &label),
 		   p_opt_def("riskfactor", param_millionths,
@@ -1190,7 +1187,6 @@ static struct command_result *json_pay(struct command *cmd,
 	}
 
 	shadow_route = payment_mod_shadowroute_get_data(p);
-	payment_mod_presplit_get_data(p)->disable = disablempp;
 	payment_mod_adaptive_splitter_get_data(p)->disable = disablempp;
 	payment_mod_route_exclusions_get_data(p)->exclusions = exclusions;
 

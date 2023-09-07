@@ -1743,6 +1743,34 @@ def test_bitcoin_backend(node_factory, bitcoind):
                                " bitcoind")
 
 
+def test_bitcoin_bad_estimatefee(node_factory, bitcoind):
+    """
+    This tests that we don't crash if bitcoind backend gives bad estimatefees.
+    """
+    plugin = os.path.join(os.getcwd(), "tests/plugins/badestimate.py")
+    l1 = node_factory.get_node(options={"disable-plugin": "bcli",
+                                        "plugin": plugin,
+                                        "badestimate-badorder": True,
+                                        "wumbo": None},
+                               start=False,
+                               may_fail=True, allow_broken_log=True)
+    l1.daemon.start(wait_for_initialized=False, stderr_redir=True)
+    assert l1.daemon.wait() == 1
+    l1.daemon.is_in_stderr(r"badestimate.py error: bad response to estimatefees.feerates \(Blocks must be ascending order: 2 <= 100!\)")
+
+    del l1.daemon.opts["badestimate-badorder"]
+    l1.start()
+
+    l2 = node_factory.get_node(options={"disable-plugin": "bcli",
+                                        "plugin": plugin,
+                                        "wumbo": None})
+    # Give me some funds.
+    bitcoind.generate_block(5)
+    l1.fundwallet(100 * 10**8)
+    l1.connect(l2)
+    l1.rpc.fundchannel(l2.info["id"], 50 * 10**8)
+
+
 def test_bcli(node_factory, bitcoind, chainparams):
     """
     This tests the bcli plugin, used to gather Bitcoin data from a local
@@ -2098,43 +2126,6 @@ def test_coin_movement_notices(node_factory, bitcoind, chainparams):
     check_coin_moves(l3, chanid_3, l3_l2_mvts, chainparams)
     check_coin_moves(l2, chanid_1, l1_l2_mvts, chainparams)
     check_coin_moves(l2, chanid_3, l2_l3_mvts, chainparams)
-
-
-def test_3847_repro(node_factory, bitcoind):
-    """Reproduces the issue in #3847: duplicate response from plugin
-
-    l2 holds on to HTLCs until the deadline expires. Then we allow them
-    through and either should terminate the payment attempt, and the second
-    would return a redundant result.
-
-    """
-    l1, l2, l3 = node_factory.line_graph(3, opts=[
-        {},
-        {},
-        {
-            'plugin': os.path.join(os.getcwd(), 'tests/plugins/hold_htlcs.py'),
-            'hold-time': 11,
-            'hold-result': 'fail',
-        },
-    ], wait_for_announce=True)
-    wait_for(lambda: len(l1.rpc.listchannels()['channels']) == 4)
-
-    # Amount sufficient to trigger the presplit modifier
-    amt = 20 * 1000 * 1000
-
-    i1 = l3.rpc.invoice(
-        amount_msat=amt, label="direct", description="desc"
-    )['bolt11']
-    with pytest.raises(RpcError):
-        l1.rpc.pay(i1, retry_for=10)
-
-    # We wait for at least two parts, and the bug would cause the `pay` plugin
-    # to crash
-    l1.daemon.wait_for_logs([r'Payment deadline expired, not retrying'] * 2)
-
-    # This call to paystatus would fail if the pay plugin crashed (it's
-    # provided by the plugin)
-    l1.rpc.paystatus(i1)
 
 
 def test_important_plugin(node_factory):
@@ -2987,6 +2978,9 @@ def test_commando_listrunes(node_factory):
     our_unstored_rune = l1.rpc.commando_listrunes(rune='M8f4jNx9gSP2QoiRbr10ybwzFxUgd-rS4CR4yofMSuA9Mg==')['runes'][0]
     assert our_unstored_rune['stored'] is False
 
+    our_unstored_rune = l1.rpc.commando_listrunes(rune='m_tyR0qqHUuLEbFJW6AhmBg-9npxVX2yKocQBFi9cvY9MyZpZF4wMjJkMjIzNjIwYTM1OWE0N2ZmNyZtZXRob2Q9bGlzdHBlZXJzJnBuYW1lbGV2ZWwhfHBuYW1lbGV2ZWwvaW8mcGFycjEhfHBhcnIxL2lv')['runes'][0]
+    assert our_unstored_rune['stored'] is False
+
     not_our_rune = l1.rpc.commando_listrunes(rune='Am3W_wI0PRn4qVNEsJ2iInHyFPQK8wfdqEXztm8-icQ9MA==')['runes'][0]
     assert not_our_rune['stored'] is False
     assert not_our_rune['our_rune'] is False
@@ -3521,6 +3515,8 @@ def test_sql(node_factory, bitcoind):
                          'type': 'string'},
                         {'name': 'scratch_txid',
                          'type': 'txid'},
+                        {'name': 'ignore_fee_limits',
+                         'type': 'boolean'},
                         {'name': 'feerate_perkw',
                          'type': 'u32'},
                         {'name': 'feerate_perkb',
@@ -3897,8 +3893,8 @@ def test_sql(node_factory, bitcoind):
     l3.daemon.wait_for_log("Refreshing channel: {}".format(scid))
 
     # This has to wait for the hold_invoice plugin to let go!
-    l1.rpc.close(l2.info['id'])
-    bitcoind.generate_block(13, wait_for_mempool=1)
+    txid = l1.rpc.close(l2.info['id'])['txid']
+    bitcoind.generate_block(13, wait_for_mempool=txid)
     wait_for(lambda: len(l3.rpc.listchannels()['channels']) == 2)
     assert len(l3.rpc.sql("SELECT * FROM channels;")['rows']) == 2
     l3.daemon.wait_for_log("Deleting channel: {}".format(scid))
@@ -4001,3 +3997,32 @@ def test_plugin_persist_option(node_factory):
     assert c['value_str'] == "Static option"
     assert c['plugin'] == plugin_path
     assert l1.rpc.call("hello") == "Static option world"
+
+
+def test_all_subscription(node_factory, directory):
+    """Ensure that registering for all notifications works."""
+    plugin1 = os.path.join(os.getcwd(), 'tests/plugins/all_notifications.py')
+    plugin2 = os.path.join(os.getcwd(), "tests/plugins/test_libplugin")
+
+    l1, l2 = node_factory.line_graph(2, opts=[{"plugin": plugin1},
+                                              {"plugin": plugin2}])
+
+    l1.stop()
+    l2.stop()
+
+    # There will be a lot of these!
+    for notstr in ("block_added: {'block_added': {'hash': ",
+                   "balance_snapshot: {'balance_snapshot': {'node_id': ",
+                   "connect: {'connect': {'id': ",
+                   "channel_state_changed: {'channel_state_changed': {'peer_id': ",
+                   "shutdown: {'shutdown': {}"):
+        assert l1.daemon.is_in_log(f".*plugin-all_notifications.py: notification {notstr}.*")
+
+    for notstr in ('block_added: ',
+                   'balance_snapshot: ',
+                   'channel_state_changed: {'):
+        assert l2.daemon.is_in_log(f'.*test_libplugin: all: {notstr}.*')
+
+    # shutdown and connect are subscribed before the wildcard, so is handled by that handler
+    assert not l2.daemon.is_in_log(f'.*test_libplugin: all: shutdown.*')
+    assert not l2.daemon.is_in_log(f'.*test_libplugin: all: connect.*')

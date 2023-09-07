@@ -1555,11 +1555,14 @@ def test_feerates(node_factory, anchors):
     # Now try setting them, one at a time.
     # Set CONSERVATIVE/2 feerate, for max
     l1.set_feerates((15000, 0, 0, 0), True)
-    wait_for(lambda: l1.rpc.feerates('perkw')['perkw']['max_acceptable'] == 15000 * 10)
+    # Make sure it's digested the bcli plugin results.
+    wait_for(lambda: len(l1.rpc.feerates('perkw')['perkw']['estimates']) == 1)
     feerates = l1.rpc.feerates('perkw')
     # We only get the warning if *no* feerates are avail.
     assert 'warning_missing_feerates' not in feerates
     assert 'perkb' not in feerates
+    assert feerates['perkw']['max_acceptable'] == 15000 * 10
+
     # With only one data point, this is a terrible guess!
     assert feerates['perkw']['min_acceptable'] == 15000 // 2
     assert feerates['perkw']['estimates'] == [{'blockcount': 2,
@@ -1568,6 +1571,8 @@ def test_feerates(node_factory, anchors):
 
     # Set ECONOMICAL/6 feerate, for unilateral_close and htlc_resolution
     l1.set_feerates((15000, 11000, 0, 0), True)
+    # Make sure it's digested the bcli plugin results.
+    wait_for(lambda: len(l1.rpc.feerates('perkw')['perkw']['estimates']) == 2)
     feerates = l1.rpc.feerates('perkw')
     assert feerates['perkw']['unilateral_close'] == 11000
     assert 'warning_missing_feerates' not in feerates
@@ -1584,6 +1589,8 @@ def test_feerates(node_factory, anchors):
 
     # Set ECONOMICAL/12 feerate, for all but min (so, no mutual_close feerate)
     l1.set_feerates((15000, 11000, 6250, 0), True)
+    # Make sure it's digested the bcli plugin results.
+    wait_for(lambda: len(l1.rpc.feerates('perkw')['perkw']['estimates']) == 3)
     feerates = l1.rpc.feerates('perkb')
     assert feerates['perkb']['unilateral_close'] == 11000 * 4
     # We dont' extrapolate, so it uses the same for mutual_close
@@ -2718,7 +2725,7 @@ def test_restorefrompeer(node_factory, bitcoind):
     try:
         l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     except RpcError as err:
-        assert "disconnected during connection" in err.error
+        assert "disconnected during connection" in err.error['message']
 
     l1.daemon.wait_for_log('peer_in WIRE_YOUR_PEER_STORAGE')
 
@@ -2908,7 +2915,7 @@ def test_notimestamp_logging(node_factory):
     # Make sure this is specified *before* other options!
     l1.daemon.early_opts = ['--log-timestamps=false']
     l1.start()
-    assert l1.daemon.logs[0].startswith("DEBUG")
+    assert l1.daemon.logs[0].startswith("lightningd-1 DEBUG")
 
     assert l1.rpc.listconfigs()['configs']['log-timestamps']['value_bool'] is False
 
@@ -2929,9 +2936,30 @@ def test_getlog(node_factory):
 def test_log_filter(node_factory):
     """Test the log-level option with subsystem filters"""
     # This actually suppresses debug!
-    l1, l2 = node_factory.line_graph(2, opts=[{'log-level': ['debug', 'broken:022d223620']}, {}])
+    l1 = node_factory.get_node(options={'log-level': ['debug', 'broken:022d223620']})
+    l2 = node_factory.get_node(start=False)
 
+    log1 = os.path.join(l2.daemon.lightning_dir, "log")
+    log2 = os.path.join(l2.daemon.lightning_dir, "log2")
+    # We need to set log file before we set options on it.
+    l2.daemon.early_opts += [f'--log-file={l}' for l in [log2] + l2.daemon.opts['log-file']]
+    del l2.daemon.opts['log-file']
+    l2.daemon.opts['log-level'] = ["broken",  # broken messages go everywhere
+                                   f"debug::{log1}",  # debug to normal log
+                                   "debug::-",  # debug to stdout
+                                   f'io:0266e4598d1d3:{log2}']
+    l2.start()
+    node_factory.join_nodes([l1, l2])
+
+    # No debug messages in l1's log
     assert not l1.daemon.is_in_log(r'-chan#[0-9]*:')
+    # No mention of l2 at all (except spenderp mentions it)
+    assert not l1.daemon.is_in_log(l2.info['id'] + '-')
+
+    # Every message in log2 must be about l1...
+    with open(log2, "r") as f:
+        lines = f.readlines()
+    assert all([' {}-'.format(l1.info['id']) in l for l in lines])
 
 
 def test_force_feerates(node_factory):

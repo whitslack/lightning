@@ -77,8 +77,7 @@ struct plugins *plugins_new(const tal_t *ctx, struct log_book *log_book,
 	struct plugins *p;
 	p = tal(ctx, struct plugins);
 	list_head_init(&p->plugins);
-	p->log_book = log_book;
-	p->log = new_log(p, log_book, NULL, "plugin-manager");
+	p->log = new_logger(p, log_book, NULL, "plugin-manager");
 	p->ld = ld;
 	p->startup = true;
 	p->plugin_cmds = tal_arr(p, struct plugin_command *, 0);
@@ -101,7 +100,8 @@ static void plugin_check_subscriptions(struct plugins *plugins,
 {
 	for (size_t i = 0; i < tal_count(plugin->subscriptions); i++) {
 		const char *topic = plugin->subscriptions[i];
-		if (!notifications_have_topic(plugins, topic))
+		if (!streq(topic, "*")
+		    && !notifications_have_topic(plugins, topic))
 			log_unusual(
 			    plugin->log,
 			    "topic '%s' is not a known notification topic",
@@ -298,7 +298,7 @@ struct plugin *plugin_register(struct plugins *plugins, const char* path TAKES,
 	p->non_numeric_ids = false;
 	p->index = plugins->plugin_idx++;
 
-	p->log = new_log(p, plugins->log_book, NULL, "plugin-%s", p->shortname);
+	p->log = new_logger(p, plugins->ld->log_book, NULL, "plugin-%s", p->shortname);
 	p->methods = tal_arr(p, const char *, 0);
 	list_head_init(&p->plugin_opts);
 
@@ -1306,7 +1306,8 @@ static const char *plugin_subscriptions_add(struct plugin *plugin,
 					    const char *buffer,
 					    const jsmntok_t *resulttok)
 {
-	const jsmntok_t *subscriptions =
+	size_t i;
+	const jsmntok_t *s, *subscriptions =
 	    json_get_member(buffer, resulttok, "subscriptions");
 
 	if (!subscriptions) {
@@ -1318,12 +1319,11 @@ static const char *plugin_subscriptions_add(struct plugin *plugin,
 		return tal_fmt(plugin, "\"result.subscriptions\" is not an array");
 	}
 
-	for (int i = 0; i < subscriptions->size; i++) {
+	json_for_each_arr(i, s, subscriptions) {
 		char *topic;
-		const jsmntok_t *s = json_get_arr(subscriptions, i);
 		if (s->type != JSMN_STRING) {
 			return tal_fmt(plugin,
-				       "result.subscriptions[%d] is not a string: '%.*s'", i,
+				       "result.subscriptions[%zu] is not a string: '%.*s'", i,
 					json_tok_full_len(s),
 					json_tok_full(buffer, s));
 		}
@@ -2236,9 +2236,13 @@ void json_add_opt_disable_plugins(struct json_stream *response,
 static bool plugin_subscriptions_contains(struct plugin *plugin,
 					  const char *method)
 {
-	for (size_t i = 0; i < tal_count(plugin->subscriptions); i++)
-		if (streq(method, plugin->subscriptions[i]))
+	for (size_t i = 0; i < tal_count(plugin->subscriptions); i++) {
+		if (streq(method, plugin->subscriptions[i])
+		    /* Asterisk is magic "all" */
+		    || streq(plugin->subscriptions[i], "*")) {
 			return true;
+		}
+	}
 
 	return false;
 }
@@ -2322,7 +2326,7 @@ void *plugins_exclusive_loop(struct plugin **plugins)
 	return ret;
 }
 
-struct log *plugin_get_log(struct plugin *plugin)
+struct logger *plugin_get_logger(struct plugin *plugin)
 {
 	return plugin->log;
 }

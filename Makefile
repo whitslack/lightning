@@ -277,7 +277,7 @@ ifeq ($(HAVE_POSTGRES),1)
 LDLIBS += $(POSTGRES_LDLIBS)
 endif
 
-default: show-flags all-programs all-test-programs doc-all default-targets $(PYTHON_GENERATED)
+default: show-flags gen all-programs all-test-programs doc-all default-targets $(PYTHON_GENERATED)
 
 ifneq ($(SUPPRESS_GENERATION),1)
 FORCE = FORCE
@@ -382,7 +382,8 @@ $(GRPC_GEN)&: cln-grpc/proto/node.proto cln-grpc/proto/primitives.proto
 	# The compiler assumes that the proto files are in the same
 	# directory structure as the generated files will be. Since we
 	# don't do that we need to path the files up.
-	find contrib/pyln-grpc-proto/pyln/ -type f -name "*.py" -print0 | xargs -0 sed -i 's/^import \(.*\)_pb2 as .*__pb2/from pyln.grpc import \1_pb2 as \1__pb2/g'
+	find contrib/pyln-grpc-proto/pyln/ -type f -name "*.py" -print0 | xargs -0 sed -i'.bak' -e 's/^import \(.*\)_pb2 as .*__pb2/from pyln.grpc import \1_pb2 as \1__pb2/g'
+	rm -f contrib/pyln-grpc-proto/pyln/*.py.bak
 
 endif
 
@@ -519,9 +520,6 @@ check-whitespace/%: %
 
 check-whitespace: check-whitespace/Makefile check-whitespace/tools/check-bolt.c $(ALL_NONGEN_SRCFILES:%=check-whitespace/%)
 
-check-markdown:
-	@tools/check-markdown.sh
-
 check-spelling:
 	@tools/check-spelling.sh
 
@@ -573,7 +571,10 @@ check-amount-access:
 	@! (git grep -nE "(->|\.)(milli)?satoshis" -- "*.c" "*.h" ":(exclude)common/amount.*" ":(exclude)*/test/*" | grep -v '/* Raw:')
 	@! git grep -nE "\\(struct amount_(m)?sat\\)" -- "*.c" "*.h" ":(exclude)common/amount.*" ":(exclude)*/test/*"
 
-check-source: check-makefile check-source-bolt check-whitespace check-markdown check-spelling check-python check-includes check-cppcheck check-shellcheck check-setup_locale check-tmpctx check-discouraged-functions check-amount-access
+# For those without working cppcheck
+check-source-no-cppcheck: check-makefile check-source-bolt check-whitespace check-spelling check-python check-includes check-shellcheck check-setup_locale check-tmpctx check-discouraged-functions check-amount-access
+
+check-source: check-source-no-cppcheck check-cppcheck
 
 full-check: check check-source
 
@@ -596,6 +597,8 @@ CHECK_GEN_ALL = \
 	wallet/statements_gettextgen.po \
 	.msggen.json \
 	doc/index.rst
+
+gen:  $(CHECK_GEN_ALL)
 
 check-gen-updated:  $(CHECK_GEN_ALL)
 	@echo "Checking for generated files being changed by make"
@@ -798,7 +801,7 @@ MAN1PAGES = $(filter %.1,$(MANPAGES))
 MAN5PAGES = $(filter %.5,$(MANPAGES))
 MAN7PAGES = $(filter %.7,$(MANPAGES))
 MAN8PAGES = $(filter %.8,$(MANPAGES))
-DOC_DATA = README.md doc/INSTALL.md doc/HACKING.md LICENSE
+DOC_DATA = README.md LICENSE
 
 install-data: installdirs $(MAN1PAGES) $(MAN5PAGES) $(MAN7PAGES) $(MAN8PAGES) $(DOC_DATA)
 	@$(NORMAL_INSTALL)
