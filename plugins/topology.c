@@ -298,14 +298,13 @@ static struct node_map *local_connected(const tal_t *ctx,
 
 	json_for_each_arr(i, channel, channels) {
 		struct node_id id;
-		bool is_connected;
-		const char *err, *state;
+		bool is_connected, normal_chan;
+		const char *err;
 
 		err = json_scan(tmpctx, buf, channel,
-				"{peer_id:%,peer_connected:%,state:%}",
+				"{peer_id:%,peer_connected:%}",
 				JSON_SCAN(json_to_node_id, &id),
-				JSON_SCAN(json_to_bool, &is_connected),
-				JSON_SCAN_TAL(tmpctx, json_strdup, &state));
+				JSON_SCAN(json_to_bool, &is_connected));
 		if (err)
 			plugin_err(plugin, "Bad listpeerchannels response (%s): %.*s",
 				   err,
@@ -315,12 +314,17 @@ static struct node_map *local_connected(const tal_t *ctx,
 		if (!is_connected)
 			continue;
 
-		/* Must also have a channel in CHANNELD_NORMAL/splice */
-		if (streq(state, "CHANNELD_NORMAL")
-		    || streq(state, "CHANNELD_AWAITING_SPLICE")) {
+		/* Must also have a channel in CHANNELD_NORMAL */
+		normal_chan = json_tok_streq(buf,
+				   json_get_member(buf, channel, "state"),
+					     "CHANNELD_NORMAL")
+			   || json_tok_streq(buf,
+				   json_get_member(buf, channel, "state"),
+					     "CHANNELD_AWAITING_SPLICE");
+
+		if (normal_chan)
 			node_map_add(connected,
 				     tal_dup(connected, struct node_id, &id));
-		}
 	}
 
 	return connected;
