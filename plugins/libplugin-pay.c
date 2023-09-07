@@ -2381,9 +2381,7 @@ local_channel_hints_listpeerchannels(struct command *cmd, const char *buffer,
 		/* Filter out local channels if they are
 		 * either a) disconnected, or b) not in normal
 		 * state. */
-		enabled = chans[i]->connected
-			&& (streq(chans[i]->state, "CHANNELD_NORMAL")
-			    || streq(chans[i]->state, "CHANNELD_AWAITING_SPLICE"));
+		enabled = chans[i]->connected && streq(chans[i]->state, "CHANNELD_NORMAL");
 
 		/* Take the configured number of max_htlcs and
 		 * subtract any HTLCs that might already be added to
