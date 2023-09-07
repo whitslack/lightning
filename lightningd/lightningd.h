@@ -103,6 +103,9 @@ struct lightningd {
 	/* The directory to find all the subdaemons. */
 	const char *daemon_dir;
 
+	/* Are deprecated APIs enabled? */
+	bool deprecated_apis;
+
 	/* If we told to run in the background, this is our parent fd, otherwise
 	 * -1. */
 	int daemon_parent_fd;
@@ -362,6 +365,9 @@ struct lightningd {
 
 	/* --experimental-upgrade-protocol */
 	bool experimental_upgrade_protocol;
+
+	/* For anchors: how much do we keep for spending close txs? */
+	struct amount_sat emergency_sat;
 };
 
 /* Turning this on allows a tal allocation to return NULL, rather than aborting.

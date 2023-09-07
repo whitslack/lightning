@@ -165,6 +165,11 @@ void json_add_unsaved_channel(struct json_stream *response,
 			       OPT_ANCHOR_OUTPUTS))
 		json_add_string(response, NULL, "option_anchor_outputs");
 
+	if (feature_negotiated(channel->peer->ld->our_features,
+			       channel->peer->their_features,
+			       OPT_ANCHORS_ZERO_FEE_HTLC_TX))
+		json_add_string(response, NULL, "option_anchors_zero_fee_htlc_tx");
+
 	json_array_end(response);
 	json_object_end(response);
 }
@@ -1258,6 +1263,7 @@ wallet_commit_channel(struct lightningd *ld,
 	} else
 		channel->scb = NULL;
 
+	tal_free(channel->type);
 	channel->type = channel_type_dup(channel, type);
 	channel->scb->type = channel_type_dup(channel->scb, type);
 
@@ -2887,6 +2893,7 @@ static struct command_result *json_openchannel_init(struct command *cmd,
 					   oa->our_upfront_shutdown_script,
 					   our_upfront_shutdown_script_wallet_index,
 					   *feerate_per_kw,
+					   unilateral_feerate(cmd->ld->topology, true),
 					   *feerate_per_kw_funding,
 					   channel->channel_flags,
 					   amount_sat_zero(*request_amt) ?
@@ -3362,6 +3369,7 @@ static struct command_result *json_queryrates(struct command *cmd,
 					   oa->our_upfront_shutdown_script,
 					   our_upfront_shutdown_script_wallet_index,
 					   *feerate_per_kw,
+					   unilateral_feerate(cmd->ld->topology, true),
 					   *feerate_per_kw_funding,
 					   channel->channel_flags,
 					   amount_sat_zero(*request_amt) ?

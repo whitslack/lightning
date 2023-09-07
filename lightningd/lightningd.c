@@ -255,6 +255,7 @@ static struct lightningd *new_lightningd(const tal_t *ctx)
 	ld->pure_tor_setup = false;
 	ld->tor_service_password = NULL;
 	ld->websocket_port = 0;
+	ld->deprecated_apis = true;
 
 	/*~ This is initialized later, but the plugin loop examines this,
 	 * so set it to NULL explicitly now. */
@@ -321,6 +322,19 @@ static struct lightningd *new_lightningd(const tal_t *ctx)
 	 * we allow overriding them with --force-feerates, in which
 	 * case this is a pointer to an enum feerate-indexed array of values */
 	ld->force_feerates = NULL;
+
+	/*~ We need some funds to help CPFP spend unilateral closes.  How
+	 * much?  But let's assume we want to boost the commitment tx (1112
+	 * Sipa).
+	 *
+	 * Anchor witness script is 40 bytes, sig is 72, input bytes is 32 + 4
+	 * + 1 + 1 + 4, core is 10 bytes, P2WKH output is 8 + 1 + 1 + 1 + 32
+	 * bytes.  Weight (40 + 42 + 10 + 43)*4 + 40 + 72 = 652.
+	 *
+	 * So every 441 sats we can increase feerate by 1 sat / vbyte.  Set
+	 * the default minimum at 25,000 sats.
+	 */
+	ld->emergency_sat = AMOUNT_SAT(25000);
 
 	return ld;
 }

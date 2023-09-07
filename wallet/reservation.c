@@ -10,6 +10,7 @@
 #include <common/key_derive.h>
 #include <common/type_to_string.h>
 #include <lightningd/chaintopology.h>
+#include <lightningd/channel.h>
 #include <lightningd/hsm_control.h>
 #include <lightningd/jsonrpc.h>
 #include <lightningd/lightningd.h>
@@ -288,7 +289,7 @@ struct wally_psbt *psbt_using_utxos(const tal_t *ctx,
 		 * set to `1` and witness:
 		 */
 		if (utxos[i]->close_info
-		    && utxos[i]->close_info->option_anchor_outputs)
+		    && utxos[i]->close_info->option_anchors)
 			this_nsequence = utxos[i]->close_info->csv;
 		else
 			this_nsequence = nsequence;
@@ -297,7 +298,8 @@ struct wally_psbt *psbt_using_utxos(const tal_t *ctx,
 				  this_nsequence, scriptSig,
 				  NULL, redeemscript);
 
-		psbt_input_set_wit_utxo(psbt, i, scriptPubkey, utxos[i]->amount);
+		psbt_input_set_wit_utxo(psbt, psbt->num_inputs-1,
+					scriptPubkey, utxos[i]->amount);
 		if (is_elements(chainparams)) {
 			struct amount_asset asset;
 			/* FIXME: persist asset tags */
@@ -321,7 +323,7 @@ struct wally_psbt *psbt_using_utxos(const tal_t *ctx,
 			tx = wallet_transaction_get(ctx, wallet,
 						    &utxos[i]->outpoint.txid);
 			if (tx)
-				psbt_input_set_utxo(psbt, i, tx->wtx);
+				psbt_input_set_utxo(psbt, psbt->num_inputs-1, tx->wtx);
 		}
 	}
 
@@ -335,11 +337,11 @@ static struct command_result *finish_psbt(struct command *cmd,
 					  struct amount_sat excess,
 					  u32 reserve,
 					  u32 *locktime,
-					  bool excess_as_change)
+					  struct amount_sat change)
 {
 	struct json_stream *response;
 	struct wally_psbt *psbt;
-	size_t change_outnum COMPILER_WANTS_INIT("gcc 9.4.0 -Og");
+	ssize_t change_outnum;
 	u32 current_height = get_block_height(cmd->ld->topology);
 
 	if (!locktime) {
@@ -351,19 +353,12 @@ static struct command_result *finish_psbt(struct command *cmd,
 				*locktime, BITCOIN_TX_RBF_SEQUENCE,
 				NULL);
 
-	/* Should we add a change output for the excess? */
-	if (excess_as_change) {
-		struct amount_sat change;
+	/* Should we add a change output?  (Iff it can pay for itself!) */
+	change = change_amount(change, feerate_per_kw, weight);
+	if (amount_sat_greater(change, AMOUNT_SAT(0))) {
 		struct pubkey pubkey;
 		s64 keyidx;
 		u8 *b32script;
-
-		/* Checks for dust, returns 0sat if below dust */
-		change = change_amount(excess, feerate_per_kw, weight);
-		if (!amount_sat_greater(change, AMOUNT_SAT(0))) {
-			excess_as_change = false;
-			goto fee_calc;
-		}
 
 		/* Get a change adddress */
 		keyidx = wallet_get_newindex(cmd->ld);
@@ -378,14 +373,13 @@ static struct command_result *finish_psbt(struct command *cmd,
 
 		change_outnum = psbt->num_outputs;
 		psbt_append_output(psbt, b32script, change);
-		/* Set excess to zero */
-		excess = AMOUNT_SAT(0);
 		/* Add additional weight of output */
 		weight += bitcoin_tx_output_weight(
 				BITCOIN_SCRIPTPUBKEY_P2WPKH_LEN);
+	} else {
+		change_outnum = -1;
 	}
 
-fee_calc:
 	/* Add a fee output if this is elements */
 	if (is_elements(chainparams)) {
 		struct amount_sat est_fee =
@@ -399,7 +393,7 @@ fee_calc:
 	json_add_num(response, "feerate_per_kw", feerate_per_kw);
 	json_add_num(response, "estimated_final_weight", weight);
 	json_add_amount_sat_msat(response, "excess_msat", excess);
-	if (excess_as_change)
+	if (change_outnum != -1)
 		json_add_num(response, "change_outnum", change_outnum);
 	if (reserve)
 		reserve_and_report(response, cmd->ld->wallet, current_height,
@@ -422,6 +416,52 @@ static inline u32 minconf_to_maxheight(u32 minconf, struct lightningd *ld)
 	return ld->topology->tip->height - minconf + 1;
 }
 
+/* Returns false if it needed to create change, but couldn't afford. */
+static bool change_for_emergency(struct lightningd *ld,
+				 bool have_anchor_channel,
+				 struct utxo **utxos,
+				 u32 feerate_per_kw,
+				 u32 weight,
+				 struct amount_sat *excess,
+				 struct amount_sat *change)
+{
+	struct amount_sat fee;
+
+	/* Only needed for anchor channels */
+	if (!have_anchor_channel)
+		return true;
+
+	/* Fine if rest of wallet has funds. */
+	if (wallet_has_funds(ld->wallet,
+			     cast_const2(const struct utxo **, utxos),
+			     get_block_height(ld->topology),
+			     ld->emergency_sat))
+		return true;
+
+	/* If we can afford with existing change output, great (or
+	 * ld->emergency_sat is 0) */
+	if (amount_sat_greater_eq(change_amount(*change,
+						feerate_per_kw, weight),
+				  ld->emergency_sat))
+		return true;
+
+	/* Try splitting excess to add to change. */
+	fee = change_fee(feerate_per_kw, weight);
+	if (!amount_sat_sub(excess, *excess, fee)
+	    || !amount_sat_sub(excess, *excess, ld->emergency_sat))
+		return false;
+
+	if (!amount_sat_add(change, *change, fee)
+	    || !amount_sat_add(change, *change, ld->emergency_sat))
+		abort();
+
+	/* We *will* get a change output now! */
+	assert(amount_sat_eq(change_amount(*change, feerate_per_kw,
+						weight),
+			     ld->emergency_sat));
+	return true;
+}
+
 static struct command_result *json_fundpsbt(struct command *cmd,
 					      const char *buffer,
 					      const jsmntok_t *obj UNNEEDED,
@@ -430,9 +470,10 @@ static struct command_result *json_fundpsbt(struct command *cmd,
 	struct utxo **utxos;
 	u32 *feerate_per_kw;
 	u32 *minconf, *weight, *min_witness_weight;
-	struct amount_sat *amount, input, diff;
-	bool all, *excess_as_change, *nonwrapped;
+	struct amount_sat *amount, input, diff, change;
+	bool all, *excess_as_change, *nonwrapped, *keep_emergency_funds;
 	u32 *locktime, *reserve, maxheight;
+	u32 current_height;
 
 	if (!param(cmd, buffer, params,
 		   p_req("satoshi", param_sat_or_all, &amount),
@@ -448,11 +489,20 @@ static struct command_result *json_fundpsbt(struct command *cmd,
 			     &excess_as_change, false),
 		   p_opt_def("nonwrapped", param_bool,
 			     &nonwrapped, false),
+		   p_opt_def("opening_anchor_channel", param_bool,
+			     &keep_emergency_funds, false),
 		   NULL))
 		return command_param_failed();
 
+	/* If we have anchor channels, we definitely need to keep
+	 * emergency funds.  */
+	if (have_anchor_channel(cmd->ld))
+		*keep_emergency_funds = true;
+
 	all = amount_sat_eq(*amount, AMOUNT_SAT(-1ULL));
 	maxheight = minconf_to_maxheight(*minconf, cmd->ld);
+
+	current_height = get_block_height(cmd->ld->topology);
 
 	/* We keep adding until we meet their output requirements. */
 	utxos = tal_arr(cmd, struct utxo *, 0);
@@ -465,7 +515,7 @@ static struct command_result *json_fundpsbt(struct command *cmd,
 		u32 utxo_weight;
 
 		utxo = wallet_find_utxo(utxos, cmd->ld->wallet,
-					cmd->ld->topology->tip->height,
+					current_height,
 					&diff,
 					*feerate_per_kw,
 					maxheight,
@@ -517,10 +567,11 @@ static struct command_result *json_fundpsbt(struct command *cmd,
 	}
 
 	if (all) {
-		/* Anything above 0 is "excess" */
+		/* We need to afford one non-dust output, at least. */
 		if (!inputs_sufficient(input, AMOUNT_SAT(0),
 				       *feerate_per_kw, *weight,
-				       &diff)) {
+				       &diff)
+		    || amount_sat_less(diff, chainparams->dust_limit)) {
 			if (!topology_synced(cmd->ld->topology))
 				return command_fail(cmd,
 						    FUNDING_STILL_SYNCING_BITCOIN,
@@ -530,10 +581,30 @@ static struct command_result *json_fundpsbt(struct command *cmd,
 					    " fees",
 					    tal_count(utxos));
 		}
+		*excess_as_change = false;
+	}
+
+	/* Turn excess into change. */
+	if (*excess_as_change) {
+		change = diff;
+		diff = AMOUNT_SAT(0);
+	} else {
+		change = AMOUNT_SAT(0);
+	}
+
+	/* If needed, add change output for emergency_sat */
+	if (!change_for_emergency(cmd->ld,
+				  *keep_emergency_funds,
+				  utxos, *feerate_per_kw, *weight,
+				  &diff, &change)) {
+		return command_fail(cmd, FUND_CANNOT_AFFORD_WITH_EMERGENCY,
+				    "We would not have enough left for min-emergency-msat %s",
+				    fmt_amount_sat(tmpctx,
+						   cmd->ld->emergency_sat));
 	}
 
 	return finish_psbt(cmd, utxos, *feerate_per_kw, *weight, diff, *reserve,
-			   locktime, *excess_as_change);
+			   locktime, change);
 }
 
 static const struct json_command fundpsbt_command = {
@@ -614,8 +685,8 @@ static struct command_result *json_utxopsbt(struct command *cmd,
 {
 	struct utxo **utxos;
 	u32 *feerate_per_kw, *weight, *min_witness_weight;
-	bool all, *reserved_ok, *excess_as_change;
-	struct amount_sat *amount, input, excess;
+	bool all, *reserved_ok, *excess_as_change, *keep_emergency_funds;
+	struct amount_sat *amount, input, excess, change;
 	u32 current_height, *locktime, *reserve;
 
 	if (!param(cmd, buffer, params,
@@ -631,8 +702,15 @@ static struct command_result *json_utxopsbt(struct command *cmd,
 			     &min_witness_weight, 0),
 		   p_opt_def("excess_as_change", param_bool,
 			     &excess_as_change, false),
+		   p_opt_def("opening_anchor_channel", param_bool,
+			     &keep_emergency_funds, false),
 		   NULL))
 		return command_param_failed();
+
+	/* If we have anchor channels, we definitely need to keep
+	 * emergency funds.  */
+	if (have_anchor_channel(cmd->ld))
+		*keep_emergency_funds = true;
 
 	all = amount_sat_eq(*amount, AMOUNT_SAT(-1ULL));
 
@@ -665,23 +743,54 @@ static struct command_result *json_utxopsbt(struct command *cmd,
 		*weight += utxo_spend_weight(utxo, *min_witness_weight);
 	}
 
-	/* For all, anything above 0 is "excess" */
-	if (!inputs_sufficient(input, all ? AMOUNT_SAT(0) : *amount,
-			       *feerate_per_kw, *weight, &excess)) {
-		return command_fail(cmd, FUND_CANNOT_AFFORD,
+	if (all) {
+		/* We need to afford one non-dust output, at least. */
+		if (!inputs_sufficient(input, AMOUNT_SAT(0),
+				       *feerate_per_kw, *weight,
+				       &excess)
+		    || amount_sat_less(excess, chainparams->dust_limit)) {
+			return command_fail(cmd, FUND_CANNOT_AFFORD,
+					    "Could not afford anything using UTXOs totalling %s with weight %u at feerate %u",
+					    type_to_string(tmpctx,
+							   struct amount_sat,
+							   &input),
+					    *weight, *feerate_per_kw);
+		}
+		*excess_as_change = false;
+	} else {
+		if (!inputs_sufficient(input, *amount,
+				       *feerate_per_kw, *weight, &excess)) {
+			return command_fail(cmd, FUND_CANNOT_AFFORD,
 				    "Could not afford %s using UTXOs totalling %s with weight %u at feerate %u",
-				    all ? "anything" :
-				    type_to_string(tmpctx,
-						   struct amount_sat,
-						   amount),
-				    type_to_string(tmpctx,
-						   struct amount_sat,
-						   &input),
-				    *weight, *feerate_per_kw);
+					    type_to_string(tmpctx,
+							   struct amount_sat,
+							   amount),
+					    type_to_string(tmpctx,
+							   struct amount_sat,
+							   &input),
+					    *weight, *feerate_per_kw);
+		}
+	}
+	if (*excess_as_change) {
+		change = excess;
+		excess = AMOUNT_SAT(0);
+	} else {
+		change = AMOUNT_SAT(0);
+	}
+
+	/* If needed, add change output for emergency_sat */
+	if (!change_for_emergency(cmd->ld,
+				  *keep_emergency_funds,
+				  utxos, *feerate_per_kw, *weight,
+				  &excess, &change)) {
+		return command_fail(cmd, FUND_CANNOT_AFFORD_WITH_EMERGENCY,
+				    "We would not have enough left for min-emergency-msat %s",
+				    fmt_amount_sat(tmpctx,
+						   cmd->ld->emergency_sat));
 	}
 
 	return finish_psbt(cmd, utxos, *feerate_per_kw, *weight, excess,
-			   *reserve, locktime, *excess_as_change);
+			   *reserve, locktime, change);
 }
 static const struct json_command utxopsbt_command = {
 	"utxopsbt",

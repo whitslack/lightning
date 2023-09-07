@@ -43,7 +43,7 @@ VG=VALGRIND=1 valgrind -q --error-exitcode=7
 VG_TEST_ARGS = --track-origins=yes --leak-check=full --show-reachable=yes --errors-for-leak-kinds=all
 endif
 
-ifeq ($(DEVELOPER),1)
+ifeq ($(DEBUGBUILD),1)
 DEV_CFLAGS=-DCCAN_TAKE_DEBUG=1 -DCCAN_TAL_DEBUG=1 -DCCAN_JSON_OUT_DEBUG=1
 else
 DEV_CFLAGS=
@@ -72,9 +72,9 @@ PYTEST_OPTS := -v -p no:logging $(PYTEST_OPTS)
 MY_CHECK_PYTHONPATH=$${PYTHONPATH}$${PYTHONPATH:+:}$(shell pwd)/contrib/pyln-client:$(shell pwd)/contrib/pyln-testing:$(shell pwd)/contrib/pyln-proto/:$(shell pwd)/external/lnprototest:$(shell pwd)/contrib/pyln-spec/bolt1:$(shell pwd)/contrib/pyln-spec/bolt2:$(shell pwd)/contrib/pyln-spec/bolt4:$(shell pwd)/contrib/pyln-spec/bolt7
 # Collect generated python files to be excluded from lint checks
 PYTHON_GENERATED= \
-	contrib/pyln-testing/pyln/testing/primitives_pb2.py \
-	contrib/pyln-testing/pyln/testing/node_pb2_grpc.py \
-	contrib/pyln-testing/pyln/testing/node_pb2.py \
+	contrib/pyln-grpc-proto/pyln/grpc/primitives_pb2.py \
+	contrib/pyln-grpc-proto/pyln/grpc/node_pb2_grpc.py \
+	contrib/pyln-grpc-proto/pyln/grpc/node_pb2.py \
 	contrib/pyln-testing/pyln/testing/grpc2py.py
 
 # Options to pass to cppcheck. Mostly used to exclude files that are
@@ -240,6 +240,9 @@ DEFAULT_TARGETS :=
 ifeq ("$(OS)-$(ARCH)", "Darwin-arm64")
 CPATH := /opt/homebrew/include
 LIBRARY_PATH := /opt/homebrew/lib
+LDFLAGS := -L/opt/homebrew/opt/sqlite/lib
+CPPFLAGS := -I/opt/homebrew/opt/sqlite/include
+PKG_CONFIG_PATH=/opt/homebrew/opt/sqlite/lib/pkgconfig
 else
 CPATH := /usr/local/include
 LIBRARY_PATH := /usr/local/lib
@@ -274,7 +277,7 @@ ifeq ($(HAVE_POSTGRES),1)
 LDLIBS += $(POSTGRES_LDLIBS)
 endif
 
-default: show-flags all-programs all-test-programs doc-all default-targets
+default: show-flags all-programs all-test-programs doc-all default-targets $(PYTHON_GENERATED)
 
 ifneq ($(SUPPRESS_GENERATION),1)
 FORCE = FORCE
@@ -363,19 +366,23 @@ ifneq ($(RUST),0)
 	include cln-rpc/Makefile
 	include cln-grpc/Makefile
 
-GRPC_GEN = contrib/pyln-testing/pyln/testing/node_pb2.py \
-	contrib/pyln-testing/pyln/testing/node_pb2_grpc.py \
-	contrib/pyln-testing/pyln/testing/primitives_pb2.py
+$(MSGGEN_GENALL)&: doc/schemas/*.request.json doc/schemas/*.schema.json
+	PYTHONPATH=contrib/msggen python3 contrib/msggen/msggen/__main__.py
+
+GRPC_GEN = \
+	contrib/pyln-grpc-proto/pyln/grpc/node_pb2.py \
+	contrib/pyln-grpc-proto/pyln/grpc/node_pb2_grpc.py \
+	contrib/pyln-grpc-proto/pyln/grpc/primitives_pb2.py
 
 ALL_TEST_GEN += $(GRPC_GEN)
 
-$(GRPC_GEN): cln-grpc/proto/node.proto cln-grpc/proto/primitives.proto
-	python -m grpc_tools.protoc -I cln-grpc/proto cln-grpc/proto/node.proto --python_out=contrib/pyln-testing/pyln/testing/ --grpc_python_out=contrib/pyln-testing/pyln/testing/ --experimental_allow_proto3_optional
-	python -m grpc_tools.protoc -I cln-grpc/proto cln-grpc/proto/primitives.proto --python_out=contrib/pyln-testing/pyln/testing/ --experimental_allow_proto3_optional
+$(GRPC_GEN)&: cln-grpc/proto/node.proto cln-grpc/proto/primitives.proto
+	python -m grpc_tools.protoc -I cln-grpc/proto cln-grpc/proto/node.proto --python_out=contrib/pyln-grpc-proto/pyln/grpc/ --grpc_python_out=contrib/pyln-grpc-proto/pyln/grpc/ --experimental_allow_proto3_optional
+	python -m grpc_tools.protoc -I cln-grpc/proto cln-grpc/proto/primitives.proto --python_out=contrib/pyln-grpc-proto/pyln/grpc/ --experimental_allow_proto3_optional
 	# The compiler assumes that the proto files are in the same
 	# directory structure as the generated files will be. Since we
 	# don't do that we need to path the files up.
-	find contrib/pyln-testing/pyln/testing/ -type f -name "*.py" -print0 | xargs -0 sed -i 's/^import \(.*\)_pb2 as .*__pb2/from . import \1_pb2 as \1__pb2/g'
+	find contrib/pyln-grpc-proto/pyln/ -type f -name "*.py" -print0 | xargs -0 sed -i 's/^import \(.*\)_pb2 as .*__pb2/from pyln.grpc import \1_pb2 as \1__pb2/g'
 
 endif
 
@@ -416,7 +423,7 @@ mkdocs.yml: $(MANPAGES:=.md)
 
 
 # Don't delete these intermediaries.
-.PRECIOUS: $(ALL_GEN_HEADERS) $(ALL_GEN_SOURCES)
+.PRECIOUS: $(ALL_GEN_HEADERS) $(ALL_GEN_SOURCES) $(PYTHON_GENERATED)
 
 # Every single object file.
 ALL_OBJS := $(ALL_C_SOURCES:.c=.o)
@@ -660,7 +667,7 @@ $(ALL_FUZZ_TARGETS):
 
 
 # Everything depends on the CCAN headers, and Makefile
-$(CCAN_OBJS) $(CDUMP_OBJS): $(CCAN_HEADERS) Makefile
+$(CCAN_OBJS) $(CDUMP_OBJS): $(CCAN_HEADERS) Makefile ccan_compat.h
 
 # Except for CCAN, we treat everything else as dependent on external/ bitcoin/ common/ wire/ and all generated headers, and Makefile
 $(ALL_OBJS): $(BITCOIN_HEADERS) $(COMMON_HEADERS) $(CCAN_HEADERS) $(WIRE_HEADERS) $(ALL_GEN_HEADERS) $(EXTERNAL_HEADERS) Makefile
@@ -686,6 +693,7 @@ default-targets: $(DEFAULT_TARGETS)
 
 distclean: clean
 	$(RM) ccan/config.h config.vars
+	$(RM) $(PYTHON_GENERATED)
 
 maintainer-clean: distclean
 	@echo 'This command is intended for maintainers to use; it'

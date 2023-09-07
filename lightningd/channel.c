@@ -244,6 +244,11 @@ struct channel *new_unsaved_channel(struct peer *peer,
 	/* closer not yet known */
 	channel->closer = NUM_SIDES;
 	channel->close_blockheight = NULL;
+	/* In case someone looks at channels before open negotiation,
+	 * initialize this with default */
+	channel->type = default_channel_type(channel,
+					     ld->our_features,
+					     peer->their_features);
 
 	/* BOLT-7b04b1461739c5036add61782d58ac490842d98b #9
 	 * | 222/223 | `option_dual_fund`
@@ -716,6 +721,31 @@ struct channel *find_channel_by_alias(const struct peer *peer,
 			return c;
 	}
 	return NULL;
+}
+
+bool have_anchor_channel(struct lightningd *ld)
+{
+	struct peer *p;
+	struct channel *channel;
+	struct peer_node_id_map_iter it;
+
+	for (p = peer_node_id_map_first(ld->peers, &it);
+	     p;
+	     p = peer_node_id_map_next(ld->peers, &it)) {
+		if (p->uncommitted_channel) {
+			/* FIXME: Assume anchors if supported */
+			if (feature_negotiated(ld->our_features,
+					       p->their_features,
+					       OPT_ANCHORS_ZERO_FEE_HTLC_TX))
+				return true;
+		}
+		list_for_each(&p->channels, channel, list) {
+			if (channel_type_has(channel->type,
+					     OPT_ANCHORS_ZERO_FEE_HTLC_TX))
+				return true;
+		}
+	}
+	return false;
 }
 
 void channel_set_last_tx(struct channel *channel,

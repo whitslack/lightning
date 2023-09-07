@@ -39,20 +39,9 @@ Pruning (`prune=n` option in `bitcoin.conf`) is partially supported, see [here](
 
 There are 4 supported installation options:
 
- - Installation from the [Ubuntu PPA][ppa].
  - Installation of a pre-compiled binary from the [release page][releases] on GitHub.
  - Using one of the [provided docker images][dockerhub] on the Docker Hub.
  - Compiling the source code yourself as described in the [installation documentation](doc/INSTALL.md).
-
-For the impatient here's the gist of it for Ubuntu:
-
-```bash
-sudo apt-get install -y software-properties-common
-sudo add-apt-repository -u ppa:lightningnetwork/ppa
-sudo apt-get install lightningd snapd
-sudo snap install bitcoin-core
-sudo ln -s /snap/bitcoin-core/current/bin/bitcoin{d,-cli} /usr/local/bin/
-```
 
 ### Starting `lightningd`
 
@@ -200,6 +189,8 @@ Command line options will always override the values in the configuration file.
 To use a configuration file, create a file named `config` within your top-level lightning directory or network subdirectory
 (eg. `~/.lightning/config` or `~/.lightning/bitcoin/config`).  See `man -l doc/lightningd-config.5`.
 
+A sample configuration file is available at `contrib/config-example`.
+
 ## Further information
 
 ### Pruning
@@ -235,7 +226,6 @@ You should also configure with `--enable-developer` to get additional checks and
 [discord]: https://discord.gg/mE9s4rc5un
 [telegram]: https://t.me/lightningd
 [docs]: https://lightning.readthedocs.org
-[ppa]: https://launchpad.net/~lightningnetwork/+archive/ubuntu/ppa
 [releases]: https://github.com/ElementsProject/lightning/releases
 [dockerhub]: https://hub.docker.com/r/elementsproject/lightningd/
 [jsonrpcspec]: https://www.jsonrpc.org/specification

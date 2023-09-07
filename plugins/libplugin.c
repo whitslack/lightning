@@ -500,6 +500,11 @@ bool command_usage_only(const struct command *cmd)
 	return cmd->usage_only;
 }
 
+bool command_deprecated_apis(const struct command *cmd)
+{
+	return deprecated_apis;
+}
+
 /* FIXME: would be good to support this! */
 bool command_check_only(const struct command *cmd)
 {
@@ -1357,8 +1362,8 @@ struct plugin_timer *plugin_timer_(struct plugin *p, struct timerel t,
 	return timer;
 }
 
-static void plugin_logv(struct plugin *p, enum log_level l,
-			const char *fmt, va_list ap)
+void plugin_logv(struct plugin *p, enum log_level l,
+		 const char *fmt, va_list ap)
 {
 	struct json_stream *js = new_json_stream(NULL, NULL, NULL);
 

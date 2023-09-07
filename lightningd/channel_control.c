@@ -27,21 +27,29 @@
 static void update_feerates(struct lightningd *ld, struct channel *channel)
 {
 	u8 *msg;
-	u32 feerate = unilateral_feerate(ld->topology);
+	u32 min_feerate;
+	bool anchors = channel_type_has_anchors(channel->type);
+	u32 feerate = unilateral_feerate(ld->topology, anchors);
 
 	/* Nothing to do if we don't know feerate. */
 	if (!feerate)
 		return;
 
+	/* For anchors, we just need the commitment tx to relay. */
+	if (anchors)
+		min_feerate = get_feerate_floor(ld->topology);
+	else
+		min_feerate = feerate_min(ld, NULL);
+
 	log_debug(ld->log,
 		  "update_feerates: feerate = %u, min=%u, max=%u, penalty=%u",
 		  feerate,
-		  feerate_min(ld, NULL),
+		  min_feerate,
 		  feerate_max(ld, NULL),
 		  penalty_feerate(ld->topology));
 
 	msg = towire_channeld_feerates(NULL, feerate,
-				       feerate_min(ld, NULL),
+				       min_feerate,
 				       feerate_max(ld, NULL),
 				       penalty_feerate(ld->topology));
 	subd_send_msg(channel->owner, take(msg));
@@ -616,6 +624,7 @@ bool peer_start_channeld(struct channel *channel,
 	struct secret last_remote_per_commit_secret;
 	secp256k1_ecdsa_signature *remote_ann_node_sig, *remote_ann_bitcoin_sig;
 	struct penalty_base *pbases;
+	u32 min_feerate;
 
 	hsmfd = hsm_get_client_fd(ld, &channel->peer->id,
 				  channel->dbid,
@@ -688,7 +697,7 @@ bool peer_start_channeld(struct channel *channel,
 
 	/* Warn once. */
 	if (ld->config.ignore_fee_limits)
-		log_debug(channel->log, "Ignoring fee limits!");
+		log_unusual(channel->log, "Ignoring fee limits!");
 
 	if (!wallet_remote_ann_sigs_load(tmpctx, channel->peer->ld->wallet,
 					 channel->dbid,
@@ -715,6 +724,12 @@ bool peer_start_channeld(struct channel *channel,
 		return false;
 	}
 
+	/* For anchors, we just need the commitment tx to relay. */
+	if (channel_type_has_anchors(channel->type))
+		min_feerate = get_feerate_floor(ld->topology);
+	else
+		min_feerate = feerate_min(ld, NULL);
+
 	initmsg = towire_channeld_init(tmpctx,
 				       chainparams,
 				       ld->our_features,
@@ -728,7 +743,7 @@ bool peer_start_channeld(struct channel *channel,
 				       &channel->our_config,
 				       &channel->channel_info.their_config,
 				       channel->fee_states,
-				       feerate_min(ld, NULL),
+				       min_feerate,
 				       feerate_max(ld, NULL),
 				       penalty_feerate(ld->topology),
 				       &channel->last_sig,
@@ -1079,6 +1094,10 @@ struct command_result *cancel_channel_before_broadcast(struct command *cmd,
 	}
 
 	tal_arr_expand(&cancel_channel->forgets, cmd);
+	/* Now, cmd will be ended by forget() or process_check_funding_broadcast(),
+	 * but in the shutdown case it might be freed first and those crash.  So instead
+	 * we make it a child if forgets so it will stay around at least that long! */
+	tal_steal(cancel_channel->forgets, cmd);
 
 	/* Check if the transaction is onchain. */
 	/* Note: The above check and this check can't completely ensure that

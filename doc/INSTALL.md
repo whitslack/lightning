@@ -167,7 +167,18 @@ To Build on FreeBSD
 
 OS version: FreeBSD 11.1-RELEASE or above
 
-Core Lightning is in the FreeBSD ports, so install it as any other port
+```
+pkg install git python py39-pip gmake libtool gmp sqlite3 \
+            postgresql13-client gettext autotools
+https://github.com/ElementsProject/lightning.git
+pip install --upgrade pip
+pip3 install mako
+./configure
+gmake -j$(nproc)
+gmake install
+```
+
+Alternately, Core Lightning is in the FreeBSD ports, so install it as any other port
 (dependencies are handled automatically):
 
     # pkg install c-lightning
@@ -198,11 +209,11 @@ Configure lightningd: copy `/usr/local/etc/lightningd-bitcoin.conf.sample` to
 To Build on OpenBSD
 --------------------
 
-OS version: OpenBSD 6.7
+OS version: OpenBSD 7.3
 
 Install dependencies:
 ```
-pkg_add git python gmake py3-pip libtool
+pkg_add git python gmake py3-pip libtool gettext-tools
 pkg_add automake # (select highest version, automake1.16.2 at time of writing)
 pkg_add autoconf # (select highest version, autoconf-2.69p2 at time of writing)
 ```
