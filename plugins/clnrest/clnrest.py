@@ -4,6 +4,7 @@ try:
     import sys
     import os
     import time
+    import multiprocessing
     from gunicorn import glogging  # noqa: F401
     from gunicorn.workers import sync  # noqa: F401
 
@@ -26,6 +27,7 @@ except ModuleNotFoundError as err:
                       'result': {'disable': str(err)}}))
     sys.exit(1)
 
+multiprocessing.set_start_method('fork')
 
 jobs = {}
 app = Flask(__name__)
@@ -66,10 +68,9 @@ def create_app():
     global app
     app.config['SECRET_KEY'] = os.urandom(24).hex()
     authorizations = {
-        "rune": {"type": "apiKey", "in": "header", "name": "Rune"},
-        "nodeid": {"type": "apiKey", "in": "header", "name": "Nodeid"}
+        "rune": {"type": "apiKey", "in": "header", "name": "Rune"}
     }
-    api = Api(app, version="1.0", title="Core Lightning Rest", description="Core Lightning REST API Swagger", authorizations=authorizations, security=["rune", "nodeid"])
+    api = Api(app, version="1.0", title="Core Lightning Rest", description="Core Lightning REST API Swagger", authorizations=authorizations, security=["rune"])
     api.add_namespace(rpcns, path="/v1")
 
 
