@@ -498,6 +498,7 @@ static struct command_result *json_fundpsbt(struct command *cmd,
 					      const jsmntok_t *params)
 {
 	struct utxo **utxos;
+	const struct utxo **excluded;
 	u32 *feerate_per_kw;
 	u32 *minconf, *weight, *min_witness_weight;
 	struct amount_sat *amount, input, diff, change;
@@ -537,6 +538,9 @@ static struct command_result *json_fundpsbt(struct command *cmd,
 	/* We keep adding until we meet their output requirements. */
 	utxos = tal_arr(cmd, struct utxo *, 0);
 
+	/* Either uneconomical at this feerate, or already included. */
+	excluded = tal_arr(cmd, const struct utxo *, 0);
+
 	input = AMOUNT_SAT(0);
 	while (!inputs_sufficient(input, *amount, *feerate_per_kw, *weight,
 				  &diff)) {
@@ -550,8 +554,10 @@ static struct command_result *json_fundpsbt(struct command *cmd,
 					*feerate_per_kw,
 					maxheight,
 					*nonwrapped,
-					cast_const2(const struct utxo **, utxos));
+					excluded);
+
 		if (utxo) {
+			tal_arr_expand(&excluded, utxo);
 			utxo_weight = utxo_spend_weight(utxo,
 							*min_witness_weight);
 			fee = amount_tx_fee(*feerate_per_kw, utxo_weight);
@@ -595,6 +601,8 @@ static struct command_result *json_fundpsbt(struct command *cmd,
 						     struct amount_sat,
 						     &diff));
 	}
+
+	tal_free(excluded);
 
 	if (all) {
 		/* We need to afford one non-dust output, at least. */

@@ -314,26 +314,35 @@ fi
 
 if [ "$VERIFY_RELEASE" = "true" ]; then
     echo "Verifying Release"
+    sumfile="SHA256SUMS-${VERSION}"
+    # Ensure that the release captains checksum exists at the desired location.
+    if [ ! -f "$sumfile" ]; then
+        echo "Can not find release captains checksum file \"$sumfile\"".
+        echo "You can download it from the repository at:"
+        echo "https://github.com/ElementsProject/lightning/releases/tag/$VERSION"
+        echo "Place it under the project root as \"$sumfile\"."
+        exit 1
+    fi
+    sumfile="$(pwd)/${sumfile}"
     cd release/
-    # Creating fake Fedora tar for SHA256SUMS match
-    # It is important for zipfile checksum match
-    touch clightning-v23.05-Fedora-28-amd64.tar.gz
-    # Creating SHA256SUMS
-	sha256sum clightning-"$VERSION"* > SHA256SUMS
-	# Replacing Fedora checksums from root file to release/SHA256SUMS
-	# because we do not have reproducible builds for Fedora
-	replace_fedora_sums=$(head -n 1 "../SHA256SUMS-$VERSION")
-	{ echo "$replace_fedora_sums"; tail -n +2 SHA256SUMS; } > SHA256SUMS.tmp && mv SHA256SUMS.tmp SHA256SUMS
-	# compare our and release captain's SHA256SUMS contents
-	if [ -f "SHA256SUMS" ] && cmp -s "SHA256SUMS" "../SHA256SUMS-$VERSION"; then
+    # Check that the release captains sum matches. Ignore missing entries as we 
+    # do not have a repro build for Fedora. Strictly this is not necessary here
+    # as we compare our checksums with the release captains checksums later, but
+    # it gives a direct hint which specific checksums don't match if so.
+    sha256sum --check --ignore-missing "${sumfile}"
+    # Creating SHA256SUMS, except Fedora (copy that from theirs)
+    grep 'bin-Fedora-28-amd64' "$sumfile" > SHA256SUMS
+    sha256sum clightning-"$VERSION"* | grep -v 'bin-Fedora-28-amd64' >> SHA256SUMS
+    # compare our and release captain's SHA256SUMS contents
+    if cmp -s SHA256SUMS "$sumfile"; then
         echo "SHA256SUMS are Identical"
     else
         echo "Error: SHA256SUMS do NOT Match"
-		exit 1
+	exit 1
     fi
-	# verify release captain signature
+    # verify release captain signature
     gpg --verify "../SHA256SUMS-$VERSION.asc"
-	# create ASCII-armored detached signature
+    # create ASCII-armored detached signature
     gpg -sb --armor < SHA256SUMS > SHA256SUMS.new
     echo "Verified Successfully! Signature Updated in release/SHA256SUMS.new"
 fi

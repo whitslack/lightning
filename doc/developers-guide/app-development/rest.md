@@ -1,6 +1,36 @@
+---
+title: "REST APIs"
+slug: "rest"
+hidden: false
+createdAt: "2023-09-05T09:54:01.784Z"
+updatedAt: "2023-09-05T09:54:01.784Z"
+---
+
 # CLNRest
 
 CLNRest is a lightweight Python-based core lightning plugin that transforms RPC calls into a REST service. By generating REST API endpoints, it enables the execution of Core Lightning's RPC methods behind the scenes and provides responses in JSON format.
+
+A complete documentation for the REST interface is available at [REST API REFERENCE](ref:get-a-list-of-all-valid-rpc-methods). 
+
+
+> 📘 Pro-tip
+> 
+> [REST API REFERENCE](ref:post_rpc_method_resource) can also be tested with your own server.
+>
+> By default, the base URL is set to connect with the Blockstream-hosted regtest node. 
+>
+> However, it can be configured to connect to your own cln node as described below:
+>
+> - Select `{protocol}://{ip}:{port}/` from Base URL dropdown on the right section of the page.
+>
+> - Click on the right side of the dropdown and configure `protocol`, `ip` and `port` values according to your setup.
+>
+> - The `ip` should be configured with your system's public IP address.
+>
+> - Default `rest-host` is `127.0.0.1` but this testing will require it to be `0.0.0.0`.
+>
+> Note: This setup is for **testing only**. It is **highly recommended** to test with _non-mainnet_ (regtest/testnet) setup only.
+
 
 ## Installation
 
@@ -31,23 +61,6 @@ Example curl command for POST will also require a `rune` header like below:
 
 With `-k` or `--insecure` option curl proceeds with the connection even if the SSL certificate cannot be verified.
 This option should be used only when testing with self signed certificate.
-
-### Swagger
-FIX SCREEN SHOTS PLEASE SHAHANA!
-
-<p float="left">
-    <img src="./.github/screenshots/Swagger.png" width="200" alt="Swagger Dashboard" />
-    <img src="./.github/screenshots/Swagger-auth.png" width="200" alt="Swagger Authorize" />
-    <img src="./.github/screenshots/Swagger-list-methods.png" width="200" alt="Swagger GET List Methods" />
-    <img src="./.github/screenshots/Swagger-rpc-method.png" width="200" alt="Swagger POST RPC Method" />
-</p>
-
-### Postman
-<p float="left">
-    <img src="./.github/screenshots/Postman.png" width="200" alt="Postman Headers">
-    <img src="./.github/screenshots/Postman-with-body.png" width="200" alt="Postman with JSON body">
-    <img src="./.github/screenshots/Postman-bkpr-plugin.png" width="200" alt="Postman bkpr plugin RPC">
-</p>
 
 ## Websocket Server
 Websocket server is available at `/ws` endpoint. clnrest queues up notifications received for a second then broadcasts them to listeners.
