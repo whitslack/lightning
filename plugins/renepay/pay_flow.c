@@ -115,7 +115,7 @@ static u32 shadow_one_flow(const struct gossmap *gossmap,
 	/* We only create shadow for extra CLTV delays, *not* for
 	 * amounts.  This is because with MPP our amounts are random
 	 * looking already. */
-	for (hop = 0; hop < MAX_SHADOW_LEN && pseudorand(1); hop++) {
+	for (hop = 0; hop < MAX_SHADOW_LEN && pseudorand(2); hop++) {
 		/* Try for a believable channel up to 10 times, then stop */
 		for (size_t i = 0; i < 10; i++) {
 			struct amount_sat cap;
@@ -124,7 +124,7 @@ static u32 shadow_one_flow(const struct gossmap *gossmap,
 			if (!gossmap_chan_set(chans[hop], dirs[hop])
 			    || !gossmap_chan_get_capacity(gossmap, chans[hop], &cap)
 			    /* This test is approximate, since amount would differ */
-			    || amount_msat_less_sat(amount, cap)) {
+			    || amount_msat_greater_sat(amount, cap)) {
 				chans[hop] = NULL;
 				continue;
 			}
@@ -172,8 +172,8 @@ static bool add_to_amounts(const struct gossmap *gossmap,
 	for (int i = num-2; i >= 0; i--) {
 		amounts[i] = amounts[i+1];
 		if (!amount_msat_add_fee(&amounts[i],
-					 flow_edge(f, i)->base_fee,
-					 flow_edge(f, i)->proportional_fee))
+					 flow_edge(f, i+1)->base_fee,
+					 flow_edge(f, i+1)->proportional_fee))
 			return false;
 	}
 
@@ -322,7 +322,7 @@ static void convert_and_attach_flows(struct payment *payment,
 		pf->cltv_delays[plen-1] = final_cltvs[i];
 		for (int j = (int)plen-2; j >= 0; j--) {
 			pf->cltv_delays[j] = pf->cltv_delays[j+1]
-				+ f->path[j]->half[f->dirs[j]].delay;
+				+ f->path[j+1]->half[f->dirs[j+1]].delay;
 		}
 		pf->amounts = tal_steal(pf, f->amounts);
 		pf->success_prob = f->success_prob;

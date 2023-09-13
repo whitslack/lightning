@@ -29,7 +29,7 @@ class ListMethodsResource(Resource):
 
 @rpcns.route("/<rpc_method>")
 class RpcMethodResource(Resource):
-    @rpcns.doc(security=[{"rune": [], "nodeid": []}])
+    @rpcns.doc(security=[{"rune": []}])
     @rpcns.doc(params={"rpc_method": (f"Name of the RPC method to be called")})
     @rpcns.expect(payload_model, validate=False)
     @rpcns.response(201, "Success")
@@ -48,7 +48,10 @@ class RpcMethodResource(Resource):
 
         try:
             if request.is_json:
-                payload = request.get_json()
+                if len(request.data) != 0:
+                    payload = request.get_json()
+                else:
+                    payload = {}
             else:
                 payload = request.form.to_dict()
             return call_rpc_method(plugin, rpc_method, payload), 201
