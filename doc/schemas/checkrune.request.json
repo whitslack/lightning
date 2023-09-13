@@ -32,6 +32,11 @@
           "description": "parameters for method"
         }
       ]
+    },
+    "filter": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "filter to apply to any successful result"
     }
   }
 }
