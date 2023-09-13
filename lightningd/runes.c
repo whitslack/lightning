@@ -569,8 +569,7 @@ static struct command_result *json_createrune(struct command *cmd,
 
 	ras = tal(cmd, struct rune_and_string);
 	ras->rune = rune_derive_start(cmd, cmd->ld->runes->master,
-				      tal_fmt(tmpctx, "%"PRIu64,
-					      cmd->ld->runes->next_unique_id));
+		tal_fmt(tmpctx, "%"PRIu64, cmd->ld->runes->next_unique_id ? cmd->ld->runes->next_unique_id : 0));
 	ras->runestr = rune_to_base64(tmpctx, ras->rune);
 
 	for (size_t i = 0; i < tal_count(restrs); i++)
