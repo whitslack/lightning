@@ -1208,10 +1208,7 @@ const struct forwarding *wallet_forwarded_payments_get(struct wallet *w,
 						       const tal_t *ctx,
 						       enum forward_status state,
 						       const struct short_channel_id *chan_in,
-						       const struct short_channel_id *chan_out,
-						       const enum wait_index *listindex,
-						       u64 liststart,
-						       const u32 *listlimit);
+						       const struct short_channel_id *chan_out);
 
 /**
  * Delete a particular forward entry
