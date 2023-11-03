@@ -4643,20 +4643,13 @@ static bool wallet_forwarded_payment_update(struct wallet *w,
 	 * one without the htlc_out restriction).*/
 	stmt = db_prepare_v2(w->db,
 			     SQL("UPDATE forwards SET"
-				 "  updated_index=?"
-				 ", in_msatoshi=?"
+				 "  in_msatoshi=?"
 				 ", out_msatoshi=?"
 				 ", state=?"
 				 ", resolved_time=?"
 				 ", failcode=?"
 				 ", forward_style=?"
 				 " WHERE in_htlc_id=? AND in_channel_scid=?"));
-	db_bind_u64(stmt,
-		    forward_index_update_status(w->ld,
-						state,
-						*channel_scid_or_local_alias(in->key.channel),
-						in->msat,
-						out ? channel_scid_or_local_alias(out->key.channel) : NULL));
 	db_bind_amount_msat(stmt, &in->msat);
 
 	if (out) {
@@ -4703,7 +4696,6 @@ void wallet_forwarded_payment_add(struct wallet *w, const struct htlc_in *in,
 {
 	struct db_stmt *stmt;
 	struct timeabs *resolved_time;
-	u64 id;
 
 	if (state == FORWARD_SETTLED || state == FORWARD_FAILED) {
 		resolved_time = tal(tmpctx, struct timeabs);
@@ -4717,8 +4709,7 @@ void wallet_forwarded_payment_add(struct wallet *w, const struct htlc_in *in,
 
 	stmt = db_prepare_v2(w->db,
 			     SQL("INSERT INTO forwards ("
-				 "  rowid"
-				 ", in_htlc_id"
+				 "  in_htlc_id"
 				 ", out_htlc_id"
 				 ", in_channel_scid"
 				 ", out_channel_scid"
@@ -4729,14 +4720,7 @@ void wallet_forwarded_payment_add(struct wallet *w, const struct htlc_in *in,
 				 ", resolved_time"
 				 ", failcode"
 				 ", forward_style"
-				 ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);"));
-	id = forward_index_created(w->ld,
-				   state,
-				   *channel_scid_or_local_alias(in->key.channel),
-				   in->msat,
-				   out ? channel_scid_or_local_alias(out->key.channel) : NULL);
-
-	db_bind_u64(stmt, id);
+				 ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);"));
 	db_bind_u64(stmt, in->key.id);
 
 	/* FORWARD_LOCAL_FAILED may occur before we get htlc_out */
@@ -5029,15 +5013,6 @@ bool wallet_forward_delete(struct wallet *w,
 	db_exec_prepared_v2(stmt);
 	changed = db_count_changes(stmt) != 0;
 	tal_free(stmt);
-
-	if (changed) {
-		/* FIXME: We don't set in->msat or out here, since that would
-		 * need an extra lookup */
-		forward_index_deleted(w->ld,
-				      state,
-				      *chan_in,
-				      NULL, NULL);
-	}
 
 	return changed;
 }
