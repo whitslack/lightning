@@ -5,9 +5,8 @@
 
 struct lightningd;
 
-/* This WAIT_SUBSYSTEM_X corresponds to listXs */
+/* This WAIT_SUBSYSTEM_X corresponds to listX */
 enum wait_subsystem {
-	WAIT_SUBSYSTEM_FORWARD,
 	WAIT_SUBSYSTEM_SENDPAY,
 	WAIT_SUBSYSTEM_INVOICE,
 };
