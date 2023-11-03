@@ -20,7 +20,6 @@ struct waiter {
 
 
 static const char *subsystem_names[] = {
-	"sendpays",
 	"invoices",
 };
 
@@ -45,8 +44,6 @@ const char *wait_index_name(enum wait_index index)
 const char *wait_subsystem_name(enum wait_subsystem subsystem)
 {
 	switch (subsystem) {
-	case WAIT_SUBSYSTEM_SENDPAY:
-		return subsystem_names[subsystem];
 	case WAIT_SUBSYSTEM_INVOICE:
 		return subsystem_names[subsystem];
 	}
