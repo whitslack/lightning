@@ -924,7 +924,6 @@
             "ListDatastore.datastore[]": 1
         },
         "ListforwardsForwards": {
-            "ListForwards.forwards[].created_index": 12,
             "ListForwards.forwards[].fee_msat": 7,
             "ListForwards.forwards[].in_channel": 1,
             "ListForwards.forwards[].in_htlc_id": 10,
@@ -935,8 +934,7 @@
             "ListForwards.forwards[].payment_hash": 6,
             "ListForwards.forwards[].received_time": 4,
             "ListForwards.forwards[].status": 3,
-            "ListForwards.forwards[].style": 9,
-            "ListForwards.forwards[].updated_index": 13
+            "ListForwards.forwards[].style": 9
         },
         "ListforwardsRequest": {
             "ListForwards.in_channel": 2,
@@ -3572,10 +3570,6 @@
             "added": "pre-v0.10.1",
             "deprecated": false
         },
-        "ListForwards.forwards[].created_index": {
-            "added": "v23.11",
-            "deprecated": false
-        },
         "ListForwards.forwards[].fee_msat": {
             "added": "pre-v0.10.1",
             "deprecated": false
@@ -3614,10 +3608,6 @@
         },
         "ListForwards.forwards[].style": {
             "added": "pre-v0.10.1",
-            "deprecated": false
-        },
-        "ListForwards.forwards[].updated_index": {
-            "added": "v23.11",
             "deprecated": false
         },
         "ListForwards.in_channel": {
