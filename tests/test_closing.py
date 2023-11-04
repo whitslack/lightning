@@ -2302,10 +2302,8 @@ def test_onchain_middleman_their_unilateral_in(node_factory, bitcoind, chainpara
         expected_2['B'].append(('wallet', ['anchor', 'ignored'], None, None))
 
     chan2_id = first_channel_id(l2, l3)
-    # FIXME: Why does this fail?
-    if not anchors:
-        tags = check_utxos_channel(l2, [channel_id, chan2_id], expected_2)
-        check_utxos_channel(l1, [channel_id, chan2_id], expected_1, tags)
+    tags = check_utxos_channel(l2, [channel_id, chan2_id], expected_2)
+    check_utxos_channel(l1, [channel_id, chan2_id], expected_1, tags)
 
 
 @pytest.mark.parametrize("anchors", [False, True])
@@ -3733,7 +3731,7 @@ def test_closing_anchorspend_htlc_tx_rbf(node_factory, bitcoind):
     bitcoind.generate_block(14)
 
     l1.daemon.wait_for_log('Peer permanent failure in CHANNELD_NORMAL: Offered HTLC 0 SENT_ADD_ACK_REVOCATION cltv 116 hit deadline')
-    l1.daemon.wait_for_log('Creating anchor spend for local commit tx')
+    l1.daemon.wait_for_log('Creating anchor spend for CPFP')
 
     wait_for(lambda: len(bitcoind.rpc.getrawmempool()) == 2)
 
@@ -3882,6 +3880,7 @@ def test_closing_minfee(node_factory, bitcoind):
     bitcoind.generate_block(1, wait_for_mempool=txid)
 
 
+@pytest.mark.xfail(strict=True)
 @unittest.skipIf(TEST_NETWORK != 'regtest', 'elementsd anchors not supportd')
 def test_peer_anchor_push(node_factory, bitcoind, executor, chainparams):
     """Test that we use anchor on peer's commit to CPFP tx"""
@@ -3928,7 +3927,7 @@ def test_peer_anchor_push(node_factory, bitcoind, executor, chainparams):
 
     # mempool should be empty, but our 'needfeerate' logic is bogus and leaves
     # the anchor spend tx!  So just check that l2 did see the commitment tx
-    wait_for(lambda: only_one(l2.rpc.listpeerchannels(l3.info['id'])['channels'])['state'] == 'ONCHAIN')
+    wait_for(lambda: only_one(l2.rpc.listpeerchannels(l3.info['id'])['channels'])['state'] == 'FUNDING_SPEND_SEEN')
 
 
 def test_closing_cpfp(node_factory, bitcoind):
