@@ -441,9 +441,9 @@ void resend_closing_transactions(struct lightningd *ld)
 void channel_errmsg(struct channel *channel,
 		    struct peer_fd *peer_fd,
 		    const char *desc,
-		    bool warning,
-		    bool aborted UNUSED,
-		    const u8 *err_for_them)
+		    const u8 *err_for_them,
+		    bool disconnect,
+		    bool warning)
 {
 	/* Clean up any in-progress open attempts */
 	channel_cleanup_commands(channel, desc);
@@ -458,7 +458,7 @@ void channel_errmsg(struct channel *channel,
 	/* No peer_fd means a subd crash or disconnection. */
 	if (!peer_fd) {
 		/* If the channel is unsaved, we forget it */
-		channel_fail_transient(channel, true, "%s: %s",
+		channel_fail_transient(channel, disconnect, "%s: %s",
 				       channel->owner->name, desc);
 		return;
 	}
@@ -472,7 +472,7 @@ void channel_errmsg(struct channel *channel,
 	 * would recover after a reconnect.  So we downgrade, but snark
 	 * about it in the logs. */
 	if (!err_for_them && strends(desc, "internal error")) {
-		channel_fail_transient(channel, true, "%s: %s",
+		channel_fail_transient(channel, disconnect, "%s: %s",
 				       channel->owner->name,
 				       "lnd sent 'internal error':"
 				       " let's give it some space");
@@ -481,7 +481,7 @@ void channel_errmsg(struct channel *channel,
 
 	/* This is us, sending a warning.  */
 	if (warning) {
-		channel_fail_transient(channel, true, "%s sent %s",
+		channel_fail_transient(channel, disconnect, "%s sent %s",
 				       channel->owner->name,
 				       desc);
 		return;
@@ -1578,8 +1578,9 @@ void peer_spoke(struct lightningd *ld, const u8 *msg)
 	bool dual_fund;
 	u8 *error;
 	int fds[2];
+	char *errmsg;
 
-	if (!fromwire_connectd_peer_spoke(msg, &id, &connectd_counter, &msgtype, &channel_id))
+	if (!fromwire_connectd_peer_spoke(msg, msg, &id, &connectd_counter, &msgtype, &channel_id, &errmsg))
 		fatal("Connectd gave bad CONNECTD_PEER_SPOKE message %s",
 		      tal_hex(msg, msg));
 
@@ -1596,13 +1597,25 @@ void peer_spoke(struct lightningd *ld, const u8 *msg)
 			goto send_error;
 		}
 
-		/* If channel is active, we raced, so ignore this:
-		 * subd will get it soon. */
 		if (channel_state_wants_peercomms(channel->state)) {
-			log_debug(channel->log,
-				  "channel already active");
-			if (!channel->owner &&
-			    channel->state == DUALOPEND_AWAITING_LOCKIN) {
+			/* If they send an error, handle it immediately. */
+			if (errmsg) {
+				channel_fail_permanent(channel, REASON_REMOTE,
+						       "They sent %s", errmsg);
+				return;
+			}
+
+			/* If channel is active there are two possibilities:
+			 * 1. We have started subd, but channeld hasn't processed
+			 *    the connectd_peer_connect_subd message yet.
+			 * 2. subd exited */
+			if (channel->owner) {
+				/* We raced... */
+				return;
+			}
+
+			log_debug(channel->log, "channel already active");
+			if (channel->state == DUALOPEND_AWAITING_LOCKIN) {
 				if (socketpair(AF_LOCAL, SOCK_STREAM, 0, fds) != 0) {
 					log_broken(ld->log,
 						   "Failed to create socketpair: %s",
@@ -2431,9 +2444,7 @@ static struct command_result *json_disconnect(struct command *cmd,
 				    channel_state_name(channel));
 	}
 
-	subd_send_msg(peer->ld->connectd,
-		      take(towire_connectd_discard_peer(NULL, &peer->id,
-							peer->connectd_counter)));
+	force_peer_disconnect(cmd->ld, peer, "disconnect command");
 
 	/* Connectd tells us when it's finally disconnected */
 	dc = tal(cmd, struct disconnect_command);

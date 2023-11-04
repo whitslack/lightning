@@ -28,30 +28,6 @@ static struct gossmap *get_gossmap(void)
 	return global_gossmap;
 }
 
-/* Convenience global since route_score_fuzz doesn't take args. 0 to 1. */
-static double fuzz;
-
-/* Prioritize costs over distance, but with fuzz.  Cost must be
- * the same when the same channel queried, so we base it on that. */
-static u64 route_score_fuzz(u32 distance,
-			    struct amount_msat cost,
-			    struct amount_msat risk,
-			    int dir UNUSED,
-			    const struct gossmap_chan *c)
-{
-	u64 costs = cost.millisatoshis + risk.millisatoshis; /* Raw: score */
-	/* Use the literal pointer, since it's stable. */
-	u64 h = siphash24(siphash_seed(), &c, sizeof(c));
-
-	/* Use distance as the tiebreaker */
-	costs += distance;
-
-	/* h / (UINT64_MAX / 2.0) is between 0 and 2. */
-	costs *= (h / (double)(UINT64_MAX / 2) - 1) * fuzz;
-
-	return costs;
-}
-
 static bool can_carry(const struct gossmap *map,
 		      const struct gossmap_chan *c,
 		      int dir,
@@ -110,74 +86,54 @@ static void json_add_route_hop(struct json_stream *js,
 	json_object_end(js);
 }
 
-static struct command_result *json_getroute(struct command *cmd,
-					    const char *buffer,
-					    const jsmntok_t *params)
-{
+struct getroute_info {
 	struct node_id *destination;
 	struct node_id *source;
 	struct amount_msat *msat;
 	u32 *cltv;
 	/* risk factor 12.345% -> riskfactor_millionths = 12345000 */
-	u64 *riskfactor_millionths, *fuzz_millionths;
+	u64 *riskfactor_millionths;
 	struct route_exclusion **excluded;
 	u32 *max_hops;
+};
+
+static struct command_result *try_route(struct command *cmd,
+					struct gossmap *gossmap,
+					struct getroute_info *info)
+{
 	const struct dijkstra *dij;
 	struct route_hop *route;
 	struct gossmap_node *src, *dst;
 	struct json_stream *js;
-	struct gossmap *gossmap;
-
-	if (!param(cmd, buffer, params,
-		   p_req("id", param_node_id, &destination),
-		   p_req("amount_msat|msatoshi", param_msat, &msat),
-		   p_req("riskfactor", param_millionths, &riskfactor_millionths),
-		   p_opt_def("cltv", param_number, &cltv, 9),
-		   p_opt_def("fromid", param_node_id, &source, local_id),
-		   p_opt_def("fuzzpercent", param_millionths, &fuzz_millionths,
-			     5000000),
-		   p_opt("exclude", param_route_exclusion_array, &excluded),
-		   p_opt_def("maxhops", param_number, &max_hops, ROUTING_MAX_HOPS),
-		   NULL))
-		return command_param_failed();
-
-	/* Convert from percentage */
-	fuzz = *fuzz_millionths / 100.0 / 1000000.0;
-	if (fuzz > 1.0)
-		return command_fail_badparam(cmd, "fuzzpercent",
-					     buffer, params,
-					     "should be <= 100");
-
-	gossmap = get_gossmap();
-	src = gossmap_find_node(gossmap, source);
+	src = gossmap_find_node(gossmap, info->source);
 	if (!src)
 		return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
 				    "%s: unknown source node_id (no public channels?)",
-				    type_to_string(tmpctx, struct node_id, source));
+				    type_to_string(tmpctx, struct node_id, info->source));
 
-	dst = gossmap_find_node(gossmap, destination);
+	dst = gossmap_find_node(gossmap, info->destination);
 	if (!dst)
 		return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
 				    "%s: unknown destination node_id (no public channels?)",
-				    type_to_string(tmpctx, struct node_id, destination));
+				    type_to_string(tmpctx, struct node_id, info->destination));
 
-	fuzz = 0;
-	dij = dijkstra(tmpctx, gossmap, dst, *msat,
-		       *riskfactor_millionths / 1000000.0,
-		       can_carry, route_score_fuzz, excluded);
-	route = route_from_dijkstra(dij, gossmap, dij, src, *msat, *cltv);
+	dij = dijkstra(tmpctx, gossmap, dst, *info->msat,
+		       *info->riskfactor_millionths / 1000000.0,
+		       can_carry, route_score_cheaper, info->excluded);
+	route = route_from_dijkstra(dij, gossmap, dij, src,
+				    *info->msat, *info->cltv);
 	if (!route)
 		return command_fail(cmd, PAY_ROUTE_NOT_FOUND, "Could not find a route");
 
 	/* If it's too far, fall back to using shortest path. */
-	if (tal_count(route) > *max_hops) {
-		plugin_notify_message(cmd, LOG_INFORM, "Cheapest route %zu hops: seeking shorter (no fuzz)",
+	if (tal_count(route) > *info->max_hops) {
+		plugin_notify_message(cmd, LOG_INFORM, "Cheapest route %zu hops: seeking shorter",
 				      tal_count(route));
-		dij = dijkstra(tmpctx, gossmap, dst, *msat,
-			       *riskfactor_millionths / 1000000.0,
-			       can_carry, route_score_shorter, excluded);
-		route = route_from_dijkstra(dij, gossmap, dij, src, *msat, *cltv);
-		if (tal_count(route) > *max_hops)
+		dij = dijkstra(tmpctx, gossmap, dst, *info->msat,
+			       *info->riskfactor_millionths / 1000000.0,
+			       can_carry, route_score_shorter, info->excluded);
+		route = route_from_dijkstra(dij, gossmap, dij, src, *info->msat, *info->cltv);
+		if (tal_count(route) > *info->max_hops)
 			return command_fail(cmd, PAY_ROUTE_NOT_FOUND, "Shortest route was %zu",
 					    tal_count(route));
 	}
@@ -190,6 +146,147 @@ static struct command_result *json_getroute(struct command *cmd,
 	json_array_end(js);
 
 	return command_finished(cmd, js);
+}
+
+static struct gossmap_localmods *
+gossmods_from_listpeerchannels(const tal_t *ctx,
+			       struct plugin *plugin,
+			       struct gossmap *gossmap,
+			       const char *buf,
+			       const jsmntok_t *toks)
+{
+	struct gossmap_localmods *mods = gossmap_localmods_new(ctx);
+	const jsmntok_t *channels, *channel;
+	size_t i;
+
+	channels = json_get_member(buf, toks, "channels");
+	json_for_each_arr(i, channel, channels) {
+		struct short_channel_id scid;
+		int dir;
+		bool connected;
+		struct node_id dst;
+		struct amount_msat capacity;
+		const char *state, *err;
+
+		/* scid/direction may not exist. */
+		scid.u64 = 0;
+		capacity = AMOUNT_MSAT(0);
+		err = json_scan(tmpctx, buf, channel,
+				"{short_channel_id?:%,"
+				"direction?:%,"
+				"spendable_msat?:%,"
+				"peer_connected:%,"
+				"state:%,"
+				"peer_id:%}",
+				JSON_SCAN(json_to_short_channel_id, &scid),
+				JSON_SCAN(json_to_int, &dir),
+				JSON_SCAN(json_to_msat, &capacity),
+				JSON_SCAN(json_to_bool, &connected),
+				JSON_SCAN_TAL(tmpctx, json_strdup, &state),
+				JSON_SCAN(json_to_node_id, &dst));
+		if (err) {
+			plugin_err(plugin,
+				   "Bad listpeerchannels.channels %zu: %s",
+				   i, err);
+		}
+
+		/* Unusable if no scid (yet) */
+		if (scid.u64 == 0)
+			continue;
+
+		/* Disable if in bad state, or disconnected */
+		if (!streq(state, "CHANNELD_NORMAL")
+		    && !streq(state, "CHANNELD_AWAITING_SPLICE")) {
+			goto disable;
+		}
+
+		if (!connected) {
+			goto disable;
+		}
+
+		/* FIXME: features? */
+		gossmap_local_addchan(mods, &local_id, &dst, &scid, NULL);
+		gossmap_local_updatechan(mods, &scid,
+					 AMOUNT_MSAT(0), capacity,
+					 /* We don't charge ourselves fees */
+					 0, 0, 0,
+					 true,
+					 dir);
+		continue;
+
+	disable:
+		/* Only apply fake "disabled" if channel exists */
+		if (gossmap_find_chan(gossmap, &scid)) {
+			gossmap_local_updatechan(mods, &scid,
+						 AMOUNT_MSAT(0), AMOUNT_MSAT(0),
+						 0, 0, 0,
+						 false,
+						 dir);
+		}
+	}
+
+	return mods;
+}
+
+static struct command_result *
+listpeerchannels_getroute_done(struct command *cmd,
+			       const char *buf,
+			       const jsmntok_t *result,
+			       struct getroute_info *info)
+{
+	struct gossmap *gossmap;
+	struct gossmap_localmods *mods;
+	struct command_result *res;
+
+	/* Get local knowledge */
+	gossmap = get_gossmap();
+	mods = gossmods_from_listpeerchannels(tmpctx, cmd->plugin,
+					      gossmap, buf, result);
+
+	/* Overlay local knowledge for dijkstra */
+	gossmap_apply_localmods(gossmap, mods);
+	res = try_route(cmd, gossmap, info);
+	gossmap_remove_localmods(gossmap, mods);
+
+	return res;
+}
+
+static struct command_result *listpeerchannels_err(struct command *cmd,
+						   const char *buf,
+						   const jsmntok_t *result,
+						   struct getroute_info *info)
+{
+	plugin_err(cmd->plugin,
+		   "Bad listpeerchannels: %.*s",
+		   json_tok_full_len(result),
+		   json_tok_full(buf, result));
+}
+
+static struct command_result *json_getroute(struct command *cmd,
+					    const char *buffer,
+					    const jsmntok_t *params)
+{
+	struct getroute_info *info = tal(cmd, struct getroute_info);
+	struct out_req *req;
+	u64 *fuzz_ignored;
+
+	if (!param(cmd, buffer, params,
+		   p_req("id", param_node_id, &info->destination),
+		   p_req("amount_msat|msatoshi", param_msat, &info->msat),
+		   p_req("riskfactor", param_millionths, &info->riskfactor_millionths),
+		   p_opt_def("cltv", param_number, &info->cltv, 9),
+		   p_opt_def("fromid", param_node_id, &info->source, local_id),
+		   p_opt("fuzzpercent", param_millionths, &fuzz_ignored),
+		   p_opt("exclude", param_route_exclusion_array, &info->excluded),
+		   p_opt_def("maxhops", param_number, &info->max_hops, ROUTING_MAX_HOPS),
+		   NULL))
+		return command_param_failed();
+
+	/* Add local info */
+	req = jsonrpc_request_start(cmd->plugin, cmd, "listpeerchannels",
+				    listpeerchannels_getroute_done,
+				    listpeerchannels_err, info);
+	return send_outreq(cmd->plugin, req);
 }
 
 HTABLE_DEFINE_TYPE(struct node_id, node_id_keyof, node_id_hash, node_id_eq,
@@ -637,7 +734,7 @@ static const struct plugin_command commands[] = {
 		"Primitive route command",
 		"Show route to {id} for {msatoshi}, using {riskfactor} and optional {cltv} (default 9). "
 		"If specified search from {fromid} otherwise use this node as source. "
-		"Randomize the route with up to {fuzzpercent} (default 5.0). "
+		"Randomize the route with up to {fuzzpercent} (ignored)). "
 		"{exclude} an array of short-channel-id/direction (e.g. [ '564334x877x1/0', '564195x1292x0/1' ]) "
 		"or node-id from consideration. "
 		"Set the {maxhops} the route can take (default 20).",

@@ -759,11 +759,7 @@ def test_openchannel_hook_chaining(node_factory, bitcoind):
     # the third plugin must now not be called anymore
     assert not l2.daemon.is_in_log("reject on principle")
 
-    if not EXPERIMENTAL_DUAL_FUND:
-        wait_for(lambda: l1.rpc.listpeers()['peers'] == [])
-        l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
-    else:
-        assert only_one(l1.rpc.listpeers()['peers'])['connected']
+    assert only_one(l1.rpc.listpeers()['peers'])['connected']
     # 100000sat is good for hook_accepter, so it should fail 'on principle'
     # at third hook openchannel_reject.py
     with pytest.raises(RpcError, match=r'reject on principle'):
@@ -2102,6 +2098,8 @@ def test_coin_movement_notices(node_factory, bitcoind, chainparams):
     # send a payment (originator)
     inv = l1.rpc.invoice(amount // 2, "second", "desc")
     payment_hash21 = inv['payment_hash']
+    # Make sure previous completely settled
+    wait_for(lambda: only_one(l2.rpc.listpeerchannels(l1.info['id'])['channels'])['htlcs'] == [])
     route = l2.rpc.getroute(l1.info['id'], amount // 2, 1)['route']
     l2.rpc.sendpay(route, payment_hash21, payment_secret=inv['payment_secret'])
     l2.rpc.waitsendpay(payment_hash21)

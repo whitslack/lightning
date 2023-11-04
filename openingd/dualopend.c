@@ -333,8 +333,8 @@ static void negotiation_aborted(struct state *state, const char *why, bool abort
 {
 	status_debug("aborted opening negotiation: %s", why);
 
-	/* Tell master that funding failed. */
-	peer_failed_received_errmsg(state->pps, why, aborted);
+	/* Tell master that funding failed (don't disconnect if we aborted) */
+	peer_failed_received_errmsg(state->pps, !aborted, why);
 }
 
 /* Softer version of 'warning' (we don't disconnect)
@@ -976,7 +976,7 @@ static void handle_dev_memleak(struct state *state, const u8 *msg)
 	memleak_scan_obj(memtable, state);
 
 	/* If there's anything left, dump it to logs, and return true. */
-	found_leak = dump_memleak(memtable, memleak_status_broken);
+	found_leak = dump_memleak(memtable, memleak_status_broken, NULL);
 	wire_sync_write(REQ_FD,
 			take(towire_dualopend_dev_memleak_reply(NULL,
 							        found_leak)));
