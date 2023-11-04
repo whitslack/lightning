@@ -299,32 +299,18 @@ static void add_htlcs(struct bitcoin_tx ***txs,
 
 /* FIXME: We could cache these. */
 struct bitcoin_tx **channel_txs(const tal_t *ctx,
+				const struct bitcoin_outpoint *funding,
+				struct amount_sat funding_sats,
 				const struct htlc ***htlcmap,
 				struct wally_tx_output *direct_outputs[NUM_SIDES],
 				const u8 **funding_wscript,
 				const struct channel *channel,
 				const struct pubkey *per_commitment_point,
 				u64 commitment_number,
-				enum side side)
-{
-	return channel_splice_txs(ctx, &channel->funding, channel->funding_sats,
-				  htlcmap, direct_outputs, funding_wscript,
-				  channel, per_commitment_point,
-				  commitment_number, side, 0, 0);
-}
-
-struct bitcoin_tx **channel_splice_txs(const tal_t *ctx,
-				       const struct bitcoin_outpoint *funding,
-				       struct amount_sat funding_sats,
-				       const struct htlc ***htlcmap,
-				       struct wally_tx_output *direct_outputs[NUM_SIDES],
-				       const u8 **funding_wscript,
-				       const struct channel *channel,
-				       const struct pubkey *per_commitment_point,
-				       u64 commitment_number,
-				       enum side side,
-				       s64 splice_amnt,
-				       s64 remote_splice_amnt)
+				enum side side,
+				s64 splice_amnt,
+				s64 remote_splice_amnt,
+				int *other_anchor_outnum)
 {
 	struct bitcoin_tx **txs;
 	const struct htlc **committed;
@@ -378,7 +364,7 @@ struct bitcoin_tx **channel_splice_txs(const tal_t *ctx,
 	    commitment_number ^ channel->commitment_number_obscurer,
 	    channel_has(channel, OPT_ANCHOR_OUTPUTS),
 	    channel_has(channel, OPT_ANCHORS_ZERO_FEE_HTLC_TX),
-	    side);
+	    side, other_anchor_outnum);
 
 	/* Set the remote/local pubkeys on the commitment tx psbt */
 	psbt_input_add_pubkey(txs[0]->psbt, 0,

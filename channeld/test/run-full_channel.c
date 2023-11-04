@@ -364,6 +364,7 @@ int main(int argc, const char *argv[])
 	bool option_anchor_outputs = false;
 	bool option_anchors_zero_fee_htlc_tx = false;
 	u32 blockheight = 0;
+	int local_anchor;
 	size_t i;
 
 	chainparams = chainparams_for_network("bitcoin");
@@ -535,19 +536,22 @@ int main(int argc, const char *argv[])
 			   to_local,
 			   to_remote,
 			   NULL, &htlc_map, NULL, 0x2bb038521914 ^ 42,
-			   option_anchor_outputs, option_anchors_zero_fee_htlc_tx, LOCAL);
+			   option_anchor_outputs, option_anchors_zero_fee_htlc_tx,
+			   LOCAL, &local_anchor);
 
-	txs = channel_txs(tmpctx,
+	txs = channel_txs(tmpctx, &funding, funding_amount,
 			  &htlc_map, NULL, &funding_wscript_alt,
-			  lchannel, &local_per_commitment_point, 42, LOCAL);
+			  lchannel, &local_per_commitment_point, 42, LOCAL, 0, 0,
+			  &local_anchor);
 	assert(tal_count(txs) == 1);
 	assert(tal_count(htlc_map) == 2);
 	assert(scripteq(funding_wscript_alt, funding_wscript));
 	tx_must_be_eq(txs[0], raw_tx);
 
-	txs2 = channel_txs(tmpctx,
+	txs2 = channel_txs(tmpctx, &funding, funding_amount,
 			   &htlc_map, NULL, &funding_wscript,
-			   rchannel, &local_per_commitment_point, 42, REMOTE);
+			   rchannel, &local_per_commitment_point, 42, REMOTE, 0, 0,
+			   &local_anchor);
 	txs_must_be_eq(txs, txs2);
 
 	/* BOLT #3:
@@ -573,11 +577,15 @@ int main(int argc, const char *argv[])
 	assert(lchannel->view[REMOTE].owed[REMOTE].millisatoshis
 	       == rchannel->view[LOCAL].owed[LOCAL].millisatoshis);
 
-	txs = channel_txs(tmpctx, &htlc_map, NULL, &funding_wscript,
-			  lchannel, &local_per_commitment_point, 42, LOCAL);
+	txs = channel_txs(tmpctx, &funding, funding_amount,
+			  &htlc_map, NULL, &funding_wscript,
+			  lchannel, &local_per_commitment_point, 42, LOCAL, 0, 0,
+			  &local_anchor);
 	assert(tal_count(txs) == 1);
-	txs2 = channel_txs(tmpctx, &htlc_map, NULL, &funding_wscript,
-			   rchannel, &local_per_commitment_point, 42, REMOTE);
+	txs2 = channel_txs(tmpctx, &funding, funding_amount,
+			   &htlc_map, NULL, &funding_wscript,
+			   rchannel, &local_per_commitment_point, 42, REMOTE, 0, 0,
+			   &local_anchor);
 	txs_must_be_eq(txs, txs2);
 
 	update_feerate(lchannel, feerate_per_kw[LOCAL]);
@@ -591,11 +599,15 @@ int main(int argc, const char *argv[])
 	assert(lchannel->view[REMOTE].owed[REMOTE].millisatoshis
 	       == rchannel->view[LOCAL].owed[LOCAL].millisatoshis);
 
-	txs = channel_txs(tmpctx, &htlc_map, NULL, &funding_wscript,
-			  lchannel, &local_per_commitment_point, 42, LOCAL);
+	txs = channel_txs(tmpctx, &funding, funding_amount,
+			  &htlc_map, NULL, &funding_wscript,
+			  lchannel, &local_per_commitment_point, 42, LOCAL, 0, 0,
+			  &local_anchor);
 	assert(tal_count(txs) == 6);
-	txs2 = channel_txs(tmpctx, &htlc_map, NULL, &funding_wscript,
-			   rchannel, &local_per_commitment_point, 42, REMOTE);
+	txs2 = channel_txs(tmpctx, &funding, funding_amount,
+			   &htlc_map, NULL, &funding_wscript,
+			   rchannel, &local_per_commitment_point, 42, REMOTE, 0, 0,
+			   &local_anchor);
 	txs_must_be_eq(txs, txs2);
 
 	/* FIXME: Compare signatures! */
@@ -663,16 +675,21 @@ int main(int argc, const char *argv[])
 		    &keyset, feerate_per_kw[LOCAL], local_config->dust_limit,
 		    to_local, to_remote, htlcs, &htlc_map, NULL,
 		    0x2bb038521914 ^ 42,
-		    option_anchor_outputs, option_anchors_zero_fee_htlc_tx, LOCAL);
+		    option_anchor_outputs, option_anchors_zero_fee_htlc_tx,
+		    LOCAL, &local_anchor);
 
-		txs = channel_txs(tmpctx, &htlc_map, NULL, &funding_wscript,
+		txs = channel_txs(tmpctx, &funding, funding_amount,
+				  &htlc_map, NULL, &funding_wscript,
 				  lchannel, &local_per_commitment_point, 42,
-				  LOCAL);
+				  LOCAL, 0, 0,
+				  &local_anchor);
 		tx_must_be_eq(txs[0], raw_tx);
 
-		txs2 = channel_txs(tmpctx, &htlc_map, NULL, &funding_wscript,
+		txs2 = channel_txs(tmpctx, &funding, funding_amount,
+				   &htlc_map, NULL, &funding_wscript,
 				   rchannel, &local_per_commitment_point,
-				   42, REMOTE);
+				   42, REMOTE, 0, 0,
+				   &local_anchor);
 		txs_must_be_eq(txs, txs2);
 	}
 

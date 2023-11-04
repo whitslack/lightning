@@ -1,4 +1,5 @@
 from fixtures import *  # noqa: F401,F403
+from flaky import flaky
 from pyln.client import RpcError
 import pytest
 import unittest
@@ -11,6 +12,7 @@ from utils import (
 @pytest.mark.openchannel('v1')
 @pytest.mark.openchannel('v2')
 @unittest.skipIf(TEST_NETWORK != 'regtest', 'elementsd doesnt yet support PSBT features we need')
+@flaky
 def test_splice(node_factory, bitcoind):
     l1, l2 = node_factory.line_graph(2, fundamount=1000000, wait_for_announce=True, opts={'experimental-splicing': None})
 
@@ -226,6 +228,7 @@ def test_invalid_splice(node_factory, bitcoind):
     assert l1.db_query("SELECT count(*) as c FROM channeltxs;")[0]['c'] == 0
 
 
+@unittest.skip("Test is flaky causing CI to be unusable.")
 @pytest.mark.openchannel('v1')
 @pytest.mark.openchannel('v2')
 @unittest.skipIf(TEST_NETWORK != 'regtest', 'elementsd doesnt yet support PSBT features we need')

@@ -270,6 +270,7 @@ int main(int argc, char *argv[])
 	const struct channel_type *channel_type;
 	struct sha256_double hash;
 	u32 blockheight = 0;
+	int local_anchor_outnum;
 
 	setup_locale();
 	chainparams = chainparams_for_network("bitcoin");
@@ -422,9 +423,10 @@ int main(int argc, char *argv[])
 	if (!per_commit_point(&localseed, &local_per_commit_point, commitnum))
 		errx(1, "Bad deriving local per-commitment-point");
 
-	local_txs = channel_txs(NULL, &htlcmap, NULL, &funding_wscript, channel,
+	local_txs = channel_txs(NULL, &channel->funding, channel->funding_sats,
+				&htlcmap, NULL, &funding_wscript, channel,
 				&local_per_commit_point, commitnum,
-				LOCAL);
+				LOCAL, 0, 0, &local_anchor_outnum);
 
 	printf("## local_commitment\n"
 	       "# input amount %s, funding_wscript %s, pubkey %s\n",
@@ -532,9 +534,10 @@ int main(int argc, char *argv[])
 	/* Create the remote commitment tx */
 	if (!per_commit_point(&remoteseed, &remote_per_commit_point, commitnum))
 		errx(1, "Bad deriving remote per-commitment-point");
-	remote_txs = channel_txs(NULL, &htlcmap, NULL, &funding_wscript, channel,
+	remote_txs = channel_txs(NULL, &channel->funding, channel->funding_sats,
+				 &htlcmap, NULL, &funding_wscript, channel,
 				 &remote_per_commit_point, commitnum,
-				 REMOTE);
+				 REMOTE, 0, 0, &local_anchor_outnum);
 
 	printf("## remote_commitment\n"
 	       "# input amount %s, funding_wscript %s, key %s\n",
