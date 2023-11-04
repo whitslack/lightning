@@ -234,6 +234,7 @@ struct channel *new_unsaved_channel(struct peer *peer,
 	channel->next_index[LOCAL] = 1;
 	channel->next_index[REMOTE] = 1;
 	channel->next_htlc_id = 0;
+	channel->funding_spend_watch = NULL;
 	/* FIXME: remove push when v1 deprecated */
 	channel->push = AMOUNT_MSAT(0);
 	channel->closing_fee_negotiation_step = 50;
@@ -465,6 +466,7 @@ struct channel *new_channel(struct peer *peer, u64 dbid,
 	channel->next_htlc_id = next_htlc_id;
 	channel->funding = *funding;
 	channel->funding_sats = funding_sats;
+	channel->funding_spend_watch = NULL;
 	channel->push = push;
 	channel->our_funds = our_funds;
 	channel->remote_channel_ready = remote_channel_ready;
@@ -589,49 +591,14 @@ const char *channel_state_str(enum channel_state state)
 	return "unknown";
 }
 
-bool channel_state_normalish(const struct channel *channel)
-{
-	return channel->state == CHANNELD_NORMAL
-		|| channel->state == CHANNELD_AWAITING_SPLICE;
-}
-
-bool channel_state_awaitish(const struct channel *channel)
-{
-	return channel->state == CHANNELD_AWAITING_LOCKIN
-		|| channel->state == CHANNELD_AWAITING_SPLICE;
-}
-
-bool channel_state_closish(enum channel_state channel_state)
-{
-	return channel_state > CHANNELD_NORMAL && channel_state <= CLOSED;
-}
-
-struct channel *peer_any_active_channel(struct peer *peer, bool *others)
+struct channel *peer_any_channel(struct peer *peer,
+				 bool (*channel_state_filter)(enum channel_state),
+				 bool *others)
 {
 	struct channel *channel, *ret = NULL;
 
 	list_for_each(&peer->channels, channel, list) {
-		if (!channel_active(channel))
-			continue;
-		/* Already found one? */
-		if (ret) {
-			if (others)
-				*others = true;
-		} else {
-			if (others)
-				*others = false;
-			ret = channel;
-		}
-	}
-	return ret;
-}
-
-struct channel *peer_any_unsaved_channel(struct peer *peer, bool *others)
-{
-	struct channel *channel, *ret = NULL;
-
-	list_for_each(&peer->channels, channel, list) {
-		if (!channel_unsaved(channel))
+		if (channel_state_filter && !channel_state_filter(channel->state))
 			continue;
 		/* Already found one? */
 		if (ret) {
@@ -819,7 +786,7 @@ void channel_set_state(struct channel *channel,
 	struct timeabs timestamp;
 
 	/* set closer, if known */
-	if (channel_state_closish(state) && channel->closer == NUM_SIDES) {
+	if (channel_state_closing(state) && channel->closer == NUM_SIDES) {
 		if (reason == REASON_LOCAL)   channel->closer = LOCAL;
 		if (reason == REASON_USER)    channel->closer = LOCAL;
 		if (reason == REASON_REMOTE)  channel->closer = REMOTE;
@@ -848,7 +815,7 @@ void channel_set_state(struct channel *channel,
 		timestamp = time_now();
 		wallet_state_change_add(channel->peer->ld->wallet,
 					channel->dbid,
-					&timestamp,
+					timestamp,
 					old_state,
 					state,
 					reason,
@@ -857,7 +824,7 @@ void channel_set_state(struct channel *channel,
 					     &channel->peer->id,
 					     &channel->cid,
 					     channel->scid,
-					     &timestamp,
+					     timestamp,
 					     old_state,
 					     state,
 					     reason,
@@ -908,7 +875,7 @@ void channel_fail_permanent(struct channel *channel,
 	/* Drop non-cooperatively (unilateral) to chain. */
 	drop_to_chain(ld, channel, false);
 
-	if (channel_active(channel))
+	if (channel_state_wants_onchain_fail(channel->state))
 		channel_set_state(channel,
 				  channel->state,
 				  AWAITING_UNILATERAL,
@@ -1003,7 +970,8 @@ void channel_internal_error(struct channel *channel, const char *fmt, ...)
 
 	channel_cleanup_commands(channel, why);
 
-	if (channel_unsaved(channel)) {
+	/* Nothing ventured, nothing lost! */
+	if (channel_state_uncommitted(channel->state)) {
 		channel_set_owner(channel, NULL);
 		delete_channel(channel);
 		tal_free(why);
@@ -1011,12 +979,11 @@ void channel_internal_error(struct channel *channel, const char *fmt, ...)
 	}
 
 	/* Don't expose internal error causes to remove unless doing dev */
-#if DEVELOPER
-	channel_fail_permanent(channel,
-			       REASON_LOCAL, "Internal error: %s", why);
-#else
-	channel_fail_permanent(channel, REASON_LOCAL, "Internal error");
-#endif
+	if (channel->peer->ld->developer)
+		channel_fail_permanent(channel,
+				       REASON_LOCAL, "Internal error: %s", why);
+	else
+		channel_fail_permanent(channel, REASON_LOCAL, "Internal error");
 	tal_free(why);
 }
 
@@ -1037,7 +1004,7 @@ void channel_set_billboard(struct channel *channel, bool perm, const char *str)
 	}
 }
 
-static void channel_err(struct channel *channel, const char *why)
+static void channel_err(struct channel *channel, bool disconnect, const char *why)
 {
 	/* Nothing to do if channel isn't actually owned! */
 	if (!channel->owner)
@@ -1046,23 +1013,30 @@ static void channel_err(struct channel *channel, const char *why)
 	log_info(channel->log, "Peer transient failure in %s: %s",
 		 channel_state_name(channel), why);
 
-#if DEVELOPER
 	if (dev_disconnect_permanent(channel->peer->ld)) {
 		channel_fail_permanent(channel,
 				       REASON_LOCAL,
 				       "dev_disconnect permfail");
 		return;
 	}
-#endif
+
 	channel_set_owner(channel, NULL);
+
+	/* Force a disconnect in case the issue is with TCP */
+	if (disconnect && channel->peer->ld->connectd) {
+		const struct peer *peer = channel->peer;
+		subd_send_msg(peer->ld->connectd,
+			      take(towire_connectd_discard_peer(NULL, &peer->id,
+								peer->connectd_counter)));
+	}
 }
 
-void channel_fail_transient(struct channel *channel, const char *fmt, ...)
+void channel_fail_transient(struct channel *channel, bool disconnect, const char *fmt, ...)
 {
 	va_list ap;
 
 	va_start(ap, fmt);
-	channel_err(channel, tal_vfmt(tmpctx, fmt, ap));
+	channel_err(channel, disconnect, tal_vfmt(tmpctx, fmt, ap));
 	va_end(ap);
 }
 

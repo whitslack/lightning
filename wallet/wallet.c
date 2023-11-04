@@ -1601,7 +1601,7 @@ static struct channel *wallet_stmt2channel(struct wallet *w, struct db_stmt *stm
 
 	chan = new_channel(peer, db_col_u64(stmt, "id"),
 			   &wshachain,
-			   db_col_int(stmt, "state"),
+			   channel_state_in_db(db_col_int(stmt, "state")),
 			   db_col_int(stmt, "funder"),
 			   NULL, /* Set up fresh log */
 			   "Loaded from database",
@@ -2168,7 +2168,7 @@ void wallet_channel_save(struct wallet *w, struct channel *chan)
 		db_bind_null(stmt);
 
 	db_bind_channel_id(stmt, &chan->cid);
-	db_bind_int(stmt, chan->state);
+	db_bind_int(stmt, channel_state_in_db(chan->state));
 	db_bind_int(stmt, chan->opener);
 	db_bind_int(stmt, chan->channel_flags);
 	db_bind_int(stmt, chan->minimum_depth);
@@ -2333,11 +2333,11 @@ void wallet_channel_save(struct wallet *w, struct channel *chan)
 
 void wallet_state_change_add(struct wallet *w,
 			     const u64 channel_id,
-			     struct timeabs *timestamp,
+			     struct timeabs timestamp,
 			     enum channel_state old_state,
 			     enum channel_state new_state,
 			     enum state_change cause,
-			     char *message)
+			     const char *message)
 {
 	struct db_stmt *stmt;
 	stmt = db_prepare_v2(w->db,
@@ -2351,9 +2351,9 @@ void wallet_state_change_add(struct wallet *w,
 				 ") VALUES (?, ?, ?, ?, ?, ?);"));
 
 	db_bind_u64(stmt, channel_id);
-	db_bind_timeabs(stmt, *timestamp);
-	db_bind_int(stmt, old_state);
-	db_bind_int(stmt, new_state);
+	db_bind_timeabs(stmt, timestamp);
+	db_bind_int(stmt, channel_state_in_db(old_state));
+	db_bind_int(stmt, channel_state_in_db(new_state));
 	db_bind_int(stmt, state_change_in_db(cause));
 	db_bind_text(stmt, message);
 
@@ -2525,7 +2525,7 @@ void wallet_channel_close(struct wallet *w, u64 wallet_id)
 	stmt = db_prepare_v2(w->db, SQL("UPDATE channels "
 					"SET state=? "
 					"WHERE channels.id=?"));
-	db_bind_u64(stmt, CLOSED);
+	db_bind_u64(stmt, channel_state_in_db(CLOSED));
 	db_bind_u64(stmt, wallet_id);
 	db_exec_prepared_v2(take(stmt));
 }
@@ -3207,24 +3207,25 @@ void wallet_payment_store(struct wallet *wallet,
 	struct db_stmt *stmt;
 	if (!find_unstored_payment(wallet, &payment->payment_hash, payment->partid)) {
 		/* Already stored on-disk */
-#if DEVELOPER
-		/* Double-check that it is indeed stored to disk
-		 * (catch bug, where we call this on a payment_hash
-		 * we never paid to) */
-		bool res;
-		stmt =
-		    db_prepare_v2(wallet->db, SQL("SELECT status FROM payments"
-						  " WHERE payment_hash=?"
-						  " AND partid = ? AND groupid = ?;"));
-		db_bind_sha256(stmt, &payment->payment_hash);
-		db_bind_u64(stmt, payment->partid);
-		db_bind_u64(stmt, payment->groupid);
-		db_query_prepared(stmt);
-		res = db_step(stmt);
-		assert(res);
-		db_col_ignore(stmt, "status");
-		tal_free(stmt);
-#endif
+		if (wallet->ld->developer) {
+			/* Double-check that it is indeed stored to disk
+			 * (catch bug, where we call this on a payment_hash
+			 * we never paid to) */
+			bool res;
+			stmt =
+				db_prepare_v2(wallet->db, SQL("SELECT status FROM payments"
+							      " WHERE payment_hash=?"
+							      " AND partid = ? AND groupid = ?;"));
+			db_bind_sha256(stmt, &payment->payment_hash);
+			db_bind_u64(stmt, payment->partid);
+			db_bind_u64(stmt, payment->groupid);
+			db_query_prepared(stmt);
+			res = db_step(stmt);
+			assert(res);
+			db_col_ignore(stmt, "status");
+			tal_free(stmt);
+		}
+
 		return;
 	}
 
@@ -3864,7 +3865,7 @@ void wallet_htlc_sigs_add(struct wallet *w, u64 channel_id,
 		stmt = db_prepare_v2(w->db,
 				     SQL("INSERT INTO htlc_sigs (channelid,"
 					 " inflight_tx_id, inflight_tx_outnum,"
-					 " signature) VALUES (?, ?, ?)"));
+					 " signature) VALUES (?, ?, ?, ?)"));
 		db_bind_u64(stmt, channel_id);
 		db_bind_txid(stmt, &inflight_outpoint.txid);
 		db_bind_int(stmt, inflight_outpoint.n);

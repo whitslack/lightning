@@ -77,7 +77,7 @@ void channel_update_feerates(struct lightningd *ld, const struct channel *channe
 static void try_update_feerates(struct lightningd *ld, struct channel *channel)
 {
 	/* No point until funding locked in */
-	if (!channel_fees_can_change(channel))
+	if (!channel_state_fees_can_change(channel->state))
 		return;
 
 	/* Can't if no daemon listening. */
@@ -130,7 +130,7 @@ static void try_update_blockheight(struct lightningd *ld,
 	}
 
 	/* If we're not opened/locked in yet, don't send update */
-	if (!channel_fees_can_change(channel))
+	if (!channel_state_fees_can_change(channel->state))
 		return;
 
 	/* We don't update the blockheight for non-leased chans */
@@ -192,24 +192,20 @@ static void handle_splice_funding_error(struct lightningd *ld,
 
 	cc = splice_command_for_chan(ld, channel);
 	if (cc) {
-		struct json_stream *response = json_stream_success(cc->cmd);
-		json_add_string(response, "message", "Splice funding too low");
-		json_add_string(response, "error",
-				tal_fmt(tmpctx,
-					"%s provided %s but committed to %s.",
-					opener_error ? "You" : "Peer",
-					fmt_amount_msat(tmpctx, funding),
-					fmt_amount_msat(tmpctx, req_funding)));
-
-		was_pending(command_success(cc->cmd, response));
+		was_pending(command_fail(cc->cmd, SPLICE_FUNDING_LOW,
+					 "%s provided %s but committed to %s.",
+					 opener_error ? "You" : "Peer",
+					 fmt_amount_msat(tmpctx, funding),
+					 fmt_amount_msat(tmpctx, req_funding)));
 	}
-	else
+	else {
 		log_peer_unusual(ld->log, &channel->peer->id,
 				 "Splice funding too low. %s provided but %s"
 				 " commited to %s",
 				 opener_error ? "peer" : "you",
 				 fmt_amount_msat(tmpctx, funding),
 				 fmt_amount_msat(tmpctx, req_funding));
+	}
 }
 
 static void handle_splice_state_error(struct lightningd *ld,
@@ -227,13 +223,9 @@ static void handle_splice_state_error(struct lightningd *ld,
 	}
 
 	cc = splice_command_for_chan(ld, channel);
-	if (cc) {
-		struct json_stream *response = json_stream_success(cc->cmd);
-		json_add_string(response, "message", "Splice state error");
-		json_add_string(response, "error", error_msg);
-
-		was_pending(command_success(cc->cmd, response));
-	}
+	if (cc)
+		was_pending(command_fail(cc->cmd, SPLICE_STATE_ERROR,
+					 "%s", error_msg));
 	else
 		log_peer_unusual(ld->log, &channel->peer->id,
 				 "Splice state error: %s", error_msg);
@@ -246,6 +238,7 @@ static void handle_splice_feerate_error(struct lightningd *ld,
 	struct splice_command *cc;
 	struct amount_msat fee;
 	bool too_high;
+	char *error_msg;
 
 	if (!fromwire_channeld_splice_feerate_error(msg, &fee, &too_high)) {
 		channel_internal_error(channel,
@@ -256,27 +249,25 @@ static void handle_splice_feerate_error(struct lightningd *ld,
 
 	cc = splice_command_for_chan(ld, channel);
 	if (cc) {
-		struct json_stream *response = json_stream_success(cc->cmd);
-		json_add_string(response, "message", "Splice feerate failed");
-
 		if (too_high)
-			json_add_string(response, "error",
-					tal_fmt(tmpctx, "Feerate too high. Do you "
-						"really want to spend %s on fees?",
-						fmt_amount_msat(tmpctx, fee)));
+			error_msg = tal_fmt(tmpctx, "Feerate too high. Do you "
+				      "really want to spend %s on fees?",
+				      fmt_amount_msat(tmpctx, fee));
 		else
-			json_add_string(response, "error",
-					tal_fmt(tmpctx, "Feerate too low. Your "
-						"funding only provided %s in fees",
-						fmt_amount_msat(tmpctx, fee)));
+			error_msg = tal_fmt(tmpctx, "Feerate too low. Your "
+				      "funding only provided %s in fees",
+				      fmt_amount_msat(tmpctx, fee));
 
-		was_pending(command_success(cc->cmd, response));
+		was_pending(command_fail(cc->cmd,
+					 too_high ? SPLICE_HIGH_FEE : SPLICE_LOW_FEE,
+					 "%s", error_msg));
 	}
-	else
+	else {
 		log_peer_unusual(ld->log, &channel->peer->id, "Peer gave us a"
 				 " splice pkg with too low of feerate (fee was"
 				 " %s), we rejected it.",
 				 fmt_amount_msat(tmpctx, fee));
+	}
 }
 
 /* When channeld finishes processing the `splice_init` command, this is called */
@@ -551,6 +542,95 @@ static void handle_splice_confirmed_signed(struct lightningd *ld,
 	send_splice_tx(channel, tx, cc, output_index);
 }
 
+bool depthcb_update_scid(struct channel *channel,
+			 const struct bitcoin_txid *txid,
+			 const struct bitcoin_outpoint *outpoint)
+{
+	struct txlocator *loc;
+	struct lightningd *ld = channel->peer->ld;
+	struct short_channel_id scid;
+
+	/* What scid is this giving us? */
+	loc = wallet_transaction_locate(tmpctx, ld->wallet, txid);
+	if (!mk_short_channel_id(&scid,
+				 loc->blkheight, loc->index,
+				 outpoint->n)) {
+		channel_fail_permanent(channel,
+				       REASON_LOCAL,
+				       "Invalid funding scid %u:%u:%u",
+				       loc->blkheight, loc->index,
+				       outpoint->n);
+		return false;
+	}
+
+	if (!channel->scid) {
+		wallet_annotate_txout(ld->wallet, outpoint,
+				      TX_CHANNEL_FUNDING, channel->dbid);
+		channel->scid = tal_dup(channel, struct short_channel_id, &scid);
+
+		/* If we have a zeroconf channel, i.e., no scid yet
+		 * but have exchange `channel_ready` messages, then we
+		 * need to fire a second time, in order to trigger the
+		 * `coin_movement` event. This is a subset of the
+		 * `lockin_complete` function called from
+		 * AWAITING_LOCKIN->NORMAL otherwise. */
+		if (channel->minimum_depth == 0)
+			lockin_has_completed(channel, false);
+
+		wallet_channel_save(ld->wallet, channel);
+	} else if (!short_channel_id_eq(channel->scid, &scid)) {
+		/* We freaked out if required when original was
+		 * removed, so just update now */
+		log_info(channel->log, "Short channel id changed from %s->%s",
+			 type_to_string(tmpctx, struct short_channel_id, channel->scid),
+			 type_to_string(tmpctx, struct short_channel_id, &scid));
+		*channel->scid = scid;
+		wallet_channel_save(ld->wallet, channel);
+	}
+
+	return true;
+}
+
+static enum watch_result splice_depth_cb(struct lightningd *ld,
+					 const struct bitcoin_txid *txid,
+					 const struct bitcoin_tx *tx,
+					 unsigned int depth,
+					 struct channel_inflight *inflight)
+{
+	/* Usually, we're here because we're awaiting a splice, but
+	 * we could also mutual shutdown, or that weird splice_locked_memonly
+	 * hack... */
+	if (inflight->channel->state != CHANNELD_AWAITING_SPLICE)
+		return DELETE_WATCH;
+
+	/* Reorged out?  OK, we're not committed yet. */
+	if (depth == 0)
+		return KEEP_WATCHING;
+
+	if (!depthcb_update_scid(inflight->channel, txid, &inflight->funding->outpoint))
+		return DELETE_WATCH;
+
+	if (inflight->channel->owner) {
+		subd_send_msg(inflight->channel->owner,
+			      take(towire_channeld_funding_depth(
+					   NULL, inflight->channel->scid,
+					   inflight->channel->alias[LOCAL],
+					   depth, true, txid)));
+	}
+
+	/* channeld will tell us when splice is locked in: we'll clean
+	 * this watch up then. */
+	return KEEP_WATCHING;
+}
+
+void watch_splice_inflight(struct lightningd *ld,
+			   struct channel_inflight *inflight)
+{
+	watch_txid(inflight, ld->topology,
+		   &inflight->funding->outpoint.txid,
+		   splice_depth_cb, inflight);
+}
+
 static void handle_add_inflight(struct lightningd *ld,
 				struct channel *channel,
 				const u8 *msg)
@@ -605,7 +685,7 @@ static void handle_add_inflight(struct lightningd *ld,
 		  		 &inflight->funding->outpoint.txid));
 
 	wallet_inflight_add(ld->wallet, inflight);
-	channel_watch_inflight(ld, channel, inflight);
+	watch_splice_inflight(ld, inflight);
 
 	subd_send_msg(channel->owner, take(towire_channeld_got_inflight(NULL)));
 }
@@ -730,8 +810,25 @@ void channel_record_open(struct channel *channel, u32 blockheight, bool record_p
 							 channel->opener == REMOTE));
 }
 
-static void lockin_complete(struct channel *channel,
-			    enum channel_state expected_state)
+void lockin_has_completed(struct channel *channel, bool record_push)
+{
+	/* Fees might have changed (and we use IMMEDIATE once we're funded),
+	 * so update now. */
+	try_update_feerates(channel->peer->ld, channel);
+
+	try_update_blockheight(channel->peer->ld, channel,
+			       get_block_height(channel->peer->ld->topology));
+
+	/* Emit an event for the channel open (or channel proposal if blockheight
+	 * is zero) */
+	channel_record_open(channel,
+			    channel->scid ?
+			    short_channel_id_blocknum(channel->scid) : 0,
+			    record_push);
+}
+
+void lockin_complete(struct channel *channel,
+		     enum channel_state expected_state)
 {
 	if (!channel->scid &&
 	    (!channel->alias[REMOTE] || !channel->alias[LOCAL])) {
@@ -760,19 +857,7 @@ static void lockin_complete(struct channel *channel,
 			  REASON_UNKNOWN,
 			  "Lockin complete");
 
-	/* Fees might have changed (and we use IMMEDIATE once we're funded),
-	 * so update now. */
-	try_update_feerates(channel->peer->ld, channel);
-
-	try_update_blockheight(channel->peer->ld, channel,
-			       get_block_height(channel->peer->ld->topology));
-
-	/* Emit an event for the channel open (or channel proposal if blockheight
-	 * is zero) */
-	channel_record_open(channel,
-			    channel->scid ?
-			    short_channel_id_blocknum(channel->scid) : 0,
-			    true);
+	lockin_has_completed(channel, true);
 }
 
 bool channel_on_channel_ready(struct channel *channel,
@@ -833,6 +918,9 @@ static void handle_peer_splice_locked(struct channel *channel, const u8 *msg)
 	list_del(&inflight->list);
 
 	wallet_channel_clear_inflights(channel->peer->ld->wallet, channel);
+
+	/* That freed watchers in inflights: now watch funding tx */
+	channel_watch_funding(channel->peer->ld, channel);
 
 	/* Put the successful inflight back in as a memory-only object.
 	 * peer_control's funding_spent function will pick this up and clean up
@@ -931,7 +1019,7 @@ static void peer_got_shutdown(struct channel *channel, const u8 *msg)
 								  &channel->peer->id,
 								  channel->peer->connectd_counter,
 								  warning)));
-		channel_fail_transient(channel, "Bad shutdown scriptpubkey %s",
+		channel_fail_transient(channel, true, "Bad shutdown scriptpubkey %s",
 				       tal_hex(tmpctx, scriptpubkey));
 		return;
 	}
@@ -1010,8 +1098,7 @@ static void peer_start_closingd_after_shutdown(struct channel *channel,
 	peer_start_closingd(channel, peer_fd);
 
 	/* We might have reconnected, so already be here. */
-	if (!channel_closed(channel)
-	    && channel->state != CLOSINGD_SIGEXCHANGE)
+	if (channel->state == CHANNELD_SHUTTING_DOWN)
 		channel_set_state(channel,
 				  CHANNELD_SHUTTING_DOWN,
 				  CLOSINGD_SIGEXCHANGE,
@@ -1120,22 +1207,6 @@ static void handle_channel_upgrade(struct channel *channel,
 		  channel->static_remotekey_start[REMOTE]);
 
 	wallet_channel_save(channel->peer->ld->wallet, channel);
-}
-
-static bool get_inflight_outpoint_index(struct channel *channel,
-					const struct bitcoin_txid *txid,
-					u32 *index)
-{
-	struct channel_inflight *inflight;
-
-	list_for_each(&channel->inflights, inflight, list) {
-		if (bitcoin_txid_eq(txid, &inflight->funding->outpoint.txid)) {
-			*index = inflight->funding->outpoint.n;
-			return true;
-		}
-	}
-
-	return false;
 }
 
 static unsigned channel_msg(struct subd *sd, const u8 *msg, const int *fds)
@@ -1417,7 +1488,10 @@ bool peer_start_channeld(struct channel *channel,
 		infcopy->outpoint = inflight->funding->outpoint;
 		infcopy->amnt = inflight->funding->total_funds;
 		infcopy->splice_amnt = inflight->funding->splice_amnt;
-		infcopy->last_tx = tal_dup(infcopy, struct bitcoin_tx, inflight->last_tx);
+		if (inflight->last_tx)
+			infcopy->last_tx = tal_dup(infcopy, struct bitcoin_tx, inflight->last_tx);
+		else
+			infcopy->last_tx = NULL;
 		infcopy->last_sig = inflight->last_sig;
 		infcopy->i_am_initiator = inflight->i_am_initiator;
 		tal_wally_start();
@@ -1472,9 +1546,7 @@ bool peer_start_channeld(struct channel *channel,
 				       reconnected,
 				       /* Anything that indicates we are or have
 					* shut down */
-				       channel->state == CHANNELD_SHUTTING_DOWN
-				       || channel->state == CLOSINGD_SIGEXCHANGE
-				       || channel_closed(channel),
+				       channel_state_closing(channel->state),
 				       channel->shutdown_scriptpubkey[REMOTE] != NULL,
 				       channel->final_key_idx,
 				       &final_ext_key,
@@ -1488,11 +1560,10 @@ bool peer_start_channeld(struct channel *channel,
 				       remote_ann_node_sig,
 				       remote_ann_bitcoin_sig,
 				       channel->type,
-				       IFDEV(ld->dev_fast_gossip, false),
-				       IFDEV(ld->dev_disable_commit == -1
+				       ld->dev_fast_gossip,
+				       ld->dev_disable_commit == -1
 					     ? NULL
 					     : (u32 *)&ld->dev_disable_commit,
-					     NULL),
 				       pbases,
 				       reestablish_only,
 				       channel->channel_update,
@@ -1522,76 +1593,16 @@ bool peer_start_channeld(struct channel *channel,
 	return true;
 }
 
-bool channel_tell_depth(struct lightningd *ld,
-			struct channel *channel,
-			const struct bitcoin_txid *txid,
-			u32 depth)
+/* Actually send the depth message to channeld */
+void channeld_tell_depth(struct channel *channel,
+			 const struct bitcoin_txid *txid,
+			 u32 depth)
 {
-	const char *txidstr;
-	struct txlocator *loc;
-	u32 outnum;
-
-	txidstr = type_to_string(tmpctx, struct bitcoin_txid, txid);
-	channel->depth = depth;
-
 	if (!channel->owner) {
 		log_debug(channel->log,
 			  "Funding tx %s confirmed, but peer disconnected",
-			  txidstr);
-		return false;
-	}
-
-	if (channel->state == CHANNELD_AWAITING_SPLICE
-	    && depth >= channel->minimum_depth) {
-		if (!get_inflight_outpoint_index(channel, txid, &outnum)) {
-			log_debug(channel->log, "Can't locate splice inflight"
-				  " txid %s", txidstr);
-			return false;
-		}
-
-		loc = wallet_transaction_locate(tmpctx, ld->wallet, txid);
-		if (!loc) {
-			channel_fail_permanent(channel,
-					       REASON_LOCAL,
-					       "Can't locate splice transaction"
-					       " in wallet txid %s", txidstr);
-			return false;
-		}
-
-		if (!mk_short_channel_id(channel->scid,
-					 loc->blkheight, loc->index,
-					 outnum)) {
-			channel_fail_permanent(channel,
-					       REASON_LOCAL,
-					       "Invalid splice scid %u:%u:%u",
-					       loc->blkheight, loc->index,
-					       channel->funding.n);
-			return false;
-		}
-	}
-
-	if (streq(channel->owner->name, "dualopend")) {
-		if (channel->state != DUALOPEND_AWAITING_LOCKIN) {
-			log_debug(channel->log,
-				  "Funding tx %s confirmed, but peer in"
-				  " state %s",
-				  txidstr, channel_state_name(channel));
-			return true;
-		}
-
-		log_debug(channel->log,
-			  "Funding tx %s confirmed, telling peer", txidstr);
-		dualopen_tell_depth(channel->owner, channel,
-				    txid, depth);
-		return true;
-	} else if (channel->state != CHANNELD_AWAITING_LOCKIN
-	    && !channel_state_normalish(channel)) {
-		/* If not awaiting lockin/announce, it doesn't
-		 * care any more */
-		log_debug(channel->log,
-			  "Funding tx %s confirmed, but peer in state %s",
-			  txidstr, channel_state_name(channel));
-		return true;
+			  type_to_string(tmpctx, struct bitcoin_txid, txid));
+		return;
 	}
 
 	log_debug(channel->log,
@@ -1602,33 +1613,6 @@ bool channel_tell_depth(struct lightningd *ld,
 		      take(towire_channeld_funding_depth(
 			  NULL, channel->scid, channel->alias[LOCAL], depth,
 			  channel->state == CHANNELD_AWAITING_SPLICE, txid)));
-
-	if (channel->remote_channel_ready &&
-	    channel->state == CHANNELD_AWAITING_LOCKIN &&
-	    depth >= channel->minimum_depth) {
-		lockin_complete(channel, CHANNELD_AWAITING_LOCKIN);
-	} else if (depth == 1 && channel->minimum_depth == 0) {
-		/* If we have a zeroconf channel, i.e., no scid yet
-		 * but have exchange `channel_ready` messages, then we
-		 * need to fire a second time, in order to trigger the
-		 * `coin_movement` event. This is a subset of the
-		 * `lockin_complete` function below. */
-
-		assert(channel->scid != NULL);
-		/* Fees might have changed (and we use IMMEDIATE once we're
-		 * funded), so update now. */
-		try_update_feerates(channel->peer->ld, channel);
-
-		try_update_blockheight(
-		    channel->peer->ld, channel,
-		    get_block_height(channel->peer->ld->topology));
-
-		/* Emit channel_open event */
-		channel_record_open(channel,
-				    short_channel_id_blocknum(channel->scid),
-				    false);
-	}
-	return true;
 }
 
 /* Check if we are the fundee of this channel, the channel
@@ -1646,7 +1630,12 @@ is_fundee_should_forget(struct lightningd *ld,
 	 *   - SHOULD forget the channel if it does not see the
 	 * correct funding transaction after a timeout of 2016 blocks.
 	 */
-	u32 max_funding_unconfirmed = IFDEV(ld->dev_max_funding_unconfirmed, 2016);
+	u32 max_funding_unconfirmed;
+
+	if (ld->developer)
+		max_funding_unconfirmed = ld->dev_max_funding_unconfirmed;
+	else
+		max_funding_unconfirmed = 2016;
 
 	/* Only applies if we are fundee. */
 	if (channel->opener == LOCAL)
@@ -1688,7 +1677,7 @@ void channel_notify_new_block(struct lightningd *ld,
 	     peer;
 	     peer = peer_node_id_map_next(ld->peers, &it)) {
 		list_for_each(&peer->channels, channel, list) {
-			if (channel_unsaved(channel))
+			if (channel_state_uncommitted(channel->state))
 				continue;
 			if (is_fundee_should_forget(ld, channel, block_height)) {
 				tal_arr_expand(&to_forget, channel);
@@ -2090,7 +2079,6 @@ static const struct json_command splice_signed_command = {
 };
 AUTODATA(json_command, &splice_signed_command);
 
-#if DEVELOPER
 static struct command_result *json_dev_feerate(struct command *cmd,
 					       const char *buffer,
 					       const jsmntok_t *obj UNNEEDED,
@@ -2114,8 +2102,8 @@ static struct command_result *json_dev_feerate(struct command *cmd,
 	if (!peer)
 		return command_fail(cmd, LIGHTNINGD, "Peer not connected");
 
-	channel = peer_any_active_channel(peer, &more_than_one);
-	if (!channel || !channel->owner || !channel_state_normalish(channel))
+	channel = peer_any_channel(peer, channel_state_can_add_htlc, &more_than_one);
+	if (!channel || !channel->owner)
 		return command_fail(cmd, LIGHTNINGD, "Peer bad state");
 	/* This is a dev command: fix the api if you need this! */
 	if (more_than_one)
@@ -2138,7 +2126,8 @@ static const struct json_command dev_feerate_command = {
 	"dev-feerate",
 	"developer",
 	json_dev_feerate,
-	"Set feerate for {id} to {feerate}"
+	"Set feerate for {id} to {feerate}",
+	.dev_only = true,
 };
 AUTODATA(json_command, &dev_feerate_command);
 
@@ -2174,8 +2163,8 @@ static struct command_result *json_dev_quiesce(struct command *cmd,
 		return command_fail(cmd, LIGHTNINGD, "Peer not connected");
 
 	/* FIXME: If this becomes a real API, check for OPT_QUIESCE! */
-	channel = peer_any_active_channel(peer, &more_than_one);
-	if (!channel || !channel->owner || !channel_state_normalish(channel))
+	channel = peer_any_channel(peer, channel_state_wants_peercomms, &more_than_one);
+	if (!channel || !channel->owner)
 		return command_fail(cmd, LIGHTNINGD, "Peer bad state");
 	/* This is a dev command: fix the api if you need this! */
 	if (more_than_one)
@@ -2191,7 +2180,7 @@ static const struct json_command dev_quiesce_command = {
 	"dev-quiesce",
 	"developer",
 	json_dev_quiesce,
-	"Initiate quiscence protocol with peer"
+	"Initiate quiscence protocol with peer",
+	.dev_only = true,
 };
 AUTODATA(json_command, &dev_quiesce_command);
-#endif /* DEVELOPER */

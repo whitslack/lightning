@@ -303,7 +303,7 @@ static void peer_closing_complete(struct channel *channel, const u8 *msg)
 	channel_set_billboard(channel, false, NULL);
 
 	/* Retransmission only, ignore closing. */
-	if (channel_closed(channel))
+	if (channel->state != CLOSINGD_SIGEXCHANGE)
 		return;
 
 	/* Channel gets dropped to chain cooperatively. */
@@ -562,6 +562,28 @@ struct some_channel {
 	struct uncommitted_channel *uc;
 };
 
+static bool channel_state_can_close(enum channel_state state)
+{
+	switch (state) {
+	case CHANNELD_NORMAL:
+	case CHANNELD_AWAITING_SPLICE:
+	case CHANNELD_AWAITING_LOCKIN:
+	case DUALOPEND_AWAITING_LOCKIN:
+	case DUALOPEND_OPEN_INIT:
+	case DUALOPEND_OPEN_COMMITTED:
+	case CLOSINGD_SIGEXCHANGE:
+	case CHANNELD_SHUTTING_DOWN:
+		return true;
+	case CLOSINGD_COMPLETE:
+	case AWAITING_UNILATERAL:
+	case FUNDING_SPEND_SEEN:
+	case ONCHAIN:
+	case CLOSED:
+		return false;
+	}
+	abort();
+}
+
 static struct command_result *param_channel_or_peer(struct command *cmd,
 						    const char *name,
 						    const char *buffer,
@@ -575,7 +597,7 @@ static struct command_result *param_channel_or_peer(struct command *cmd,
 	(*sc)->uc = NULL;
 
 	if (peer) {
-		(*sc)->channel = peer_any_active_channel(peer, &more_than_one);
+		(*sc)->channel = peer_any_channel(peer, channel_state_can_close, &more_than_one);
 		if ((*sc)->channel) {
 			if (more_than_one)
 				goto more_than_one;
@@ -583,10 +605,14 @@ static struct command_result *param_channel_or_peer(struct command *cmd,
 		}
 	} else {
 		struct command_result *res;
-		res = command_find_channel(cmd, buffer, tok, &(*sc)->channel);
+		res = command_find_channel(cmd, name, buffer, tok, &(*sc)->channel);
 		if (res)
 			return res;
 		assert((*sc)->channel);
+		if (!channel_state_can_close((*sc)->channel->state))
+			return command_fail_badparam(cmd, name, buffer, tok,
+						     tal_fmt(tmpctx, "Channel in state %s",
+							     channel_state_name((*sc)->channel)));
 		return NULL;
 	}
 
@@ -595,7 +621,7 @@ static struct command_result *param_channel_or_peer(struct command *cmd,
 	if ((*sc)->uc)
 		return NULL;
 
-	(*sc)->unsaved_channel = peer_any_unsaved_channel(peer, &more_than_one);
+	(*sc)->unsaved_channel = peer_any_channel(peer, channel_state_uncommitted, &more_than_one);
 	if ((*sc)->unsaved_channel) {
 		if (more_than_one)
 			goto more_than_one;
@@ -871,7 +897,14 @@ static struct command_result *json_close(struct command *cmd,
 			break;
 		case CLOSINGD_SIGEXCHANGE:
 			break;
-		default:
+
+		case DUALOPEND_OPEN_INIT:
+		case DUALOPEND_OPEN_COMMITTED:
+		case CLOSINGD_COMPLETE:
+		case AWAITING_UNILATERAL:
+		case FUNDING_SPEND_SEEN:
+		case ONCHAIN:
+		case CLOSED:
 			return command_fail(cmd, LIGHTNINGD, "Channel is in state %s",
 					    channel_state_name(channel));
 	}

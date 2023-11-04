@@ -170,7 +170,7 @@ static void tell_channeld_htlc_failed(const struct htlc_in *hin,
 		return;
 
 	/* onchaind doesn't care, it can't do anything but wait */
-	if (!channel_active(hin->key.channel))
+	if (!channel_state_can_remove_htlc(hin->key.channel->state))
 		return;
 
 	subd_send_msg(hin->key.channel->owner,
@@ -584,23 +584,14 @@ static void htlc_offer_timeout(struct htlc_out *out)
 	assert(out->hstate == SENT_ADD_HTLC);
 
 	/* If owner died, we should already be taken care of. */
-	if (!channel->owner || !channel_state_normalish(channel))
+	if (!channel->owner || !channel_state_can_add_htlc(channel->state))
 		return;
 
 	log_unusual(channel->owner->log,
 		    "Adding HTLC %"PRIu64" too slow: killing connection",
 		    out->key.id);
-	tal_free(channel->owner);
-	channel_set_billboard(channel, false,
+	channel_fail_transient(channel, true,
 			      "Adding HTLC timed out: killed connection");
-
-	/* Force a disconnect in case the issue is with TCP */
-	if (channel->peer->ld->connectd) {
-		const struct peer *peer = channel->peer;
-		subd_send_msg(peer->ld->connectd,
-			      take(towire_connectd_discard_peer(NULL, &peer->id,
-								peer->connectd_counter)));
-	}
 }
 
 /* Returns failmsg, or NULL on success. */
@@ -620,7 +611,7 @@ const u8 *send_htlc_out(const tal_t *ctx,
 
 	*houtp = NULL;
 
-	if (!channel_can_add_htlc(out)) {
+	if (!channel_state_can_add_htlc(out->state)) {
 		log_info(out->log, "Attempt to send HTLC but not ready (%s)",
 			 channel_state_name(out));
 		return towire_unknown_next_peer(ctx);
@@ -648,7 +639,7 @@ const u8 *send_htlc_out(const tal_t *ctx,
 	tal_add_destructor(*houtp, destroy_hout_subd_died);
 
 	/* Give channel 30 seconds to commit this htlc. */
-	if (!IFDEV(out->peer->ld->dev_no_htlc_timeout, 0)) {
+	if (!out->peer->ld->dev_no_htlc_timeout) {
 		(*houtp)->timeout = new_reltimer(out->peer->ld->timers,
 						 *houtp, time_from_sec(30),
 						 htlc_offer_timeout,
@@ -676,7 +667,7 @@ static struct channel *best_channel(struct lightningd *ld,
 	/* Seek channel with largest spendable! */
 	list_for_each(&next_peer->channels, channel, list) {
 		struct amount_msat spendable;
-		if (!channel_can_add_htlc(channel))
+		if (!channel_state_can_add_htlc(channel->state))
 			continue;
 		spendable = channel_amount_spendable(channel);
 		if (!amount_msat_greater(spendable, best_spendable))
@@ -725,7 +716,7 @@ static void forward_htlc(struct htlc_in *hin,
 		next = NULL;
 
 	/* Unknown peer, or peer not ready. */
-	if (!next || !channel_active(next)) {
+	if (!next || !channel_state_can_add_htlc(next->state)) {
 		local_fail_in_htlc(hin, take(towire_unknown_next_peer(NULL)));
 		wallet_forwarded_payment_add(hin->key.channel->peer->ld->wallet,
 					 hin, FORWARD_STYLE_TLV,
@@ -1338,18 +1329,17 @@ static bool peer_accepted_htlc(const tal_t *ctx,
 
 	htlc_in_check(hin, __func__);
 
-#if DEVELOPER
-	if (channel->peer->ignore_htlcs) {
+	if (channel->peer->dev_ignore_htlcs) {
 		log_debug(channel->log, "their htlc %"PRIu64" dev_ignore_htlcs",
 			  id);
 		return true;
 	}
-#endif
+
 	/* BOLT #2:
 	 *
 	 *   - SHOULD fail to route any HTLC added after it has sent `shutdown`.
 	 */
-	if (channel->state == CHANNELD_SHUTTING_DOWN) {
+	if (!channel_state_can_add_htlc(channel->state)) {
 		*failmsg = towire_permanent_channel_failure(ctx);
 		log_debug(channel->log,
 			  "Rejecting their htlc %"PRIu64
@@ -2791,8 +2781,8 @@ void htlcs_notify_new_block(struct lightningd *ld, u32 height)
 			if (height < htlc_out_deadline(hout))
 				continue;
 
-			/* Peer on chain already? */
-			if (channel_on_chain(hout->key.channel)) {
+			/* Channel dying already? */
+			if (!channel_state_can_add_htlc(hout->key.channel->state)) {
 				consider_failing_incoming(ld, height, hout);
 				continue;
 			}
@@ -2844,7 +2834,7 @@ void htlcs_notify_new_block(struct lightningd *ld, u32 height)
 				continue;
 
 			/* Peer on chain already? */
-			if (channel_on_chain(channel))
+			if (channel_state_failing_onchain(channel->state))
 				continue;
 
 			/* Peer already failed, or we hit it? */
@@ -2956,7 +2946,6 @@ void htlcs_resubmit(struct lightningd *ld,
 	tal_free(unconnected_htlcs_in);
 }
 
-#if DEVELOPER
 static struct command_result *json_dev_ignore_htlcs(struct command *cmd,
 						    const char *buffer,
 						    const jsmntok_t *obj UNNEEDED,
@@ -2977,7 +2966,7 @@ static struct command_result *json_dev_ignore_htlcs(struct command *cmd,
 		return command_fail(cmd, LIGHTNINGD,
 				    "Could not find channel with that peer");
 	}
-	peer->ignore_htlcs = *ignore;
+	peer->dev_ignore_htlcs = *ignore;
 
 	return command_success(cmd, json_stream_success(cmd));
 }
@@ -2986,12 +2975,11 @@ static const struct json_command dev_ignore_htlcs = {
 	"dev-ignore-htlcs",
 	"developer",
 	json_dev_ignore_htlcs,
-	"Set ignoring incoming HTLCs for peer {id} to {ignore}", false,
-	"Set/unset ignoring of all incoming HTLCs.  For testing only."
+	"Set ignoring incoming HTLCs for peer {id} to {ignore}",
+	.dev_only = true,
 };
 
 AUTODATA(json_command, &dev_ignore_htlcs);
-#endif /* DEVELOPER */
 
 /* Warp this process to ensure the consistent json object structure
  * between 'listforwards' API and 'forward_event' notification. */

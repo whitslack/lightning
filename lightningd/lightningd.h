@@ -128,6 +128,9 @@ struct lightningd {
 	 * transaction. */
 	struct jsonrpc *jsonrpc;
 
+	/* --developer? */
+	bool developer;
+
 	/* Configuration file name */
 	char *config_filename;
 	/* Configuration settings. */
@@ -277,7 +280,6 @@ struct lightningd {
 	/* Contains the codex32 string used with --recover flag */
 	char *recover;
 
-#if DEVELOPER
 	/* If we want to debug a subdaemon/plugin. */
 	char *dev_debug_subprocess;
 
@@ -333,7 +335,6 @@ struct lightningd {
 
 	/* Tell channeld not to worry about pings. */
 	bool dev_no_ping_timer;
-#endif /* DEVELOPER */
 
 	/* tor support */
 	struct wireaddr *proxyaddr;

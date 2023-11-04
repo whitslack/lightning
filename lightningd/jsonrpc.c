@@ -230,7 +230,6 @@ static const struct json_command stop_command = {
 };
 AUTODATA(json_command, &stop_command);
 
-#if DEVELOPER
 struct slowcmd {
 	struct command *cmd;
 	unsigned *msec;
@@ -310,10 +309,10 @@ static const struct json_command dev_command = {
 	"dev crash\n"
 	"	Crash lightningd by calling fatal()\n"
 	"dev slowcmd {msec}\n"
-	"	Torture test for slow commands, optional {msec}\n"
+	"	Torture test for slow commands, optional {msec}\n",
+	.dev_only = true,
 };
 AUTODATA(json_command, &dev_command);
-#endif /* DEVELOPER */
 
 static size_t num_cmdlist;
 
@@ -404,6 +403,10 @@ static struct command_result *json_help(struct command *cmd,
 		if (!cmd->ld->deprecated_apis && one_cmd->deprecated)
 			return command_fail(cmd, JSONRPC2_METHOD_NOT_FOUND,
 					    "Deprecated command %s",
+					    cmdname);
+		if (!cmd->ld->developer && one_cmd->dev_only)
+			return command_fail(cmd, JSONRPC2_METHOD_NOT_FOUND,
+					    "Developer-only command %s",
 					    cmdname);
 	} else
 		one_cmd = NULL;
@@ -741,6 +744,18 @@ static void replace_command(struct rpc_command_hook_payload *p,
 			      buffer + method->start);
 		goto fail;
 	}
+	if (p->cmd->json_cmd->deprecated && !p->cmd->ld->deprecated_apis) {
+		bad = tal_fmt(tmpctx, "redirected to deprecated command '%.*s'",
+			      method->end - method->start,
+			      buffer + method->start);
+		goto fail;
+	}
+	if (p->cmd->json_cmd->dev_only && !p->cmd->ld->developer) {
+		bad = tal_fmt(tmpctx, "redirected to developer-only command '%.*s'",
+			      method->end - method->start,
+			      buffer + method->start);
+		goto fail;
+	}
 
 	jsonrpc = json_get_member(buffer, replacetok, "jsonrpc");
 	if (!jsonrpc || jsonrpc->type != JSMN_STRING || !json_tok_streq(buffer, jsonrpc, "2.0")) {
@@ -963,6 +978,12 @@ parse_request(struct json_connection *jcon, const jsmntok_t tok[])
 	if (c->json_cmd->deprecated && !jcon->ld->deprecated_apis) {
 		return command_fail(c, JSONRPC2_METHOD_NOT_FOUND,
 				    "Command %.*s is deprecated",
+				    json_tok_full_len(method),
+				    json_tok_full(jcon->buffer, method));
+	}
+	if (c->json_cmd->dev_only && !jcon->ld->developer) {
+		return command_fail(c, JSONRPC2_METHOD_NOT_FOUND,
+				    "Command %.*s is developer-only",
 				    json_tok_full_len(method),
 				    json_tok_full(jcon->buffer, method));
 	}
@@ -1239,13 +1260,11 @@ static void destroy_jsonrpc(struct jsonrpc *jsonrpc)
 	strmap_clear(&jsonrpc->usagemap);
 }
 
-#if DEVELOPER
 static void memleak_help_jsonrpc(struct htable *memtable,
 				 struct jsonrpc *jsonrpc)
 {
 	memleak_scan_strmap(memtable, &jsonrpc->usagemap);
 }
-#endif /* DEVELOPER */
 
 void jsonrpc_setup(struct lightningd *ld)
 {
@@ -1272,6 +1291,11 @@ bool command_usage_only(const struct command *cmd)
 bool command_deprecated_apis(const struct command *cmd)
 {
 	return cmd->ld->deprecated_apis;
+}
+
+bool command_dev_apis(const struct command *cmd)
+{
+	return cmd->ld->developer;
 }
 
 void command_set_usage(struct command *cmd, const char *usage TAKES)

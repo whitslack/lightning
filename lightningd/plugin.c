@@ -45,13 +45,11 @@ struct plugin_rpccall {
 	struct jsonrpc_request *request;
 };
 
-#if DEVELOPER
 static void memleak_help_pending_requests(struct htable *memtable,
 					  struct plugins *plugins)
 {
 	memleak_scan_strmap(memtable, &plugins->pending_requests);
 }
-#endif /* DEVELOPER */
 
 static const char *state_desc(const struct plugin *plugin)
 {
@@ -83,9 +81,7 @@ struct plugins *plugins_new(const tal_t *ctx, struct log_book *log_book,
 	p->plugin_cmds = tal_arr(p, struct plugin_command *, 0);
 	p->blacklist = tal_arr(p, const char *, 0);
 	p->plugin_idx = 0;
-#if DEVELOPER
 	p->dev_builtin_plugins_unimportant = false;
-#endif /* DEVELOPER */
 	strmap_init(&p->pending_requests);
 	memleak_add_helper(p, memleak_help_pending_requests);
 
@@ -242,7 +238,7 @@ static u32 file_checksum(struct lightningd *ld, const char *path)
 {
 	char *content;
 
-	if (IFDEV(ld->dev_no_plugin_checksum, false))
+	if (ld->dev_no_plugin_checksum)
 		return 0;
 
 	content = grab_file(tmpctx, path);
@@ -1265,6 +1261,7 @@ static const char *plugin_rpcmethod_add(struct plugin *plugin,
 	} else
 		cmd->deprecated = false;
 
+	cmd->dev_only = false;
 	cmd->dispatch = plugin_rpcmethod_dispatch;
 	if (!jsonrpc_command_add(plugin->plugins->ld->jsonrpc, cmd, usage)) {
 		struct plugin *p =
@@ -1474,7 +1471,8 @@ static const char *plugin_add_params(const struct plugin *plugin)
 		tal_arr_expand(&plugin->plugins->ld->configvars, cv);
 
 		/* If this fails, we free plugin and unregister the configvar */
-		err = configvar_parse(cv, false, true, IFDEV(true, false));
+		err = configvar_parse(cv, false, true,
+				      plugin->plugins->ld->developer);
 		if (err)
 			return err;
 	}
@@ -1790,18 +1788,17 @@ void plugins_add_default_dir(struct plugins *plugins)
 	}
 }
 
+static bool debugging(struct plugin *p)
+{
+	if (p->plugins->ld->dev_debug_subprocess == NULL)
+		return false;
+	return strends(p->cmd, p->plugins->ld->dev_debug_subprocess);
+}
+
 static void plugin_set_timeout(struct plugin *p)
 {
-	bool debug = false;
-
-#if DEVELOPER
-	if (p->plugins->ld->dev_debug_subprocess
-	    && strends(p->cmd, p->plugins->ld->dev_debug_subprocess))
-		debug = true;
-#endif
-
 	/* Don't timeout if they're running a debugger. */
-	if (debug)
+	if (debugging(p))
 		p->timeout_timer = NULL;
 	else {
 		p->timeout_timer
@@ -1816,17 +1813,14 @@ const char *plugin_send_getmanifest(struct plugin *p, const char *cmd_id)
 	char **cmd;
 	int stdinfd, stdoutfd;
 	struct jsonrpc_request *req;
-	bool debug = false;
 
-#if DEVELOPER
-	if (p->plugins->ld->dev_debug_subprocess
-	    && strends(p->cmd, p->plugins->ld->dev_debug_subprocess))
-		debug = true;
-#endif
-	cmd = tal_arrz(tmpctx, char *, 2 + debug);
+	cmd = tal_arr(tmpctx, char *, 1);
 	cmd[0] = p->cmd;
-	if (debug)
-		cmd[1] = "--debugger";
+	if (debugging(p))
+		tal_arr_expand(&cmd, "--debugger");
+	if (p->plugins->ld->developer)
+		tal_arr_expand(&cmd, "--developer");
+	tal_arr_expand(&cmd, NULL);
 	p->pid = pipecmdarr(&stdinfd, &stdoutfd, &pipecmd_preserve, cmd);
 	if (p->pid == -1)
 		return tal_fmt(p, "opening pipe: %s", strerror(errno));
@@ -1881,7 +1875,6 @@ void plugins_init(struct plugins *plugins)
 	plugins->default_dir = path_join(plugins, plugins->ld->config_basedir, "plugins");
 	plugins_add_default_dir(plugins);
 
-#if DEVELOPER
 	if (plugins->dev_builtin_plugins_unimportant) {
 		size_t i;
 
@@ -1900,7 +1893,6 @@ void plugins_init(struct plugins *plugins)
 			}
 		}
 	}
-#endif /* DEVELOPER */
 
 	setenv("LIGHTNINGD_PLUGIN", "1", 1);
 	setenv("LIGHTNINGD_VERSION", version(), 1);

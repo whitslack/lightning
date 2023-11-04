@@ -28,7 +28,6 @@ jobs:
           -e NETWORK=${{ matrix.network }} \
           -e TARGET_HOST=${{ matrix.TARGET_HOST }} \
           -e VALGRIND=${{ matrix.valgrind }} \
-          -e DEVELOPER=1 \
           -e PYTEST_PAR=2 \
           -e PYTEST_OPTS="--timeout=300" \
           -e TEST_CMD="make check-protos" \
@@ -36,9 +35,3 @@ jobs:
           -e TEST_GROUP_COUNT=1 \
           -e TIMEOUT=120 \
           cln-ci-ubuntu
-      - name: Upload Unit Test Results
-        if: always()
-        uses: actions/upload-artifact@v2.2.4
-        with:
-          name: Junit Report ${{ github.run_number }}.{{ matrix.cfg }}
-          path: report.*
