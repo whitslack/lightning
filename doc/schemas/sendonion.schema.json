@@ -3,7 +3,6 @@
   "type": "object",
   "additionalProperties": true,
   "required": [
-    "created_index",
     "id",
     "payment_hash",
     "status",
@@ -11,14 +10,9 @@
     "amount_sent_msat"
   ],
   "properties": {
-    "created_index": {
-      "added": "v23.11",
-      "type": "u64",
-      "description": "1-based index indicating order this payment was created in"
-    },
     "id": {
       "type": "u64",
-      "description": "old synonym for created_index"
+      "description": "unique ID for this payment attempt"
     },
     "payment_hash": {
       "type": "hash",
@@ -83,7 +77,6 @@
           "payment_preimage"
         ],
         "properties": {
-          "created_index": {},
           "id": {},
           "payment_hash": {},
           "status": {},
@@ -98,11 +91,6 @@
           "bolt11": {},
           "bolt12": {},
           "partid": {},
-          "updated_index": {
-            "added": "v23.11",
-            "type": "u64",
-            "description": "1-based index indicating order this payment was changed"
-          },
           "payment_preimage": {
             "type": "secret",
             "description": "the proof of payment: SHA256 of this **payment_hash**"
@@ -125,7 +113,6 @@
         "additionalProperties": false,
         "required": [],
         "properties": {
-          "created_index": {},
           "id": {},
           "payment_hash": {},
           "status": {},

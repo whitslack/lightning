@@ -41,8 +41,7 @@ payments will be returned -- one payment object for each partid.
 [comment]: # (GENERATE-FROM-SCHEMA-START)
 On success, an object containing **payments** is returned.  It is an array of objects, where each object contains:
 
-- **created\_index** (u64): 1-based index indicating order this payment was created in *(added v23.11)*
-- **id** (u64): old synonym for created\_index
+- **id** (u64): unique ID for this payment attempt
 - **payment\_hash** (hash): the hash of the *payment\_preimage* which will prove payment
 - **status** (string): status of the payment (one of "pending", "failed", "complete")
 - **amount\_sent\_msat** (msat): the amount we actually sent, including fees
@@ -50,7 +49,6 @@ On success, an object containing **payments** is returned.  It is an array of ob
 - **partid** (u64, optional): unique ID within this (multi-part) payment
 - **destination** (pubkey, optional): the final destination of the payment if known
 - **amount\_msat** (msat, optional): the amount the destination received, if known
-- **updated\_index** (u64, optional): 1-based index indicating order this payment was changed (only present if it has changed since creation) *(added v23.11)*
 - **completed\_at** (u64, optional): the UNIX timestamp showing when this payment was completed
 - **groupid** (u64, optional): Grouping key to disambiguate multiple attempts to pay an invoice or the same payment\_hash
 - **payment\_preimage** (secret, optional): proof of payment
@@ -109,4 +107,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:d390a3db57ea9ab02ce8d2613ba0396f717658fb972ccc9531fd7da0f4eb8ab4)
+[comment]: # ( SHA256STAMP:a7736b0f340fce7c02a7bdfeb2c5321656c490a5046129895d6689c2d82cc431)

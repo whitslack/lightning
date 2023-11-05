@@ -4,21 +4,15 @@
   "additionalProperties": true,
   "required": [
     "id",
-    "created_index",
     "payment_hash",
     "status",
     "created_at",
     "amount_sent_msat"
   ],
   "properties": {
-    "created_index": {
-      "added": "v23.11",
-      "type": "u64",
-      "description": "1-based index indicating order this payment was created in"
-    },
     "id": {
       "type": "u64",
-      "description": "old synonym for created_index"
+      "description": "unique ID for this payment attempt"
     },
     "groupid": {
       "type": "u64",
@@ -46,11 +40,6 @@
     "created_at": {
       "type": "u64",
       "description": "the UNIX timestamp showing when this payment was initiated"
-    },
-    "updated_index": {
-      "added": "v23.11",
-      "type": "u64",
-      "description": "1-based index indicating order this payment was changed (only present if it has changed since creation)"
     },
     "completed_at": {
       "type": "number",
@@ -96,8 +85,6 @@
         ],
         "properties": {
           "id": {},
-          "created_index": {},
-          "updated_index": {},
           "groupid": {},
           "payment_hash": {},
           "status": {},
