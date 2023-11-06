@@ -270,7 +270,6 @@ int main(int argc, char *argv[])
 	const struct channel_type *channel_type;
 	struct sha256_double hash;
 	u32 blockheight = 0;
-	int local_anchor_outnum;
 
 	setup_locale();
 	chainparams = chainparams_for_network("bitcoin");
@@ -426,7 +425,7 @@ int main(int argc, char *argv[])
 	local_txs = channel_txs(NULL, &channel->funding, channel->funding_sats,
 				&htlcmap, NULL, &funding_wscript, channel,
 				&local_per_commit_point, commitnum,
-				LOCAL, 0, 0, &local_anchor_outnum);
+				LOCAL, 0, 0);
 
 	printf("## local_commitment\n"
 	       "# input amount %s, funding_wscript %s, pubkey %s\n",
@@ -537,7 +536,7 @@ int main(int argc, char *argv[])
 	remote_txs = channel_txs(NULL, &channel->funding, channel->funding_sats,
 				 &htlcmap, NULL, &funding_wscript, channel,
 				 &remote_per_commit_point, commitnum,
-				 REMOTE, 0, 0, &local_anchor_outnum);
+				 REMOTE, 0, 0);
 
 	printf("## remote_commitment\n"
 	       "# input amount %s, funding_wscript %s, key %s\n",
