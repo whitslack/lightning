@@ -3430,14 +3430,17 @@ static void resume_splice_negotiation(struct peer *peer,
 
 static struct inflight *inflights_new(struct peer *peer)
 {
-	struct inflight *inf;
+	struct inflight *inf = tal(peer->splice_state->inflights,
+				   struct inflight);
+	int i = tal_count(peer->splice_state->inflights);
 
-	if (!peer->splice_state->inflights)
+	if (i)
+		tal_resize(&peer->splice_state->inflights, i + 1);
+	else
 		peer->splice_state->inflights = tal_arr(peer->splice_state,
-							struct inflight *, 0);
+							struct inflight *, 1);
 
-	inf = tal(peer->splice_state->inflights, struct inflight);
-	tal_arr_expand(&peer->splice_state->inflights, inf);
+	peer->splice_state->inflights[i] = inf;
 	return inf;
 }
 
