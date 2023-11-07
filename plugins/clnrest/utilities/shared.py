@@ -2,17 +2,23 @@ import json5
 import re
 import json
 
-CERTS_PATH, REST_PROTOCOL, REST_HOST, REST_PORT = "", "", "", ""
+CERTS_PATH, REST_PROTOCOL, REST_HOST, REST_PORT, REST_CSP, REST_CORS_ORIGINS = "", "", "", "", "", []
 
 
 def set_config(options):
     if 'rest-port' not in options:
         return "`rest-port` option is not configured"
-    global CERTS_PATH, REST_PROTOCOL, REST_HOST, REST_PORT
+    global CERTS_PATH, REST_PROTOCOL, REST_HOST, REST_PORT, REST_CSP, REST_CORS_ORIGINS
     CERTS_PATH = str(options["rest-certs"])
     REST_PROTOCOL = str(options["rest-protocol"])
     REST_HOST = str(options["rest-host"])
     REST_PORT = int(options["rest-port"])
+    REST_CSP = str(options["rest-csp"])
+    cors_origins = options["rest-cors-origins"]
+    REST_CORS_ORIGINS.clear()
+    for origin in cors_origins:
+        REST_CORS_ORIGINS.append(str(origin))
+
     return None
 
 
@@ -56,9 +62,14 @@ def verify_rune(plugin, request):
     else:
         rpc_params = request.form.to_dict()
 
+    try:
+        rpc_method = request.view_args["rpc_method"]
+    except Exception:
+        rpc_method = ""
+
     return call_rpc_method(plugin, "checkrune",
                            {"rune": rune,
-                            "method": request.view_args["rpc_method"],
+                            "method": rpc_method,
                             "params": rpc_params})
 
 

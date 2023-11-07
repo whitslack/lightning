@@ -93,7 +93,6 @@ void peer_spoke(struct lightningd *ld, const u8 *msg);
 
 void channel_errmsg(struct channel *channel,
 		    struct peer_fd *peer_fd,
-		    const struct channel_id *channel_id,
 		    const char *desc,
 		    bool warning,
 		    bool aborted,

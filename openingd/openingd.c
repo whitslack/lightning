@@ -185,9 +185,7 @@ static u8 *opening_negotiate_msg(const tal_t *ctx, struct state *state,
 	 * form, but we use it in a very limited way. */
 	for (;;) {
 		u8 *msg;
-		char *err;
-		bool warning;
-		struct channel_id actual;
+		const char *err;
 
 		/* The event loop is responsible for freeing tmpctx, so our
 		 * temporary allocations don't grow unbounded. */
@@ -206,42 +204,18 @@ static u8 *opening_negotiate_msg(const tal_t *ctx, struct state *state,
 			continue;
 
 		/* A helper which decodes an error. */
-		if (is_peer_error(tmpctx, msg, &state->channel_id,
-				  &err, &warning)) {
-			/* BOLT #1:
-			 *
-			 *  - if no existing channel is referred to by `channel_id`:
-			 *    - MUST ignore the message.
-			 */
-			/* In this case, is_peer_error returns true, but sets
-			 * err to NULL */
-			if (!err) {
-				tal_free(msg);
-				continue;
-			}
+		err = is_peer_error(tmpctx, msg);
+		if (err) {
 			negotiation_aborted(state,
 					    tal_fmt(tmpctx, "They sent %s",
 						    err));
 			/* Return NULL so caller knows to stop negotiating. */
-			return NULL;
+			return tal_free(msg);
 		}
 
-		/*~ We do not support multiple "live" channels, though the
-		 * protocol has a "channel_id" field in all non-gossip messages
-		 * so it's possible.  Our one-process-one-channel mechanism
-		 * keeps things simple: if we wanted to change this, we would
-		 * probably be best with another daemon to de-multiplex them;
-		 * this could be connectd itself, in fact. */
-		if (is_wrong_channel(msg, &state->channel_id, &actual)
-		    && is_wrong_channel(msg, alternate, &actual)) {
-			status_debug("Rejecting %s for unknown channel_id %s",
-				     peer_wire_name(fromwire_peektype(msg)),
-				     type_to_string(tmpctx, struct channel_id,
-						    &actual));
-			peer_write(state->pps,
-				   take(towire_errorfmt(NULL, &actual,
-							"Multiple channels"
-							" unsupported")));
+		err = is_peer_warning(tmpctx, msg);
+		if (err) {
+			status_info("They sent %s", err);
 			tal_free(msg);
 			continue;
 		}
@@ -471,7 +445,7 @@ static u8 *funder_channel_start(struct state *state, u8 channel_flags,
 	/* BOLT #2:
 	 * - if `channel_type` is set, and `channel_type` was set in
 	 *   `open_channel`, and they are not equal types:
-	 *    - MUST reject the channel.
+	 *    - MUST fail the channel.
 	 */
 	if (accept_tlvs->channel_type) {
 		/* Except that v23.05 could set OPT_SCID_ALIAS in reply! */
@@ -1412,7 +1386,7 @@ static u8 *handle_peer_in(struct state *state)
 		return fundee_channel(state, msg);
 
 	/* Handles error cases. */
-	if (handle_peer_error(state->pps, &state->channel_id, msg))
+	if (handle_peer_error_or_warning(state->pps, msg))
 		return NULL;
 
 	extracted = extract_channel_id(msg, &channel_id);

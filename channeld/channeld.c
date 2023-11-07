@@ -2229,7 +2229,7 @@ static void peer_in(struct peer *peer, const u8 *msg)
 {
 	enum peer_wire type = fromwire_peektype(msg);
 
-	if (handle_peer_error(peer->pps, &peer->channel_id, msg))
+	if (handle_peer_error_or_warning(peer->pps, msg))
 		return;
 
 	/* Must get channel_ready before almost anything. */
@@ -2852,7 +2852,7 @@ static void peer_reconnect(struct peer *peer,
 					      "Expected reestablish, got: %s",
 					      tal_hex(tmpctx, msg));
 		}
-	} while (handle_peer_error(peer->pps, &peer->channel_id, msg) ||
+	} while (handle_peer_error_or_warning(peer->pps, msg) ||
 		 capture_premature_msg(&premature_msgs, msg));
 
 	/* Initialize here in case we don't read it below! */

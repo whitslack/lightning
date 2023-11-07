@@ -15,6 +15,7 @@ env:
   # of a bit of compile time.
   RUST_PROFILE: release
   SLOW_MACHINE: 1
+  CI_SERVER: "http://35.239.136.52:3170"
 
 jobs:
   prebuild:
@@ -34,7 +35,7 @@ jobs:
 
       - name: Rebase
         # We can't rebase if we're on master already.
-        if: github.ref == 'refs/heads/master'
+        if: github.ref != 'refs/heads/master'
         run: |
           git config user.name github-actions
           git config user.email github-actions@github.com
@@ -354,6 +355,7 @@ jobs:
 
       - name: Install dependencies
         run: |
+          sudo apt-get update -qq
           sudo apt-get install -yyq valgrind
           pip3 install --user pip wheel poetry
           poetry install

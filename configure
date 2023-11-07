@@ -174,7 +174,7 @@ set_defaults()
 	fi
     fi
     if [ "$FUZZING" != 0 ]; then
-	FUZZFLAGS="-fsanitize=fuzzer-no-link"
+	FUZZFLAGS="-fsanitize=fuzzer-no-link -DFUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION"
 	CSANFLAGS="$CSANFLAGS $FUZZFLAGS"
     fi
     echo CSANFLAGS = $CSANFLAGS
@@ -210,7 +210,7 @@ usage()
     echo "    Prefix for make install"
     usage_with_default "--enable/disable-developer" "$DEVELOPER" "enable" "disable"
     echo "    Developer mode, good for testing"
-    usage_with_default "--enable/disable-debug" "$DEBUGBUILD" "enable" "disable"
+    usage_with_default "--enable/disable-debugbuild" "$DEBUGBUILD" "enable" "disable"
     echo "    Extra debug checks in the build, good for testing"
     usage_with_default "--enable/disable-compat" "$COMPAT" "enable" "disable"
     echo "    Compatibility mode, good to disable to see if your software breaks"
