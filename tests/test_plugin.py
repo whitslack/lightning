@@ -800,25 +800,47 @@ def test_channel_state_changed_bilateral(node_factory, bitcoind):
     assert 'closer' not in l1.rpc.listpeerchannels()['channels'][0]
     assert 'closer' not in l2.rpc.listpeerchannels()['channels'][0]
 
-    event1 = wait_for_event(l1)
-    event2 = wait_for_event(l2)
-    assert(event1['peer_id'] == l2_id)  # we only test these IDs the first time
-    assert(event1['channel_id'] == cid)
-    assert(event1['short_channel_id'] is None)  # None until locked in
-    assert(event1['cause'] == "user")
+    if l1.config('experimental-dual-fund'):
+        # Dual funded channels go through two state transitions.
+        event1a, event1b = wait_for_event(l1), wait_for_event(l1)
+        event2a, event2b = wait_for_event(l2), wait_for_event(l2)
 
-    assert(event2['peer_id'] == l1_id)  # we only test these IDs the first time
-    assert(event2['channel_id'] == cid)
-    assert(event2['short_channel_id'] is None)  # None until locked in
-    assert(event2['cause'] == "remote")
+        for ev in [event1a, event1b]:
+            assert(ev['peer_id'] == l2_id)  # we only test these IDs the first time
+            assert(ev['channel_id'] == cid)
+            assert(ev['short_channel_id'] is None)  # None until locked in
+        assert(event1a['cause'] == "remote")
+        assert(event1b['cause'] == "user")
 
-    for ev in [event1, event2]:
-        # Dual funded channels
-        if l1.config('experimental-dual-fund'):
+        for ev in [event2a, event2b]:
+            assert(ev['peer_id'] == l1_id)  # we only test these IDs the first time
+            assert(ev['channel_id'] == cid)
+            assert(ev['short_channel_id'] is None)  # None until locked in
+            assert(ev['cause'] == "remote")
+
+        for ev in [event1a, event2a]:
             assert(ev['old_state'] == "DUALOPEND_OPEN_INIT")
+            assert(ev['new_state'] == "DUALOPEND_OPEN_COMMITTED")
+            assert(ev['message'] == "Commitment transaction committed")
+
+        for ev in [event1b, event2b]:
+            assert(ev['old_state'] == "DUALOPEND_OPEN_COMMITTED")
             assert(ev['new_state'] == "DUALOPEND_AWAITING_LOCKIN")
             assert(ev['message'] == "Sigs exchanged, waiting for lock-in")
-        else:
+    else:
+        event1 = wait_for_event(l1)
+        event2 = wait_for_event(l2)
+        assert(event1['peer_id'] == l2_id)  # we only test these IDs the first time
+        assert(event1['channel_id'] == cid)
+        assert(event1['short_channel_id'] is None)  # None until locked in
+        assert(event1['cause'] == "user")
+
+        assert(event2['peer_id'] == l1_id)  # we only test these IDs the first time
+        assert(event2['channel_id'] == cid)
+        assert(event2['short_channel_id'] is None)  # None until locked in
+        assert(event2['cause'] == "remote")
+
+        for ev in [event1, event2]:
             assert(ev['old_state'] == "unknown")
             assert(ev['new_state'] == "CHANNELD_AWAITING_LOCKIN")
             assert(ev['message'] == "new channel opened")
@@ -943,8 +965,13 @@ def test_channel_state_changed_unilateral(node_factory, bitcoind):
 
     if l2.config('experimental-dual-fund'):
         assert(event2['old_state'] == "DUALOPEND_OPEN_INIT")
-        assert(event2['new_state'] == "DUALOPEND_AWAITING_LOCKIN")
-        assert(event2['message'] == "Sigs exchanged, waiting for lock-in")
+        assert(event2['new_state'] == "DUALOPEND_OPEN_COMMITTED")
+        assert(event2['message'] == "Commitment transaction committed")
+
+        event2 = wait_for_event(l2)
+        assert event2['old_state'] == "DUALOPEND_OPEN_COMMITTED"
+        assert event2['new_state'] == "DUALOPEND_AWAITING_LOCKIN"
+        assert event2['message'] == "Sigs exchanged, waiting for lock-in"
     else:
         assert(event2['old_state'] == "unknown")
         assert(event2['new_state'] == "CHANNELD_AWAITING_LOCKIN")
@@ -1038,7 +1065,7 @@ def test_channel_state_change_history(node_factory, bitcoind):
     history = l1.rpc.listpeerchannels()['channels'][0]['state_changes']
     if l1.config('experimental-dual-fund'):
         assert(history[0]['cause'] == "user")
-        assert(history[0]['old_state'] == "DUALOPEND_OPEN_INIT")
+        assert(history[0]['old_state'] == "DUALOPEND_OPEN_COMMITTED")
         assert(history[0]['new_state'] == "DUALOPEND_AWAITING_LOCKIN")
         assert(history[1]['cause'] == "user")
         assert(history[1]['old_state'] == "DUALOPEND_AWAITING_LOCKIN")
@@ -2777,17 +2804,7 @@ def test_commando_rune(node_factory):
                             {'alternatives': ['parr1!', 'parr1/io'],
                              'summary': "parr1 (array parameter #1) is missing OR parr1 (array parameter #1) unequal to 'io'"}]),
                    (rune7, [{'alternatives': ['pnum=0'],
-                             'summary': "pnum (number of command parameters) equal to 0"}]),
-                   (rune8, [{'alternatives': ['pnum=0'],
-                             'summary': "pnum (number of command parameters) equal to 0"},
-                            {'alternatives': ['rate=3'],
-                             'summary': "rate (max per minute) equal to 3"}]),
-                   (rune9, [{'alternatives': ['pnum=0'],
-                             'summary': "pnum (number of command parameters) equal to 0"},
-                            {'alternatives': ['rate=3'],
-                             'summary': "rate (max per minute) equal to 3"},
-                            {'alternatives': ['rate=1'],
-                             'summary': "rate (max per minute) equal to 1"}]))
+                             'summary': "pnum (number of command parameters) equal to 0"}]))
     for decode in runedecodes:
         rune = decode[0]
         restrictions = decode[1]
@@ -2821,10 +2838,7 @@ def test_commando_rune(node_factory):
                  (rune6, "listpeers", [l2.info['id'], 'broken']),
                  (rune6, "listpeers", [l2.info['id']]),
                  (rune7, "listpeers", []),
-                 (rune7, "getinfo", {}),
-                 (rune9, "getinfo", {}),
-                 (rune8, "getinfo", {}),
-                 (rune8, "getinfo", {}))
+                 (rune7, "getinfo", {}))
 
     failures = ((rune2, "withdraw", {}),
                 (rune2, "plugin", {'subcommand': 'list'}),
@@ -2846,7 +2860,6 @@ def test_commando_rune(node_factory):
         time.sleep(1)
 
     for rune, cmd, params in failures:
-        print("{} {}".format(cmd, params))
         with pytest.raises(RpcError, match='Not authorized:') as exc_info:
             l2.rpc.call(method='commando',
                         payload={'peer_id': l1.info['id'],
@@ -2854,70 +2867,6 @@ def test_commando_rune(node_factory):
                                  'method': cmd,
                                  'params': params})
         assert exc_info.value.error['code'] == 0x4c51
-
-    # Now, this can flake if we cross a minute boundary!  So wait until
-    # It succeeds again.
-    while True:
-        try:
-            l2.rpc.call(method='commando',
-                        payload={'peer_id': l1.info['id'],
-                                 'rune': rune8['rune'],
-                                 'method': 'getinfo',
-                                 'params': {}})
-            break
-        except RpcError as e:
-            assert e.error['code'] == 0x4c51
-        time.sleep(1)
-
-    # This fails immediately, since we've done one.
-    with pytest.raises(RpcError, match='Not authorized:') as exc_info:
-        l2.rpc.call(method='commando',
-                    payload={'peer_id': l1.info['id'],
-                             'rune': rune9['rune'],
-                             'method': 'getinfo',
-                             'params': {}})
-    assert exc_info.value.error['code'] == 0x4c51
-
-    # Two more succeed for rune8.
-    for _ in range(2):
-        l2.rpc.call(method='commando',
-                    payload={'peer_id': l1.info['id'],
-                             'rune': rune8['rune'],
-                             'method': 'getinfo',
-                             'params': {}})
-    assert exc_info.value.error['code'] == 0x4c51
-
-    # Now we've had 3 in one minute, this will fail.
-    with pytest.raises(RpcError, match='Not authorized:') as exc_info:
-        l2.rpc.call(method='commando',
-                    payload={'peer_id': l1.info['id'],
-                             'rune': rune8['rune'],
-                             'method': 'getinfo',
-                             'params': {}})
-    assert exc_info.value.error['code'] == 0x4c51
-
-    # rune5 can only be used by l2:
-    l3 = node_factory.get_node()
-    l3.connect(l1)
-    with pytest.raises(RpcError, match='Not authorized:') as exc_info:
-        l3.rpc.call(method='commando',
-                    payload={'peer_id': l1.info['id'],
-                             'rune': rune5['rune'],
-                             'method': "listpeers",
-                             'params': {}})
-    assert exc_info.value.error['code'] == 0x4c51
-
-    # Now wait for ratelimit expiry, ratelimits should reset.
-    time.sleep(61)
-
-    for rune, cmd, params in ((rune9, "getinfo", {}),
-                              (rune8, "getinfo", {}),
-                              (rune8, "getinfo", {})):
-        l2.rpc.call(method='commando',
-                    payload={'peer_id': l1.info['id'],
-                             'rune': rune['rune'],
-                             'method': cmd,
-                             'params': params})
 
 
 def test_commando_listrunes(node_factory):

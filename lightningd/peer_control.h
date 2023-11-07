@@ -110,7 +110,12 @@ void resend_closing_transactions(struct lightningd *ld);
 
 void drop_to_chain(struct lightningd *ld, struct channel *channel, bool cooperative);
 
+void update_channel_from_inflight(struct lightningd *ld,
+				  struct channel *channel,
+				  const struct channel_inflight *inflight);
+
 void channel_watch_funding(struct lightningd *ld, struct channel *channel);
+
 /* If this channel has a "wrong funding" shutdown, watch that too. */
 void channel_watch_wrong_funding(struct lightningd *ld, struct channel *channel);
 
@@ -132,9 +137,10 @@ void waitblockheight_notify_new_block(struct lightningd *ld,
 				      u32 block_height);
 
 
-/* JSON parameter by channel_id or scid */
+/* JSON parameter by channel_id or scid (caller must check state!) */
 struct command_result *
 command_find_channel(struct command *cmd,
+		     const char *name,
 		     const char *buffer, const jsmntok_t *tok,
 		     struct channel **channel);
 

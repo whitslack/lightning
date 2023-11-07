@@ -72,12 +72,6 @@ void broadcast_tx_(struct chain_topology *topo UNNEEDED,
 		   bool (*refresh)(struct channel * UNNEEDED, const struct bitcoin_tx ** UNNEEDED, void *) UNNEEDED,
 		   void *cbarg TAKES UNNEEDED)
 { fprintf(stderr, "broadcast_tx_ called!\n"); abort(); }
-/* Generated stub for channel_tell_depth */
-bool channel_tell_depth(struct lightningd *ld UNNEEDED,
-				 struct channel *channel UNNEEDED,
-				 const struct bitcoin_txid *txid UNNEEDED,
-				 u32 depth UNNEEDED)
-{ fprintf(stderr, "channel_tell_depth called!\n"); abort(); }
 /* Generated stub for channel_unsaved_close_conn */
 void channel_unsaved_close_conn(struct channel *channel UNNEEDED, const char *why UNNEEDED)
 { fprintf(stderr, "channel_unsaved_close_conn called!\n"); abort(); }
@@ -89,6 +83,11 @@ void channel_update_reserve(struct channel *channel UNNEEDED,
 			    struct channel_config *their_config UNNEEDED,
 			    struct amount_sat funding_total UNNEEDED)
 { fprintf(stderr, "channel_update_reserve called!\n"); abort(); }
+/* Generated stub for channeld_tell_depth */
+void channeld_tell_depth(struct channel *channel UNNEEDED,
+			 const struct bitcoin_txid *txid UNNEEDED,
+			 u32 depth UNNEEDED)
+{ fprintf(stderr, "channeld_tell_depth called!\n"); abort(); }
 /* Generated stub for cmd_id_from_close_command */
 const char *cmd_id_from_close_command(const tal_t *ctx UNNEEDED,
 				      struct lightningd *ld UNNEEDED, struct channel *channel UNNEEDED)
@@ -140,6 +139,11 @@ struct onionreply *create_onionreply(const tal_t *ctx UNNEEDED,
 				     const struct secret *shared_secret UNNEEDED,
 				     const u8 *failure_msg UNNEEDED)
 { fprintf(stderr, "create_onionreply called!\n"); abort(); }
+/* Generated stub for depthcb_update_scid */
+bool depthcb_update_scid(struct channel *channel UNNEEDED,
+			 const struct bitcoin_txid *txid UNNEEDED,
+			 const struct bitcoin_outpoint *outpoint UNNEEDED)
+{ fprintf(stderr, "depthcb_update_scid called!\n"); abort(); }
 /* Generated stub for derive_channel_id */
 void derive_channel_id(struct channel_id *channel_id UNNEEDED,
 		       const struct bitcoin_outpoint *outpoint UNNEEDED)
@@ -342,7 +346,7 @@ void json_add_timeabs(struct json_stream *result UNNEEDED, const char *fieldname
 /* Generated stub for json_add_timeiso */
 void json_add_timeiso(struct json_stream *result UNNEEDED,
 		      const char *fieldname UNNEEDED,
-		      struct timeabs *time UNNEEDED)
+		      struct timeabs time UNNEEDED)
 { fprintf(stderr, "json_add_timeiso called!\n"); abort(); }
 /* Generated stub for json_add_tx */
 void json_add_tx(struct json_stream *result UNNEEDED,
@@ -434,6 +438,9 @@ bool json_tok_streq(const char *buffer UNNEEDED, const jsmntok_t *tok UNNEEDED, 
 void kill_uncommitted_channel(struct uncommitted_channel *uc UNNEEDED,
 			      const char *why UNNEEDED)
 { fprintf(stderr, "kill_uncommitted_channel called!\n"); abort(); }
+/* Generated stub for lockin_complete */
+void lockin_complete(struct channel *channel UNNEEDED)
+{ fprintf(stderr, "lockin_complete called!\n"); abort(); }
 /* Generated stub for logv */
 void logv(struct logger *logger UNNEEDED, enum log_level level UNNEEDED, const struct node_id *node_id UNNEEDED,
 	  bool call_notifier UNNEEDED, const char *fmt UNNEEDED, va_list ap UNNEEDED)
@@ -492,14 +499,14 @@ void notify_channel_open_failed(struct lightningd *ld UNNEEDED,
 { fprintf(stderr, "notify_channel_open_failed called!\n"); abort(); }
 /* Generated stub for notify_channel_state_changed */
 void notify_channel_state_changed(struct lightningd *ld UNNEEDED,
-				  struct node_id *peer_id UNNEEDED,
-				  struct channel_id *cid UNNEEDED,
-				  struct short_channel_id *scid UNNEEDED,
-				  struct timeabs *timestamp UNNEEDED,
+				  const struct node_id *peer_id UNNEEDED,
+				  const struct channel_id *cid UNNEEDED,
+				  const struct short_channel_id *scid UNNEEDED,
+				  struct timeabs timestamp UNNEEDED,
 				  enum channel_state old_state UNNEEDED,
 				  enum channel_state new_state UNNEEDED,
 				  enum state_change cause UNNEEDED,
-				  char *message UNNEEDED)
+				  const char *message UNNEEDED)
 { fprintf(stderr, "notify_channel_state_changed called!\n"); abort(); }
 /* Generated stub for notify_connect */
 void notify_connect(struct lightningd *ld UNNEEDED,
@@ -875,17 +882,21 @@ void try_reconnect(const tal_t *ctx UNNEEDED,
 		   struct peer *peer UNNEEDED,
 		   const struct wireaddr_internal *addrhint UNNEEDED)
 { fprintf(stderr, "try_reconnect called!\n"); abort(); }
-/* Generated stub for watch_txid */
-struct txwatch *watch_txid(const tal_t *ctx UNNEEDED,
-			   struct chain_topology *topo UNNEEDED,
-			   struct channel *channel UNNEEDED,
-			   const struct bitcoin_txid *txid UNNEEDED,
-			   enum watch_result (*cb)(struct lightningd *ld UNNEEDED,
-						   struct channel * UNNEEDED,
-						   const struct bitcoin_txid * UNNEEDED,
-						   const struct bitcoin_tx * UNNEEDED,
-						   unsigned int depth))
-{ fprintf(stderr, "watch_txid called!\n"); abort(); }
+/* Generated stub for watch_opening_inflight */
+void watch_opening_inflight(struct lightningd *ld UNNEEDED,
+			    struct channel_inflight *inflight UNNEEDED)
+{ fprintf(stderr, "watch_opening_inflight called!\n"); abort(); }
+/* Generated stub for watch_txid_ */
+struct txwatch *watch_txid_(const tal_t *ctx UNNEEDED,
+			    struct chain_topology *topo UNNEEDED,
+			    const struct bitcoin_txid *txid UNNEEDED,
+			    enum watch_result (*cb)(struct lightningd *ld UNNEEDED,
+						    const struct bitcoin_txid * UNNEEDED,
+						    const struct bitcoin_tx * UNNEEDED,
+						    unsigned int depth UNNEEDED,
+						    void *arg) UNNEEDED,
+			    void *arg UNNEEDED)
+{ fprintf(stderr, "watch_txid_ called!\n"); abort(); }
 /* Generated stub for watch_txo */
 struct txowatch *watch_txo(const tal_t *ctx UNNEEDED,
 			   struct chain_topology *topo UNNEEDED,

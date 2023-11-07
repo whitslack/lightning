@@ -139,6 +139,9 @@ struct channel {
 	struct bitcoin_outpoint funding;
 	struct amount_sat funding_sats;
 
+	/* Watch we have on funding output. */
+	struct txowatch *funding_spend_watch;
+
 	/* Our original funds, in funding amount */
 	struct amount_sat our_funds;
 
@@ -385,6 +388,221 @@ void delete_channel(struct channel *channel STEALS);
 const char *channel_state_name(const struct channel *channel);
 const char *channel_state_str(enum channel_state state);
 
+/* Can this channel send an HTLC? */
+static inline bool channel_state_can_add_htlc(enum channel_state state)
+{
+	switch (state) {
+	case CHANNELD_AWAITING_LOCKIN:
+	case CHANNELD_SHUTTING_DOWN:
+	case CLOSINGD_SIGEXCHANGE:
+	case CLOSINGD_COMPLETE:
+	case AWAITING_UNILATERAL:
+	case FUNDING_SPEND_SEEN:
+	case ONCHAIN:
+	case CLOSED:
+	case DUALOPEND_OPEN_INIT:
+	case DUALOPEND_OPEN_COMMITTED:
+	case DUALOPEND_AWAITING_LOCKIN:
+		return false;
+	case CHANNELD_NORMAL:
+		return true;
+	}
+	abort();
+}
+
+/* Can this channel remove an HTLC? */
+static inline bool channel_state_can_remove_htlc(enum channel_state state)
+{
+	switch (state) {
+	case CHANNELD_AWAITING_LOCKIN:
+	case CLOSINGD_SIGEXCHANGE:
+	case CLOSINGD_COMPLETE:
+	case AWAITING_UNILATERAL:
+	case FUNDING_SPEND_SEEN:
+	case ONCHAIN:
+	case CLOSED:
+	case DUALOPEND_OPEN_INIT:
+	case DUALOPEND_OPEN_COMMITTED:
+	case DUALOPEND_AWAITING_LOCKIN:
+		return false;
+	case CHANNELD_SHUTTING_DOWN:
+	case CHANNELD_NORMAL:
+		return true;
+	}
+	abort();
+}
+
+static inline bool channel_state_closing(enum channel_state state)
+{
+	switch (state) {
+	case CHANNELD_AWAITING_LOCKIN:
+	case CHANNELD_NORMAL:
+	case DUALOPEND_OPEN_INIT:
+	case DUALOPEND_OPEN_COMMITTED:
+	case DUALOPEND_AWAITING_LOCKIN:
+		return false;
+	case CHANNELD_SHUTTING_DOWN:
+	case CLOSINGD_SIGEXCHANGE:
+	case CLOSINGD_COMPLETE:
+	case AWAITING_UNILATERAL:
+	case FUNDING_SPEND_SEEN:
+	case ONCHAIN:
+	case CLOSED:
+		return true;
+	}
+	abort();
+}
+
+static inline bool channel_state_fees_can_change(enum channel_state state)
+{
+	switch (state) {
+	case CHANNELD_AWAITING_LOCKIN:
+	case CHANNELD_SHUTTING_DOWN:
+	case CLOSINGD_COMPLETE:
+	case AWAITING_UNILATERAL:
+	case FUNDING_SPEND_SEEN:
+	case ONCHAIN:
+	case CLOSED:
+	case DUALOPEND_OPEN_INIT:
+	case DUALOPEND_OPEN_COMMITTED:
+	case DUALOPEND_AWAITING_LOCKIN:
+		return false;
+	case CHANNELD_NORMAL:
+	case CLOSINGD_SIGEXCHANGE:
+		return true;
+	}
+	abort();
+}
+
+static inline bool channel_state_failing_onchain(enum channel_state state)
+{
+	switch (state) {
+	case CHANNELD_AWAITING_LOCKIN:
+	case CHANNELD_NORMAL:
+	case CLOSINGD_SIGEXCHANGE:
+	case CHANNELD_SHUTTING_DOWN:
+	case CLOSINGD_COMPLETE:
+	case CLOSED:
+	case DUALOPEND_OPEN_INIT:
+	case DUALOPEND_OPEN_COMMITTED:
+	case DUALOPEND_AWAITING_LOCKIN:
+		return false;
+	case AWAITING_UNILATERAL:
+	case FUNDING_SPEND_SEEN:
+	case ONCHAIN:
+		return true;
+	}
+	abort();
+}
+
+static inline bool channel_state_pre_open(enum channel_state state)
+{
+	switch (state) {
+	case CHANNELD_AWAITING_LOCKIN:
+	case DUALOPEND_OPEN_INIT:
+	case DUALOPEND_OPEN_COMMITTED:
+	case DUALOPEND_AWAITING_LOCKIN:
+		return true;
+	case CHANNELD_NORMAL:
+	case CLOSINGD_SIGEXCHANGE:
+	case CHANNELD_SHUTTING_DOWN:
+	case CLOSINGD_COMPLETE:
+	case AWAITING_UNILATERAL:
+	case FUNDING_SPEND_SEEN:
+	case ONCHAIN:
+	case CLOSED:
+		return false;
+	}
+	abort();
+}
+
+static inline bool channel_state_closed(enum channel_state state)
+{
+	switch (state) {
+	case CHANNELD_AWAITING_LOCKIN:
+	case DUALOPEND_OPEN_INIT:
+	case DUALOPEND_OPEN_COMMITTED:
+	case DUALOPEND_AWAITING_LOCKIN:
+	case CHANNELD_NORMAL:
+	case CLOSINGD_SIGEXCHANGE:
+	case CHANNELD_SHUTTING_DOWN:
+		return false;
+	case CLOSINGD_COMPLETE:
+	case AWAITING_UNILATERAL:
+	case FUNDING_SPEND_SEEN:
+	case ONCHAIN:
+	case CLOSED:
+		return true;
+	}
+	abort();
+}
+
+/* Not even int the database yet? */
+static inline bool channel_state_uncommitted(enum channel_state state)
+{
+	switch (state) {
+ 	case DUALOPEND_OPEN_INIT:
+		return true;
+	case DUALOPEND_OPEN_COMMITTED:
+	case CHANNELD_AWAITING_LOCKIN:
+ 	case DUALOPEND_AWAITING_LOCKIN:
+ 	case CHANNELD_NORMAL:
+ 	case CLOSINGD_SIGEXCHANGE:
+ 	case CHANNELD_SHUTTING_DOWN:
+ 	case CLOSINGD_COMPLETE:
+ 	case AWAITING_UNILATERAL:
+ 	case FUNDING_SPEND_SEEN:
+ 	case ONCHAIN:
+ 	case CLOSED:
+		return false;
+	}
+	abort();
+}
+
+/* Established enough, that we could reach out to peer to discuss */
+static inline bool channel_state_wants_peercomms(enum channel_state state)
+{
+	switch (state) {
+	case CHANNELD_AWAITING_LOCKIN:
+	case DUALOPEND_AWAITING_LOCKIN:
+	case DUALOPEND_OPEN_COMMITTED:
+	case CHANNELD_NORMAL:
+	case CLOSINGD_SIGEXCHANGE:
+	case CHANNELD_SHUTTING_DOWN:
+		return true;
+	case DUALOPEND_OPEN_INIT:
+	case CLOSINGD_COMPLETE:
+	case AWAITING_UNILATERAL:
+	case FUNDING_SPEND_SEEN:
+	case ONCHAIN:
+	case CLOSED:
+		return false;
+	}
+	abort();
+}
+
+/* Established enough, that we have to fail onto chain */
+static inline bool channel_state_wants_onchain_fail(enum channel_state state)
+{
+	switch (state) {
+	case CHANNELD_AWAITING_LOCKIN:
+	case DUALOPEND_OPEN_COMMITTED:
+	case DUALOPEND_AWAITING_LOCKIN:
+	case CHANNELD_NORMAL:
+	case CLOSINGD_SIGEXCHANGE:
+	case CHANNELD_SHUTTING_DOWN:
+		return true;
+	case DUALOPEND_OPEN_INIT:
+	case CLOSINGD_COMPLETE:
+	case AWAITING_UNILATERAL:
+	case FUNDING_SPEND_SEEN:
+	case ONCHAIN:
+	case CLOSED:
+		return false;
+	}
+	abort();
+}
+
 void channel_set_owner(struct channel *channel, struct subd *owner);
 
 /* Channel has failed, but can try again.  Usually, set disconnect to true. */
@@ -414,12 +632,11 @@ void channel_set_state(struct channel *channel,
 
 const char *channel_change_state_reason_str(enum state_change reason);
 
-/* Find a channel which is not onchain, if any: sets *others if there
+/* Find a channel which is passes filter, if any: sets *others if there
  * is more than one. */
-struct channel *peer_any_active_channel(struct peer *peer, bool *others);
-
-/* Find a channel which is not yet saved to disk */
-struct channel *peer_any_unsaved_channel(struct peer *peer, bool *others);
+struct channel *peer_any_channel(struct peer *peer,
+				 bool (*channel_state_filter)(enum channel_state),
+				 bool *others);
 
 struct channel *channel_by_dbid(struct lightningd *ld, const u64 dbid);
 
@@ -453,58 +670,6 @@ bool have_anchor_channel(struct lightningd *ld);
 void channel_set_last_tx(struct channel *channel,
 			 struct bitcoin_tx *tx,
 			 const struct bitcoin_signature *sig);
-
-static inline bool channel_can_add_htlc(const struct channel *channel)
-{
-	return channel->state == CHANNELD_NORMAL;
-}
-
-static inline bool channel_fees_can_change(const struct channel *channel)
-{
-	return channel->state == CHANNELD_NORMAL
-		|| channel->state == CHANNELD_SHUTTING_DOWN;
-}
-
-static inline bool channel_state_on_chain(enum channel_state state)
-{
-	return state == ONCHAIN;
-}
-
-static inline bool channel_on_chain(const struct channel *channel)
-{
-	return channel_state_on_chain(channel->state);
-}
-
-static inline bool channel_unsaved(const struct channel *channel)
-{
-	return channel->state == DUALOPEND_OPEN_INIT
-		&& channel->dbid == 0;
-}
-
-static inline bool channel_pre_open(const struct channel *channel)
-{
-	return channel->state == CHANNELD_AWAITING_LOCKIN
-		|| channel->state == DUALOPEND_OPEN_INIT
-		|| channel->state == DUALOPEND_AWAITING_LOCKIN;
-}
-
-static inline bool channel_active(const struct channel *channel)
-{
-	return channel->state != FUNDING_SPEND_SEEN
-		&& channel->state != CLOSINGD_COMPLETE
-		&& channel->state != AWAITING_UNILATERAL
-		&& !channel_unsaved(channel)
-		&& !channel_on_chain(channel);
-}
-
-static inline bool channel_closed(const struct channel *channel)
-{
-	return channel->state == CLOSINGD_COMPLETE
-		|| channel->state == AWAITING_UNILATERAL
-		|| channel->state == FUNDING_SPEND_SEEN
-		|| channel->state == ONCHAIN
-		|| channel->state == CLOSED;
-}
 
 static inline bool channel_has(const struct channel *channel, int f)
 {

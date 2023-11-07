@@ -8,6 +8,7 @@
 #include <common/utxo.h>
 #include <common/wallet.h>
 #include <lightningd/bitcoind.h>
+#include <lightningd/channel_state.h>
 #include <lightningd/log.h>
 #include <lightningd/peer_htlcs.h>
 
@@ -21,8 +22,6 @@ struct node_id;
 struct oneshot;
 struct peer;
 struct timers;
-enum channel_state;
-enum state_change;
 
 struct wallet {
 	struct lightningd *ld;
@@ -266,6 +265,50 @@ static inline enum htlc_state htlc_state_in_db(enum htlc_state s)
 		return s;
 	case HTLC_STATE_INVALID:
 		/* Not in db! */
+		break;
+	}
+	fatal("%s: %u is invalid", __func__, s);
+}
+
+/* DB wrapper to check channel_state */
+static inline enum channel_state channel_state_in_db(enum channel_state s)
+{
+	switch (s) {
+	case CHANNELD_AWAITING_LOCKIN:
+		BUILD_ASSERT(CHANNELD_AWAITING_LOCKIN == 2);
+		return s;
+	case CHANNELD_NORMAL:
+		BUILD_ASSERT(CHANNELD_NORMAL == 3);
+		return s;
+	case CHANNELD_SHUTTING_DOWN:
+		BUILD_ASSERT(CHANNELD_SHUTTING_DOWN == 4);
+		return s;
+	case CLOSINGD_SIGEXCHANGE:
+		BUILD_ASSERT(CLOSINGD_SIGEXCHANGE == 5);
+		return s;
+	case CLOSINGD_COMPLETE:
+		BUILD_ASSERT(CLOSINGD_COMPLETE == 6);
+		return s;
+	case AWAITING_UNILATERAL:
+		BUILD_ASSERT(AWAITING_UNILATERAL == 7);
+		return s;
+	case FUNDING_SPEND_SEEN:
+		BUILD_ASSERT(FUNDING_SPEND_SEEN == 8);
+		return s;
+	case ONCHAIN:
+		BUILD_ASSERT(ONCHAIN == 9);
+		return s;
+	case CLOSED:
+		BUILD_ASSERT(CLOSED == 10);
+		return s;
+	case DUALOPEND_OPEN_COMMITTED:
+		BUILD_ASSERT(DUALOPEND_OPEN_COMMITTED == 11);
+		return s;
+	case DUALOPEND_AWAITING_LOCKIN:
+		BUILD_ASSERT(DUALOPEND_AWAITING_LOCKIN == 12);
+		return s;
+	case DUALOPEND_OPEN_INIT:
+		/* Never appears in db! */
 		break;
 	}
 	fatal("%s: %u is invalid", __func__, s);
@@ -649,11 +692,11 @@ void wallet_channel_close(struct wallet *w, u64 wallet_id);
  */
 void wallet_state_change_add(struct wallet *w,
 			     const u64 channel_id,
-			     struct timeabs *timestamp,
+			     struct timeabs timestamp,
 			     enum channel_state old_state,
 			     enum channel_state new_state,
 			     enum state_change cause,
-			     char *message);
+			     const char *message);
 
 /**
  * Gets all state change history entries for a channel from the database

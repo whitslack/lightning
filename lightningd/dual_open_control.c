@@ -58,7 +58,7 @@ static void channel_disconnect(struct channel *channel,
 void channel_unsaved_close_conn(struct channel *channel, const char *why)
 {
 	/* Gotta be unsaved */
-	assert(channel_unsaved(channel));
+	assert(channel_state_uncommitted(channel->state));
 	log_info(channel->log, "Unsaved peer failed."
 		 " Disconnecting and deleting channel. Reason: %s",
 		 why);
@@ -77,7 +77,7 @@ static void channel_saved_err_broken_reconn(struct channel *channel,
 	const char *errmsg;
 
 	/* We only reconnect to 'saved' channel peers */
-	assert(!channel_unsaved(channel));
+	assert(!channel_state_uncommitted(channel->state));
 
 	va_start(ap, fmt);
 	errmsg = tal_vfmt(tmpctx, fmt, ap);
@@ -97,7 +97,7 @@ static void channel_err_broken(struct channel *channel,
 	errmsg = tal_vfmt(tmpctx, fmt, ap);
 	va_end(ap);
 
-	if (channel_unsaved(channel)) {
+	if (channel_state_uncommitted(channel->state)) {
 		log_broken(channel->log, "%s", errmsg);
 		channel_unsaved_close_conn(channel, errmsg);
 	} else
@@ -953,6 +953,110 @@ openchannel2_signed_deserialize(struct openchannel2_psbt_payload *payload,
 	return true;
 }
 
+static void dualopend_tell_depth(struct channel *channel,
+				 const struct bitcoin_txid *txid,
+				 u32 depth)
+{
+	const u8 *msg;
+	u32 to_go;
+
+	if (!channel->owner) {
+		log_debug(channel->log,
+			  "Funding tx %s confirmed, but peer disconnected",
+			  type_to_string(tmpctx, struct bitcoin_txid, txid));
+		return;
+	}
+
+	log_debug(channel->log,
+		  "Funding tx %s confirmed, telling peer",
+		  type_to_string(tmpctx, struct bitcoin_txid, txid));
+	if (depth < channel->minimum_depth) {
+		to_go = channel->minimum_depth - depth;
+	} else
+		to_go = 0;
+
+	/* Are we there yet? */
+	if (to_go == 0) {
+		assert(channel->scid);
+		assert(bitcoin_txid_eq(&channel->funding.txid, txid));
+
+		channel_set_billboard(channel, false,
+				      tal_fmt(tmpctx, "Funding depth reached"
+					      " %d confirmations, alerting peer"
+					      " we're locked-in.",
+					      to_go));
+
+		msg = towire_dualopend_depth_reached(NULL, depth);
+		subd_send_msg(channel->owner, take(msg));
+	} else
+		channel_set_billboard(channel, false,
+				      tal_fmt(tmpctx, "Funding needs %d more"
+					      " confirmations to be ready.",
+					      to_go));
+}
+
+static enum watch_result opening_depth_cb(struct lightningd *ld,
+					  const struct bitcoin_txid *txid,
+					  const struct bitcoin_tx *tx,
+					  unsigned int depth,
+					  struct channel_inflight *inflight)
+{
+	struct txlocator *loc;
+	struct short_channel_id scid;
+
+	/* Usually, we're here because we're awaiting a lockin, but
+	 * we could also mutual shutdown */
+	if (inflight->channel->state != DUALOPEND_AWAITING_LOCKIN)
+		return DELETE_WATCH;
+
+	/* Reorged out?  OK, we're not committed yet. */
+	if (depth == 0)
+		return KEEP_WATCHING;
+
+	/* FIXME: Don't do this until we're actually locked in! */
+	loc = wallet_transaction_locate(tmpctx, ld->wallet, txid);
+	if (!mk_short_channel_id(&scid,
+				 loc->blkheight, loc->index,
+				 inflight->funding->outpoint.n)) {
+		channel_fail_permanent(inflight->channel,
+				       REASON_LOCAL,
+				       "Invalid funding scid %u:%u:%u",
+				       loc->blkheight, loc->index,
+				       inflight->funding->outpoint.n);
+		return DELETE_WATCH;
+	}
+
+	if (!inflight->channel->scid) {
+		wallet_annotate_txout(ld->wallet, &inflight->funding->outpoint,
+				      TX_CHANNEL_FUNDING, inflight->channel->dbid);
+		inflight->channel->scid = tal_dup(inflight->channel, struct short_channel_id, &scid);
+		wallet_channel_save(ld->wallet, inflight->channel);
+	} else if (!short_channel_id_eq(inflight->channel->scid, &scid)) {
+		/* We freaked out if required when original was
+		 * removed, so just update now */
+		log_info(inflight->channel->log, "Short channel id changed from %s->%s",
+			 type_to_string(tmpctx, struct short_channel_id, inflight->channel->scid),
+			 type_to_string(tmpctx, struct short_channel_id, &scid));
+		*inflight->channel->scid = scid;
+		wallet_channel_save(ld->wallet, inflight->channel);
+	}
+
+	dualopend_tell_depth(inflight->channel, txid, depth);
+
+	if (depth >= inflight->channel->minimum_depth)
+		update_channel_from_inflight(ld, inflight->channel, inflight);
+
+	return KEEP_WATCHING;
+}
+
+void watch_opening_inflight(struct lightningd *ld,
+			    struct channel_inflight *inflight)
+{
+	watch_txid(inflight, ld->topology,
+		   &inflight->funding->outpoint.txid,
+		   opening_depth_cb, inflight);
+}
+
 static void
 openchannel2_sign_hook_cb(struct openchannel2_psbt_payload *payload STEALS)
 {
@@ -1007,7 +1111,7 @@ openchannel2_sign_hook_cb(struct openchannel2_psbt_payload *payload STEALS)
 					   cast_const(struct wally_psbt *,
 						      payload->psbt));
 	wallet_inflight_save(payload->ld->wallet, inflight);
-	channel_watch_funding(payload->ld, channel);
+	watch_opening_inflight(payload->ld, inflight);
 	msg = towire_dualopend_send_tx_sigs(NULL, inflight->funding_psbt);
 
 send_msg:
@@ -1218,7 +1322,7 @@ wallet_commit_channel(struct lightningd *ld,
 {
 	struct amount_msat our_msat, lease_fee_msat;
 	struct channel_inflight *inflight;
-	bool any_active = peer_any_active_channel(channel->peer, NULL);
+	bool any_active = peer_any_channel(channel->peer, channel_state_wants_peercomms, NULL);
 
 	if (!amount_sat_to_msat(&our_msat, our_funding)) {
 		log_broken(channel->log, "Unable to convert funds");
@@ -1246,6 +1350,22 @@ wallet_commit_channel(struct lightningd *ld,
 	assert(channel->unsaved_dbid != 0);
 	channel->dbid = channel->unsaved_dbid;
 	channel->unsaved_dbid = 0;
+	/* We can't call channel_set_state here: channel isn't in db, so
+	 * really this is a "channel creation" event. */
+	assert(channel->state == DUALOPEND_OPEN_INIT);
+	log_info(channel->log, "State changed from %s to %s",
+		 channel_state_name(channel),
+		 channel_state_str(DUALOPEND_OPEN_COMMITTED));
+	channel->state = DUALOPEND_OPEN_COMMITTED;
+	notify_channel_state_changed(channel->peer->ld,
+				     &channel->peer->id,
+				     &channel->cid,
+				     channel->scid,
+				     time_now(),
+				     DUALOPEND_OPEN_INIT,
+				     DUALOPEND_OPEN_COMMITTED,
+				     REASON_REMOTE,
+				     "Commitment transaction committed");
 
 	channel->funding = *funding;
 	channel->funding_sats = total_funding;
@@ -1370,7 +1490,7 @@ static void handle_peer_wants_to_close(struct subd *dualopend,
 				      OPT_ANCHORS_ZERO_FEE_HTLC_TX);
 
 	/* We shouldn't get this message while we're waiting to finish */
-	if (channel_unsaved(channel)) {
+	if (channel_state_uncommitted(channel->state)) {
 		log_broken(dualopend->ld->log, "Channel in wrong state for"
 		           " shutdown, still has uncommitted"
 		           " channel pending.");
@@ -1671,7 +1791,7 @@ static void handle_peer_tx_sigs_sent(struct subd *dualopend,
 		send_funding_tx(channel, take(wtx));
 
 		/* Must be in an "init" state */
-		assert(channel->state == DUALOPEND_OPEN_INIT
+		assert(channel->state == DUALOPEND_OPEN_COMMITTED
 		       || channel->state == DUALOPEND_AWAITING_LOCKIN);
 
 		channel_set_state(channel, channel->state,
@@ -1815,44 +1935,12 @@ static void handle_channel_locked(struct subd *dualopend,
 	/* Empty out the inflights */
 	wallet_channel_clear_inflights(dualopend->ld->wallet, channel);
 
+	/* That freed watchers in inflights: now watch funding tx */
+	channel_watch_funding(dualopend->ld, channel);
+
 	/* FIXME: LND sigs/update_fee msgs? */
 	peer_start_channeld(channel, peer_fd, NULL, false, NULL);
 	return;
-}
-
-
-
-void dualopen_tell_depth(struct subd *dualopend,
-			 struct channel *channel,
-			 const struct bitcoin_txid *txid,
-			 u32 depth)
-{
-	const u8 *msg;
-	u32 to_go;
-
-	if (depth < channel->minimum_depth) {
-		to_go = channel->minimum_depth - depth;
-	} else
-		to_go = 0;
-
-	/* Are we there yet? */
-	if (to_go == 0) {
-		assert(channel->scid);
-		assert(bitcoin_txid_eq(&channel->funding.txid, txid));
-
-		channel_set_billboard(channel, false,
-				      tal_fmt(tmpctx, "Funding depth reached"
-					      " %d confirmations, alerting peer"
-					      " we're locked-in.",
-					      to_go));
-
-		msg = towire_dualopend_depth_reached(NULL, depth);
-		subd_send_msg(dualopend, take(msg));
-	} else
-		channel_set_billboard(channel, false,
-				      tal_fmt(tmpctx, "Funding needs %d more"
-					      " confirmations to be ready.",
-					      to_go));
 }
 
 static void rbf_got_offer(struct subd *dualopend, const u8 *msg)
@@ -2049,7 +2137,7 @@ static void handle_peer_tx_sigs_msg(struct subd *dualopend,
 
 		send_funding_tx(channel, take(wtx));
 
-		assert(channel->state == DUALOPEND_OPEN_INIT
+		assert(channel->state == DUALOPEND_OPEN_COMMITTED
 		       /* We might be reconnecting */
 		       || channel->state == DUALOPEND_AWAITING_LOCKIN);
 		channel_set_state(channel, channel->state,
@@ -2584,8 +2672,7 @@ json_openchannel_signed(struct command *cmd,
 
 	/* Update the PSBT on disk */
 	wallet_inflight_save(cmd->ld->wallet, inflight);
-	/* Uses the channel->funding_txid, which we verified above */
-	channel_watch_funding(cmd->ld, channel);
+	watch_opening_inflight(cmd->ld, inflight);
 
 	/* Send our tx_sigs to the peer */
 	subd_send_msg(channel->owner,
@@ -3593,7 +3680,7 @@ static void dualopen_errmsg(struct channel *channel,
 	/* Clean up any in-progress open attempts */
 	channel_cleanup_commands(channel, desc);
 
-	if (channel_unsaved(channel)) {
+	if (channel_state_uncommitted(channel->state)) {
 		log_info(channel->log, "%s", "Unsaved peer failed."
 			 " Deleting channel.");
 		delete_channel(channel);
@@ -3758,7 +3845,7 @@ bool peer_restart_dualopend(struct peer *peer,
 	u32 *local_shutdown_script_wallet_index;
 	u8 *msg;
 
-	if (channel_unsaved(channel))
+	if (channel_state_uncommitted(channel->state))
 		return peer_start_dualopend(peer, peer_fd, channel);
 
 	hsmfd = hsm_get_client_fd(peer->ld, &peer->id, channel->dbid,
