@@ -1393,7 +1393,6 @@ static struct command_result *json_commando_listrunes(struct command *cmd,
 	return send_outreq(plugin, req);
 }
 
-#if DEVELOPER
 static void memleak_mark_globals(struct plugin *p, struct htable *memtable)
 {
 	memleak_scan_obj(memtable, usage_table);
@@ -1405,7 +1404,6 @@ static void memleak_mark_globals(struct plugin *p, struct htable *memtable)
 	if (rune_counter)
 		memleak_scan_obj(memtable, rune_counter);
 }
-#endif
 
 static const char *init(struct plugin *p,
 			const char *buf UNUSED, const jsmntok_t *config UNUSED)
@@ -1430,9 +1428,7 @@ static const char *init(struct plugin *p,
 	usage_table = tal(p, struct usage_table);
 	usage_table_init(usage_table);
 	plugin = p;
-#if DEVELOPER
 	plugin_set_memleak_handler(p, memleak_mark_globals);
-#endif
 
 	rune_counter = tal(p, u64);
 	/* If this fails, it probably doesn't exist */

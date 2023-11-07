@@ -385,7 +385,7 @@ $(GRPC_GEN)&: cln-grpc/proto/node.proto cln-grpc/proto/primitives.proto
 	$(PYTHON) -m grpc_tools.protoc -I cln-grpc/proto cln-grpc/proto/node.proto --python_out=$(GRPC_PATH)/ --grpc_python_out=$(GRPC_PATH)/ --experimental_allow_proto3_optional
 	$(PYTHON) -m grpc_tools.protoc -I cln-grpc/proto cln-grpc/proto/primitives.proto --python_out=$(GRPC_PATH)/ --experimental_allow_proto3_optional
 	find $(GRPC_DIR)/ -type f -name "*.py" -print0 | xargs -0 sed -i'.bak' -e 's/^import \(.*\)_pb2 as .*__pb2/from pyln.grpc import \1_pb2 as \1__pb2/g'
-	find $(GRPC_DIR)/ -type f -name "*.py.bak" -delete
+	find $(GRPC_DIR)/ -type f -name "*.py.bak" -print0 | xargs rm -f
 endif
 
 # We make pretty much everything depend on these.
@@ -456,11 +456,7 @@ check-protos: $(ALL_PROGRAMS)
 ifeq ($(PYTEST),)
 	@echo "py.test is required to run the protocol tests, please install using 'pip3 install -r requirements.txt', and rerun 'configure'."; false
 else
-ifeq ($(DEVELOPER),1)
 	@(cd external/lnprototest && PYTHONPATH=$(MY_CHECK_PYTHONPATH) LIGHTNING_SRC=../.. $(PYTEST) --runner lnprototest.clightning.Runner $(PYTEST_OPTS))
-else
-	@echo "lnprototest target requires DEVELOPER=1, skipping"
-endif
 endif
 
 pytest: $(ALL_PROGRAMS) $(DEFAULT_TARGETS) $(ALL_TEST_PROGRAMS) $(ALL_TEST_GEN)
@@ -468,8 +464,8 @@ ifeq ($(PYTEST),)
 	@echo "py.test is required to run the integration tests, please install using 'pip3 install -r requirements.txt', and rerun 'configure'."
 	exit 1
 else
-# Explicitly hand DEVELOPER and VALGRIND so you can override on make cmd line.
-	PYTHONPATH=$(MY_CHECK_PYTHONPATH) TEST_DEBUG=1 DEVELOPER=$(DEVELOPER) VALGRIND=$(VALGRIND) $(PYTEST) tests/ $(PYTEST_OPTS)
+# Explicitly hand VALGRIND so you can override on make cmd line.
+	PYTHONPATH=$(MY_CHECK_PYTHONPATH) TEST_DEBUG=1 VALGRIND=$(VALGRIND) $(PYTEST) tests/ $(PYTEST_OPTS)
 endif
 
 check-fuzz: $(ALL_FUZZ_TARGETS)
@@ -734,13 +730,7 @@ pyln-release:  $(PYLNS:%=pyln-release-%)
 pyln-release-%:
 	cd contrib/pyln-$* && $(MAKE) prod-release
 
-# These must both be enabled for update-mocks
-ifeq ($(DEVELOPER),1)
 update-mocks: $(ALL_TEST_PROGRAMS:%=update-mocks/%.c)
-else
-update-mocks:
-	@echo Need DEVELOPER=1 to regenerate mocks >&2; exit 1
-endif
 
 $(ALL_TEST_PROGRAMS:%=update-mocks/%.c): $(ALL_GEN_HEADERS) $(EXTERNAL_LIBS) libccan.a ccan/ccan/cdump/tools/cdump-enumstr config.vars
 

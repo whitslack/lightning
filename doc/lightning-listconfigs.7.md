@@ -54,6 +54,9 @@ On success, an object is returned, containing:
   - **conf** (object, optional):
     - **value\_str** (string): field from cmdline
     - **source** (string): source of configuration setting (always "cmdline")
+  - **developer** (object, optional) *(added v23.08)*:
+    - **set** (boolean): `true` if set in config or cmdline
+    - **source** (string): source of configuration setting
   - **clear-plugins** (object, optional):
     - **set** (boolean): `true` if set in config or cmdline
     - **source** (string): source of configuration setting
@@ -348,6 +351,7 @@ On success, an object is returned, containing:
 - **dev-allowdustreserve** (boolean, optional): Whether we allow setting dust reserves **deprecated, removal in v24.05**
 - **announce-addr-dns** (boolean, optional): Whether we put DNS entries into node\_announcement **deprecated, removal in v24.05** *(added v22.11.1)*
 - **require-confirmed-inputs** (boolean, optional): Request peers to only send confirmed inputs (dual-fund only) **deprecated, removal in v24.05**
+- **developer** (boolean, optional): Whether developer mode is enabled *(added v23.08)*
 - **commit-fee** (u64, optional): The percentage of the 6-block fee estimate to use for commitment transactions **deprecated, removal in v24.05** *(added v23.05)*
 - **min-emergency-msat** (msat, optional): field from config or cmdline, or default *(added v23.08)*
 
@@ -467,4 +471,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:a40882cad0d889aa736a2932250102be43ae7e62b3d2429b26e0961e4c315f7b)
+[comment]: # ( SHA256STAMP:12073b819d3270912509e8c13e228d845158ac844d47d82de6c3b12876a05b45)

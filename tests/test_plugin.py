@@ -5,8 +5,8 @@ from hashlib import sha256
 from pyln.client import RpcError, Millisatoshi
 from pyln.proto import Invoice
 from utils import (
-    DEVELOPER, only_one, sync_blockheight, TIMEOUT, wait_for, TEST_NETWORK,
-    DEPRECATED_APIS, expected_peer_features, expected_node_features,
+    only_one, sync_blockheight, TIMEOUT, wait_for, TEST_NETWORK,
+    expected_peer_features, expected_node_features,
     expected_channel_features, account_balance,
     check_coin_moves, first_channel_id, EXPERIMENTAL_DUAL_FUND,
     mine_funding_to_announce, VALGRIND
@@ -430,8 +430,8 @@ def test_pay_plugin(node_factory):
     msg = 'pay bolt11 [amount_msat] [label] [riskfactor] [maxfeepercent] '\
           '[retry_for] [maxdelay] [exemptfee] [localinvreqid] [exclude] '\
           '[maxfee] [description]'
-    if DEVELOPER:
-        msg += ' [use_shadow]'
+    # We run with --developer:
+    msg += ' [dev_use_shadow]'
     assert only_one(l1.rpc.help('pay')['help'])['command'] == msg
 
 
@@ -489,7 +489,6 @@ def test_plugin_connected_hook_chaining(node_factory):
     assert not l1.daemon.is_in_log(f"peer_connected_logger_b {l3id}")
 
 
-@pytest.mark.developer("localhost remote_addr will be filtered without DEVELOEPR")
 def test_peer_connected_remote_addr(node_factory):
     """This tests the optional tlv `remote_addr` being passed to a plugin.
 
@@ -1064,7 +1063,6 @@ def test_channel_state_change_history(node_factory, bitcoind):
         assert(history[3]['message'] == "Closing complete")
 
 
-@pytest.mark.developer("Gossip slow, and we test --dev-onion-reply-length")
 def test_htlc_accepted_hook_fail(node_factory):
     """Send payments from l1 to l2, but l2 just declines everything.
 
@@ -1109,7 +1107,6 @@ def test_htlc_accepted_hook_fail(node_factory):
     assert len(inv) == 1 and inv[0]['status'] == 'unpaid'
 
 
-@pytest.mark.developer("without DEVELOPER=1, gossip v slow")
 def test_htlc_accepted_hook_resolve(node_factory):
     """l3 creates an invoice, l2 knows the preimage and will shortcircuit.
     """
@@ -1158,7 +1155,6 @@ def test_htlc_accepted_hook_direct_restart(node_factory, executor):
     f1.result()
 
 
-@pytest.mark.developer("without DEVELOPER=1, gossip v slow")
 def test_htlc_accepted_hook_forward_restart(node_factory, executor):
     """l2 restarts while it is pondering what to do with an HTLC.
     """
@@ -1170,7 +1166,7 @@ def test_htlc_accepted_hook_forward_restart(node_factory, executor):
     ], wait_for_announce=True)
 
     i1 = l3.rpc.invoice(amount_msat=1000, label="direct", description="desc")['bolt11']
-    f1 = executor.submit(l1.dev_pay, i1, use_shadow=False)
+    f1 = executor.submit(l1.dev_pay, i1, dev_use_shadow=False)
 
     l2.daemon.wait_for_log(r'Holding onto an incoming htlc for 10 seconds')
 
@@ -1228,7 +1224,6 @@ def test_warning_notification(node_factory):
     l1.daemon.wait_for_log('plugin-pretend_badlog.py: log: Test warning notification\\(for broken event\\)')
 
 
-@pytest.mark.developer("needs to deactivate shadow routing")
 def test_invoice_payment_notification(node_factory):
     """
     Test the 'invoice_payment' notification
@@ -1240,14 +1235,13 @@ def test_invoice_payment_notification(node_factory):
     preimage = '1' * 64
     label = "a_descriptive_label"
     inv1 = l2.rpc.invoice(msats, label, 'description', preimage=preimage)
-    l1.dev_pay(inv1['bolt11'], use_shadow=False)
+    l1.dev_pay(inv1['bolt11'], dev_use_shadow=False)
 
     l2.daemon.wait_for_log(r"Received invoice_payment event for label {},"
                            " preimage {}, and amount of {}msat"
                            .format(label, preimage, msats))
 
 
-@pytest.mark.developer("needs to deactivate shadow routing")
 def test_invoice_creation_notification(node_factory):
     """
     Test the 'invoice_creation' notification
@@ -1281,7 +1275,6 @@ def test_channel_opened_notification(node_factory):
                            .format(l1.info["id"], amount))
 
 
-@pytest.mark.developer("needs DEVELOPER=1")
 def test_forward_event_notification(node_factory, bitcoind, executor):
     """ test 'forward_event' notifications
     """
@@ -1490,7 +1483,7 @@ def test_rpc_command_hook(node_factory):
     assert funds[0] == "Custom rpc_command_1 result"
 
     # Test command redirection to a plugin
-    l1.rpc.call('help', [0])
+    l1.rpc.call('help', ['developer'])
 
     # Check the 'already modified' warning is not logged on just 'continue'
     assert not l1.daemon.is_in_log("rpc_command hook 'listfunds' already modified, ignoring.")
@@ -1604,9 +1597,6 @@ def test_libplugin_deprecated(node_factory):
     assert l1.rpc.call("testrpc-deprecated") == l1.rpc.getinfo()
 
 
-@unittest.skipIf(
-    not DEVELOPER or DEPRECATED_APIS, "needs LIGHTNINGD_DEV_LOG_IO and new API"
-)
 @pytest.mark.openchannel('v1')
 @pytest.mark.openchannel('v2')
 def test_plugin_feature_announce(node_factory):
@@ -1920,7 +1910,6 @@ def test_replacement_payload(node_factory):
     assert l2.daemon.wait_for_log("Attempt to pay.*with wrong secret")
 
 
-@pytest.mark.developer("Requires dev_sign_last_tx")
 def test_watchtower(node_factory, bitcoind, directory, chainparams):
     """Test watchtower hook.
 
@@ -2016,7 +2005,6 @@ def test_plugin_fail(node_factory):
     l1.daemon.wait_for_log(r': exited during normal operation')
 
 
-@pytest.mark.developer("without DEVELOPER=1, gossip v slow")
 @pytest.mark.openchannel('v1')
 @pytest.mark.openchannel('v2')
 def test_coin_movement_notices(node_factory, bitcoind, chainparams):
@@ -2192,7 +2180,6 @@ def test_important_plugin(node_factory):
     n.stop()
 
 
-@pytest.mark.developer("tests developer-only option.")
 def test_dev_builtin_plugins_unimportant(node_factory):
     n = node_factory.get_node(options={"dev-builtin-plugins-unimportant": None})
     n.rpc.plugin_stop(plugin="pay")
@@ -2412,7 +2399,6 @@ def test_htlc_accepted_hook_failonion(node_factory):
         l1.rpc.pay(inv)
 
 
-@pytest.mark.developer("Gossip without developer is slow.")
 def test_htlc_accepted_hook_fwdto(node_factory):
     plugin = os.path.join(os.path.dirname(__file__), 'plugins/htlc_accepted-fwdto.py')
     l1, l2, l3 = node_factory.line_graph(3, opts=[{}, {'plugin': plugin}, {}], wait_for_announce=True)
@@ -3451,7 +3437,6 @@ def test_block_added_notifications(node_factory, bitcoind):
 
 
 @unittest.skipIf(TEST_NETWORK != 'regtest', 'elementsd doesnt yet support PSBT features we need')
-@pytest.mark.developer("wants dev-announce-localhost so we see listnodes.addresses")
 def test_sql(node_factory, bitcoind):
     opts = {'experimental-offers': None,
             'experimental-dual-fund': None,

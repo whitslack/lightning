@@ -55,6 +55,9 @@ struct peer {
 	bool channel_ready[NUM_SIDES];
 	u64 next_index[NUM_SIDES];
 
+	/* --developer? */
+	bool developer;
+
 	/* Features peer supports. */
 	u8 *their_features;
 
@@ -148,13 +151,12 @@ struct peer {
 	/* Updates master asked, which we've deferred while quiescing */
 	struct msg_queue *update_queue;
 
-#if DEVELOPER
 	/* If set, don't fire commit counter when this hits 0 */
 	u32 *dev_disable_commit;
 
 	/* If set, send channel_announcement after 1 second, not 30 */
 	bool dev_fast_gossip;
-#endif
+
 	/* Information used for reestablishment. */
 	bool last_was_revoke;
 	struct changed_htlc *last_sent_commit;
@@ -1267,12 +1269,10 @@ static void send_commit(struct peer *peer)
 	u32 our_blockheight;
 	u32 feerate_target;
 
-#if DEVELOPER
 	if (peer->dev_disable_commit && !*peer->dev_disable_commit) {
 		peer->commit_timer = NULL;
 		return;
 	}
-#endif
 
 	/* FIXME: Document this requirement in BOLT 2! */
 	/* We can't send two commits in a row. */
@@ -1394,13 +1394,11 @@ static void send_commit(struct peer *peer)
 	}  else
 		pbase = NULL;
 
-#if DEVELOPER
 	if (peer->dev_disable_commit) {
 		(*peer->dev_disable_commit)--;
 		if (*peer->dev_disable_commit == 0)
 			status_unusual("dev-disable-commit-after: disabling");
 	}
-#endif
 
 	status_debug("Telling master we're about to commit...");
 	/* Tell master to save this next commit to database, then wait. */
@@ -3577,7 +3575,6 @@ static void handle_send_error(struct peer *peer, const u8 *msg)
 	exit(0);
 }
 
-#if DEVELOPER
 static void handle_dev_reenable_commit(struct peer *peer)
 {
 	peer->dev_disable_commit = tal_free(peer->dev_disable_commit);
@@ -3617,7 +3614,6 @@ static void handle_dev_quiesce(struct peer *peer, const u8 *msg)
 	peer->stfu_initiator = LOCAL;
 	maybe_send_stfu(peer);
 }
-#endif /* DEVELOPER */
 
 static void req_in(struct peer *peer, const u8 *msg)
 {
@@ -3666,21 +3662,24 @@ static void req_in(struct peer *peer, const u8 *msg)
 	case WIRE_CHANNELD_CHANNEL_UPDATE:
 		handle_channel_update(peer, msg);
 		return;
-#if DEVELOPER
-	case WIRE_CHANNELD_DEV_REENABLE_COMMIT:
-		handle_dev_reenable_commit(peer);
-		return;
+ 	case WIRE_CHANNELD_DEV_REENABLE_COMMIT:
+		if (peer->developer) {
+			handle_dev_reenable_commit(peer);
+			return;
+		}
+		break;
 	case WIRE_CHANNELD_DEV_MEMLEAK:
-		handle_dev_memleak(peer, msg);
-		return;
+		if (peer->developer) {
+			handle_dev_memleak(peer, msg);
+			return;
+		}
+		break;
 	case WIRE_CHANNELD_DEV_QUIESCE:
-		handle_dev_quiesce(peer, msg);
-		return;
-#else
-	case WIRE_CHANNELD_DEV_REENABLE_COMMIT:
-	case WIRE_CHANNELD_DEV_MEMLEAK:
-	case WIRE_CHANNELD_DEV_QUIESCE:
-#endif /* DEVELOPER */
+		if (peer->developer) {
+			handle_dev_quiesce(peer, msg);
+			return;
+		}
+		break;
 	case WIRE_CHANNELD_INIT:
 	case WIRE_CHANNELD_OFFER_HTLC_REPLY:
 	case WIRE_CHANNELD_SENDING_COMMITSIG:
@@ -3733,8 +3732,6 @@ static void init_channel(struct peer *peer)
 	struct penalty_base *pbases;
 	bool reestablish_only;
 	struct channel_type *channel_type;
-	u32 *dev_disable_commit; /* Always NULL */
-	bool dev_fast_gossip;
 
 	assert(!(fcntl(MASTER_FD, F_GETFL) & O_NONBLOCK));
 
@@ -3796,8 +3793,8 @@ static void init_channel(struct peer *peer)
 				    &remote_ann_node_sig,
 				    &remote_ann_bitcoin_sig,
 				    &channel_type,
-				    &dev_fast_gossip,
-				    &dev_disable_commit,
+				    &peer->dev_fast_gossip,
+				    &peer->dev_disable_commit,
 				    &pbases,
 				    &reestablish_only,
 				    &peer->channel_update,
@@ -3807,11 +3804,6 @@ static void init_channel(struct peer *peer)
 
 	peer->final_index = tal_dup(peer, u32, &final_index);
 	peer->final_ext_key = tal_dup(peer, struct ext_key, &final_ext_key);
-
-#if DEVELOPER
-	peer->dev_disable_commit = dev_disable_commit;
-	peer->dev_fast_gossip = dev_fast_gossip;
-#endif
 
 	status_debug("option_static_remotekey = %u,"
 		     " option_anchor_outputs = %u"
@@ -3931,12 +3923,14 @@ int main(int argc, char *argv[])
 	int i, nfds;
 	fd_set fds_in, fds_out;
 	struct peer *peer;
+	bool developer;
 
-	subdaemon_setup(argc, argv);
+	developer = subdaemon_setup(argc, argv);
 
 	status_setup_sync(MASTER_FD);
 
 	peer = tal(NULL, struct peer);
+	peer->developer = developer;
 	timers_init(&peer->timers, time_mono());
 	peer->commit_timer = NULL;
 	peer->have_sigs[LOCAL] = peer->have_sigs[REMOTE] = false;

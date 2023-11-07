@@ -828,11 +828,10 @@ bool peer_start_channeld(struct channel *channel,
 				       remote_ann_node_sig,
 				       remote_ann_bitcoin_sig,
 				       channel->type,
-				       IFDEV(ld->dev_fast_gossip, false),
-				       IFDEV(ld->dev_disable_commit == -1
+				       ld->dev_fast_gossip,
+				       ld->dev_disable_commit == -1
 					     ? NULL
 					     : (u32 *)&ld->dev_disable_commit,
-					     NULL),
 				       pbases,
 				       reestablish_only,
 				       channel->channel_update,
@@ -944,7 +943,12 @@ is_fundee_should_forget(struct lightningd *ld,
 	 *   - SHOULD forget the channel if it does not see the
 	 * correct funding transaction after a timeout of 2016 blocks.
 	 */
-	u32 max_funding_unconfirmed = IFDEV(ld->dev_max_funding_unconfirmed, 2016);
+	u32 max_funding_unconfirmed;
+
+	if (ld->developer)
+		max_funding_unconfirmed = ld->dev_max_funding_unconfirmed;
+	else
+		max_funding_unconfirmed = 2016;
 
 	/* Only applies if we are fundee. */
 	if (channel->opener == LOCAL)
@@ -1162,7 +1166,6 @@ void channel_replace_update(struct channel *channel, u8 *update TAKES)
 							  channel->channel_update)));
 }
 
-#if DEVELOPER
 static struct command_result *json_dev_feerate(struct command *cmd,
 					       const char *buffer,
 					       const jsmntok_t *obj UNNEEDED,
@@ -1210,7 +1213,8 @@ static const struct json_command dev_feerate_command = {
 	"dev-feerate",
 	"developer",
 	json_dev_feerate,
-	"Set feerate for {id} to {feerate}"
+	"Set feerate for {id} to {feerate}",
+	.dev_only = true,
 };
 AUTODATA(json_command, &dev_feerate_command);
 
@@ -1263,7 +1267,7 @@ static const struct json_command dev_quiesce_command = {
 	"dev-quiesce",
 	"developer",
 	json_dev_quiesce,
-	"Initiate quiscence protocol with peer"
+	"Initiate quiscence protocol with peer",
+	.dev_only = true,
 };
 AUTODATA(json_command, &dev_quiesce_command);
-#endif /* DEVELOPER */
