@@ -430,7 +430,7 @@ def test_payment_success_persistence(node_factory, bitcoind, executor):
     assert len(payments) == 1 and payments[0]['status'] == 'complete'
     assert len(invoices) == 1 and invoices[0]['status'] == 'paid'
 
-    l1.wait_channel_active(chanid)
+    l1.wait_local_channel_active(chanid)
 
     # A duplicate should succeed immediately (nop) and return correct preimage.
     preimage = l1.dev_pay(
@@ -2745,48 +2745,6 @@ def test_error_returns_blockheight(node_factory, bitcoind):
             == '400f{:016x}{:08x}'.format(100, bitcoind.rpc.getblockcount()))
 
 
-def test_tlv_or_legacy(node_factory, bitcoind):
-    # Ideally we'd test with l2 NOT var-onion, but then it can no longer connect
-    # to us!
-    l1, l2, l3 = node_factory.line_graph(3,
-                                         opts={'plugin': os.path.join(os.getcwd(), 'tests/plugins/print_htlc_onion.py')})
-
-    scid12 = l1.get_channel_scid(l2)
-    scid23 = l2.get_channel_scid(l3)
-
-    # We need to force l3 to provide route hint from l2 (it won't normally,
-    # since it sees l2 as a dead end).
-    inv = l3.dev_invoice(amount_msat=10000,
-                         label="test_tlv1",
-                         description="test_tlv1",
-                         dev_routes=[[{'id': l2.info['id'],
-                                       'short_channel_id': scid23,
-                                       'fee_base_msat': 1,
-                                       'fee_proportional_millionths': 10,
-                                       'cltv_expiry_delta': 6}]])['bolt11']
-    l1.rpc.pay(inv)
-
-    # Since L1 hasn't seen broadcast, it doesn't know L2 isn't TLV, but invoice tells it about L3
-    l2.daemon.wait_for_log("Got onion.*'type': 'tlv'")
-    l3.daemon.wait_for_log("Got onion.*'type': 'tlv'")
-
-    # We need 5 more blocks to announce l1->l2 channel.
-    mine_funding_to_announce(bitcoind, [l1, l2, l3])
-
-    # Make sure l1 knows about l2
-    wait_for(lambda: 'alias' in l1.rpc.listnodes(l2.info['id'])['nodes'][0])
-
-    # Make sure l3 knows about l1->l2, so it will add route hint now.
-    wait_for(lambda: len(l3.rpc.listchannels(scid12)['channels']) > 0)
-
-    # Now it should send TLV to l2.
-    inv = l3.rpc.invoice(10000, "test_tlv2", "test_tlv2")['bolt11']
-
-    l1.rpc.pay(inv)
-    l2.daemon.wait_for_log("Got onion.*'type': 'tlv'")
-    l3.daemon.wait_for_log("Got onion.*'type': 'tlv'")
-
-
 @unittest.skipIf(TEST_NETWORK != 'regtest', "Invoice is network specific")
 def test_pay_no_secret(node_factory, bitcoind):
     l1, l2 = node_factory.line_graph(2, wait_for_announce=True)
@@ -4003,13 +3961,13 @@ def test_mpp_waitblockheight_routehint_conflict(node_factory, bitcoind, executor
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     l1l2, _ = l1.fundchannel(l2, 10**7, announce_channel=True)
     l2.rpc.connect(l3.info['id'], 'localhost', l3.port)
-    l2.fundchannel(l3, 10**7, announce_channel=False)
+    l2l3, _ = l2.fundchannel(l3, 10**7, announce_channel=False)
 
     mine_funding_to_announce(bitcoind, [l1, l2, l3])
 
     # Wait for l3 to learn about l1->l2, otherwise it will think
     # l2 is a deadend and not add it to the routehint.
-    wait_for(lambda: len(l3.rpc.listchannels(l1l2)['channels']) >= 2)
+    l3.wait_channel_active(l1l2)
 
     # Now make the l1 payer stop receiving blocks.
     def no_more_blocks(req):
@@ -4021,7 +3979,11 @@ def test_mpp_waitblockheight_routehint_conflict(node_factory, bitcoind, executor
     bitcoind.generate_block(2)
     sync_blockheight(bitcoind, [l3])
 
+    # FIXME: routehint currently requires channels in gossip store
+    l3.wait_channel_active(l2l3)
+
     inv = l3.rpc.invoice(Millisatoshi(2 * 10000 * 1000), 'i', 'i', exposeprivatechannels=True)['bolt11']
+    assert 'routes' in l3.rpc.decodepay(inv)
 
     # Have l1 pay l3
     def pay(l1, inv):
@@ -4866,12 +4828,15 @@ gives a routehint straight to us causes an issue
 
     # Existence of l1 makes l3 use l2 for routehint (otherwise it sees deadend)
     l1, l2 = node_factory.line_graph(2, wait_for_announce=True)
+    scid12 = first_scid(l1, l2)
     l3 = node_factory.get_node()
     l3.rpc.connect(l2.info['id'], 'localhost', l2.port)
     scid23, _ = l2.fundchannel(l3, 1000000, announce_channel=False)
     # Make sure l3 sees l1->l2 channel.
-    wait_for(lambda: l3.rpc.listnodes(l1.info['id'])['nodes'] != [])
+    l3.wait_channel_active(scid12)
 
+    # FIXME: Routehint code currently relies on private gossip in store!
+    l3.wait_channel_active(scid23)
     inv = l3.rpc.invoice(10, "test", "test")['bolt11']
     decoded = l3.rpc.decodepay(inv)
     assert(only_one(only_one(decoded['routes']))['short_channel_id']
@@ -5345,7 +5310,7 @@ def test_pay_routehint_minhtlc(node_factory, bitcoind):
     l1, l2, l3 = node_factory.line_graph(3, wait_for_announce=True)
     l4 = node_factory.get_node()
 
-    l3.fundchannel(l4, announce_channel=False)
+    scid34, _ = l3.fundchannel(l4, announce_channel=False)
 
     # l2->l3 required htlc of at least 1sat
     scid = only_one(l2.rpc.setchannel(l3.info['id'], htlcmin=1000)['channels'])['short_channel_id']
@@ -5356,6 +5321,8 @@ def test_pay_routehint_minhtlc(node_factory, bitcoind):
     # And make sure l1 knows that l2->l3 has htlcmin 1000
     wait_for(lambda: l1.rpc.listchannels(scid)['channels'][0]['htlc_minimum_msat'] == Millisatoshi(1000))
 
+    # FIXME: Routehint code currently relies on private gossip in store!
+    l4.wait_channel_active(scid34)
     inv = l4.rpc.invoice(100000, "inv", "inv")
     assert only_one(l1.rpc.decodepay(inv['bolt11'])['routes'])
 
