@@ -12,22 +12,6 @@
 #include <wire/peer_wire.h>
 #include <wire/wire_sync.h>
 
-const char *is_peer_warning(const tal_t *ctx, const u8 *msg)
-{
-	if (fromwire_peektype(msg) != WIRE_WARNING)
-		return NULL;
-	/* connectd demuxes, so we only see it if channel_id is ours. */
-	return sanitize_error(ctx, msg, NULL);
-}
-
-const char *is_peer_error(const tal_t *ctx, const u8 *msg)
-{
-	if (fromwire_peektype(msg) != WIRE_ERROR)
-		return NULL;
-	/* connectd demuxes, so we only see it if channel_id is ours. */
-	return sanitize_error(ctx, msg, NULL);
-}
-
 bool handle_peer_error_or_warning(struct per_peer_state *pps,
 				  const u8 *msg TAKES)
 {
@@ -35,7 +19,7 @@ bool handle_peer_error_or_warning(struct per_peer_state *pps,
 
 	err = is_peer_error(tmpctx, msg);
 	if (err)
-		peer_failed_received_errmsg(pps, err, false);
+		peer_failed_received_errmsg(pps, true, err);
 
 	/* Simply log incoming warnings */
 	err = is_peer_warning(tmpctx, msg);

@@ -16,6 +16,7 @@
 #include <lightningd/channel_control.h>
 #include <lightningd/closing_control.h>
 #include <lightningd/coin_mvts.h>
+#include <lightningd/connect_control.h>
 #include <lightningd/dual_open_control.h>
 #include <lightningd/gossip_control.h>
 #include <lightningd/hsm_control.h>
@@ -80,6 +81,10 @@ static void try_update_blockheight(struct lightningd *ld,
 {
 	u8 *msg;
 
+	/* We don't update the blockheight for non-leased chans */
+	if (channel->lease_expiry == 0)
+		return;
+
 	log_debug(channel->log, "attempting update blockheight %s",
 		  type_to_string(tmpctx, struct channel_id, &channel->cid));
 
@@ -91,8 +96,7 @@ static void try_update_blockheight(struct lightningd *ld,
 
 	/* If they're offline, check that we're not too far behind anyway */
 	if (!channel->owner) {
-		if (channel->opener == REMOTE
-		    && channel->lease_expiry > 0) {
+		if (channel->opener == REMOTE) {
 			u32 peer_height
 				= get_blockheight(channel->blockheight_states,
 						  channel->opener, REMOTE);
@@ -117,11 +121,7 @@ static void try_update_blockheight(struct lightningd *ld,
 	}
 
 	/* If we're not opened/locked in yet, don't send update */
-	if (!channel_state_fees_can_change(channel->state))
-		return;
-
-	/* We don't update the blockheight for non-leased chans */
-	if (channel->lease_expiry == 0)
+	if (!channel_state_can_add_htlc(channel->state))
 		return;
 
 	log_debug(ld->log, "update_blockheight: height = %u", blockheight);
@@ -442,11 +442,6 @@ void channel_fallen_behind(struct channel *channel, const u8 *msg)
 			fatal("Our own id invalid?");
 		channel->future_per_commitment_point = any;
 	}
-
-	/* Peer sees this, so send a generic msg about unilateral close. */
-	channel_fail_permanent(channel,
-			       REASON_LOCAL,
-			       "Awaiting unilateral close");
 }
 
 static void
@@ -715,10 +710,8 @@ bool peer_start_channeld(struct channel *channel,
 	if (!channel->owner) {
 		log_broken(channel->log, "Could not subdaemon channel: %s",
 			   strerror(errno));
-		/* Disconnect it. */
-		subd_send_msg(ld->connectd,
-			      take(towire_connectd_discard_peer(NULL, &channel->peer->id,
-								channel->peer->connectd_counter)));
+		force_peer_disconnect(ld, channel->peer,
+				      "Failed to create channeld");
 		return false;
 	}
 

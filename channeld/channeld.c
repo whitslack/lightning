@@ -2556,6 +2556,7 @@ static void check_future_dataloss_fields(struct peer *peer,
 			take(towire_channeld_fail_fallen_behind(NULL,
 				       remote_current_per_commitment_point)));
 
+	sleep(1);
 	/* We have to send them an error to trigger dropping to chain. */
 	peer_failed_err(peer->pps, &peer->channel_id,
 			"Awaiting unilateral close");
@@ -2942,13 +2943,17 @@ static void peer_reconnect(struct peer *peer,
 		retransmit_revoke_and_ack = true;
 	} else if (next_revocation_number < peer->next_index[LOCAL] - 1) {
 		/* Send a warning here!  Because this is what it looks like if peer is
-		 * in the past, and they might still recover. */
-		peer_failed_warn(peer->pps,
-				 &peer->channel_id,
-				 "bad reestablish revocation_number: %"PRIu64
-				 " vs %"PRIu64,
-				 next_revocation_number,
-				 peer->next_index[LOCAL]);
+		 * in the past, and they might still recover.
+		 *
+		 * We don't disconnect: they might send an error, meaning
+		 * we will force-close the channel for them.
+		 */
+		peer_failed_warn_nodisconnect(peer->pps,
+					      &peer->channel_id,
+					      "bad reestablish revocation_number: %"PRIu64
+					      " vs %"PRIu64,
+					      next_revocation_number,
+					      peer->next_index[LOCAL]);
 	} else if (next_revocation_number > peer->next_index[LOCAL] - 1) {
 		if (!check_extra_fields)
 			/* They don't support option_data_loss_protect or

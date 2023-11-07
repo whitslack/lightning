@@ -422,18 +422,18 @@ static bool handle_peer_error(struct subd *sd, const u8 *msg, int fds[1])
 	struct peer_fd *peer_fd;
 	u8 *err_for_them;
 	bool warning;
-	bool aborted;
+	bool disconnect;
 
 	if (!fromwire_status_peer_error(msg, msg,
-					&desc, &warning,
-					&aborted, &err_for_them))
+					&disconnect, &desc, &warning,
+					&err_for_them))
 		return false;
 
 	peer_fd = new_peer_fd_arr(msg, fds);
 
 	/* Don't free sd; we may be about to free channel. */
 	sd->channel = NULL;
-	sd->errcb(channel, peer_fd, desc, warning, aborted, err_for_them);
+	sd->errcb(channel, peer_fd, desc, err_for_them, disconnect, warning);
 	return true;
 }
 
@@ -709,9 +709,9 @@ static struct subd *new_subd(const tal_t *ctx,
 			     void (*errcb)(void *channel,
 					   struct peer_fd *peer_fd,
 					   const char *desc,
-					   bool warning,
-					   bool aborted,
-					   const u8 *err_for_them),
+					   const u8 *err_for_them,
+					   bool disconnect,
+					   bool warning),
 			     void (*billboardcb)(void *channel,
 						 bool perm,
 						 const char *happenings),
@@ -815,9 +815,9 @@ struct subd *new_channel_subd_(const tal_t *ctx,
 			       void (*errcb)(void *channel,
 					     struct peer_fd *peer_fd,
 					     const char *desc,
-					     bool warning,
-					     bool aborted,
-					     const u8 *err_for_them),
+					     const u8 *err_for_them,
+					     bool disconnect,
+					     bool warning),
 			       void (*billboardcb)(void *channel, bool perm,
 						   const char *happenings),
 			       ...)

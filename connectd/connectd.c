@@ -45,6 +45,7 @@
 #include <netinet/in.h>
 #include <signal.h>
 #include <sodium.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -1811,8 +1812,10 @@ static void peer_discard(struct daemon *daemon, const u8 *msg)
 	/* If it's reconnected already, it will learn soon. */
 	if (peer->counter != counter)
 		return;
+
+	/* We make sure any final messages from the subds are sent! */
 	status_peer_debug(&id, "discard_peer");
-	tal_free(peer);
+	drain_peer(peer);
 }
 
 static void start_shutdown(struct daemon *daemon, const u8 *msg)
@@ -1957,12 +1960,36 @@ static const char *try_tal_name(const tal_t *ctx, const void *p)
 	return tal_fmt(ctx, "%p", p);
 }
 
+static char *fd_mode_str(int fd)
+{
+	struct stat finfo;
+	if (0 != fstat(fd, &finfo))
+		return "invalid fd";
+	if (S_ISBLK(finfo.st_mode))
+		return "block special";
+	if (S_ISCHR(finfo.st_mode))
+		return "char special";
+	if (S_ISDIR(finfo.st_mode))
+		return "directory";
+	if (S_ISFIFO(finfo.st_mode))
+		return "fifo or socket";
+	if (S_ISREG(finfo.st_mode))
+		return "regular file";
+	if (S_ISLNK(finfo.st_mode))
+		return "symbolic link";
+	if (S_ISSOCK(finfo.st_mode))
+		return "socket";
+	return "unknown";
+}
+
 static void dev_report_fds(struct daemon *daemon, const u8 *msg)
 {
+	bool found_chr_fd = false;
 	for (int fd = 3; fd < 4096; fd++) {
 		bool listener;
 		const struct io_conn *c;
 		const struct io_listener *l;
+		struct stat finfo;
 		if (!isatty(fd) && errno == EBADF)
 			continue;
 		if (fd == HSM_FD) {
@@ -1983,7 +2010,16 @@ static void dev_report_fds(struct daemon *daemon, const u8 *msg)
 		}
 		c = io_have_fd(fd, &listener);
 		if (!c) {
-			status_broken("dev_report_fds: %i open but unowned?", fd);
+			/* We consider a single CHR as expected */
+			if (!found_chr_fd && !fstat(fd, &finfo)
+			    && S_ISCHR(finfo.st_mode)) {
+				found_chr_fd = true;
+				status_info("dev_report_fds: %i -> char fd", fd);
+				continue;
+			}
+
+			status_broken("dev_report_fds: %i open but unowned? fd"
+				      " mode: %s", fd, fd_mode_str(fd));
 			continue;
 		} else if (listener) {
 			l = (void *)c;

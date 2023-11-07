@@ -108,7 +108,7 @@ static void close_subd_timeout(struct subd *subd)
 	io_close(subd->conn);
 }
 
-static void drain_peer(struct peer *peer)
+void drain_peer(struct peer *peer)
 {
 	status_debug("drain_peer");
 	assert(!peer->draining);
@@ -426,7 +426,8 @@ static struct io_plan *encrypt_and_send(struct peer *peer,
 	case DEV_DISCONNECT_AFTER:
 		/* Disallow reads from now on */
 		peer->dev_read_enabled = false;
-		next = (void *)io_close_cb;
+		/* Using io_close here can lose the data we're about to send! */
+		next = io_sock_shutdown_cb;
 		break;
 	case DEV_DISCONNECT_BLACKHOLE:
 		/* Disable both reads and writes from now on */
@@ -443,17 +444,6 @@ static struct io_plan *encrypt_and_send(struct peer *peer,
 	}
 
 	set_urgent_flag(peer, is_urgent(type));
-
-	/* We are no longer required to do this, but we do disconnect
-	 * after sending an error or warning. */
-	if (type == WIRE_ERROR || type == WIRE_WARNING) {
-		/* Might already be draining... */
-		if (!peer->draining)
-			drain_peer(peer);
-
-		/* Close as soon as we've sent this. */
-		next = io_sock_shutdown_cb;
-	}
 
 	/* We free this and the encrypted version in next write_to_peer */
 	peer->sent_to_peer = cryptomsg_encrypt_msg(peer, &peer->cs, msg);
@@ -1134,7 +1124,8 @@ static struct io_plan *read_body_from_peer_done(struct io_conn *peer_conn,
 				take(towire_connectd_peer_spoke(NULL, &peer->id,
 								peer->counter,
 								t,
-								&channel_id)));
+								&channel_id,
+								is_peer_error(tmpctx, decrypted))));
        }
 
        /* Even if we just created it, call this to catch open_channel2 */
