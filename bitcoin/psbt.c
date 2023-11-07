@@ -733,6 +733,12 @@ const u8 *psbt_get_bytes(const tal_t *ctx, const struct wally_psbt *psbt,
 	return bytes;
 }
 
+bool validate_psbt(const struct wally_psbt *psbt)
+{
+	size_t len;
+	return wally_psbt_get_length(psbt, 0, &len) == WALLY_OK;
+}
+
 struct wally_psbt *psbt_from_bytes(const tal_t *ctx, const u8 *bytes,
 				   size_t byte_len)
 {

@@ -266,6 +266,7 @@ struct wally_psbt *psbt_from_b64(const tal_t *ctx,
 char *psbt_to_b64(const tal_t *ctx, const struct wally_psbt *psbt);
 const u8 *psbt_get_bytes(const tal_t *ctx, const struct wally_psbt *psbt,
 			 size_t *bytes_written);
+bool validate_psbt(const struct wally_psbt *psbt);
 struct wally_psbt *psbt_from_bytes(const tal_t *ctx, const u8 *bytes,
 				   size_t byte_len);
 void towire_wally_psbt(u8 **pptr, const struct wally_psbt *psbt);
