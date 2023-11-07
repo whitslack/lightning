@@ -1398,8 +1398,14 @@ def test_recover(node_factory, bitcoind):
     l1.daemon.opts.update({"recover": "CL10LEETSLLHDMN9M42VCSAMX24ZRXGS3QQAT3LTDVAKMT73"})
     l1.daemon.start(wait_for_initialized=False, stderr_redir=True)
     assert l1.daemon.wait() == 1
-    assert l1.daemon.is_in_stderr(r"Expected 32 Byte secret: ffeeddccbbaa99887766554433221100")
+    assert l1.daemon.is_in_stderr(r"Invalid length: must be 32 bytes")
 
+    # Can do HSM secret in hex, too!
+    l1.daemon.opts["recover"] = "6c696768746e696e672d31000000000000000000000000000000000000000000"
+    l1.daemon.start()
+    l1.stop()
+
+    # And can start without recovery, of course!
     l1.daemon.opts.pop("recover")
     l1.start()
 
@@ -1834,8 +1840,9 @@ def test_check_command(node_factory):
 
     l1.rpc.check(command_to_check='help')
     l1.rpc.check(command_to_check='help', command='check')
-    # Note: this just checks form, not whether it's valid!
-    l1.rpc.check(command_to_check='help', command='badcommand')
+    # Actually checks that command is there!
+    with pytest.raises(RpcError, match=r'Unknown command'):
+        l1.rpc.check(command_to_check='help', command='badcommand')
     with pytest.raises(RpcError, match=r'Unknown command'):
         l1.rpc.check(command_to_check='badcommand')
     with pytest.raises(RpcError, match=r'unknown parameter'):
@@ -2617,12 +2624,6 @@ def test_sendcustommsg(node_factory):
     with pytest.raises(RpcError, match=r'Cannot send messages of type 18 .WIRE_PING.'):
         l2.rpc.sendcustommsg(l2.info['id'], r'0012')
 
-    # The sendcustommsg RPC call is currently limited to odd-typed messages,
-    # since they will not result in disconnections or even worse channel
-    # failures.
-    with pytest.raises(RpcError, match=r'Cannot send even-typed [0-9]+ custom message'):
-        l2.rpc.sendcustommsg(l2.info['id'], r'00FE')
-
     # This should work since the peer is currently owned by `channeld`
     l2.rpc.sendcustommsg(l1.info['id'], msg)
     l2.daemon.wait_for_log(
@@ -2860,6 +2861,7 @@ def test_listforwards_and_listhtlcs(node_factory, bitcoind):
     # Wait until channels are active
     mine_funding_to_announce(bitcoind, [l1, l2, l3, l4])
     l1.wait_channel_active(c23)
+    l1.wait_channel_active(c24)
 
     # successful payments
     i31 = l3.rpc.invoice(1000, 'i31', 'desc')
@@ -3319,6 +3321,37 @@ def test_datastore_keylist(node_factory):
                                                                          'hex': b'ab2val2'.hex()}]}
 
 
+def test_datastoreusage(node_factory):
+    l1: LightningNode = node_factory.get_node()
+    assert l1.rpc.datastoreusage() == {'datastoreusage': {'key': '[]', 'total_bytes': 0}}
+
+    data = 'somedatatostoreinthedatastore'  # len 29
+    l1.rpc.datastore(key=["a", "b"], string=data)
+    assert l1.rpc.datastoreusage() == {'datastoreusage': {'key': '[]', 'total_bytes': (29 + 1 + 1 + 1)}}
+    assert l1.rpc.datastoreusage(key="a") == {'datastoreusage': {'key': '[a]', 'total_bytes': (29 + 1 + 1 + 1)}}
+    assert l1.rpc.datastoreusage(key=["a", "b"]) == {'datastoreusage': {'key': '[a,b]', 'total_bytes': (29 + 1 + 1 + 1)}}
+
+    # add second leaf
+    l1.rpc.datastore(key=["a", "c"], string=data)
+    assert l1.rpc.datastoreusage() == {'datastoreusage': {'key': '[]', 'total_bytes': (29 + 1 + 1 + 1 + 29 + 1 + 1 + 1)}}
+    assert l1.rpc.datastoreusage(key=["a", "b"]) == {'datastoreusage': {'key': '[a,b]', 'total_bytes': (29 + 1 + 1 + 1)}}
+    assert l1.rpc.datastoreusage(key=["a", "c"]) == {'datastoreusage': {'key': '[a,c]', 'total_bytes': (29 + 1 + 1 + 1)}}
+
+    # check that the key is also counted as stored data
+    l1.rpc.datastore(key=["a", "thisissomelongkeythattriestostore46bytesofdata"], string=data)
+    assert l1.rpc.datastoreusage() == {'datastoreusage': {'key': '[]', 'total_bytes': (29 + 1 + 1 + 46 + 64)}}
+    assert l1.rpc.datastoreusage(key=["a", "thisissomelongkeythattriestostore46bytesofdata"]) == {'datastoreusage': {'key': '[a,thisissomelongkeythattriestostore46bytesofdata]', 'total_bytes': (29 + 1 + 1 + 46)}}
+
+    # check that the root is also counted
+    l1.rpc.datastore(key=["thisissomelongkeythattriestostore46bytesofdata", "a"], string=data)
+    assert l1.rpc.datastoreusage(key=["thisissomelongkeythattriestostore46bytesofdata", "a"]) == {'datastoreusage': {'key': '[thisissomelongkeythattriestostore46bytesofdata,a]', 'total_bytes': (29 + 1 + 1 + 46)}}
+
+    # check really deep data
+    l1.rpc.datastore(key=["a", "d", "e", "f", "g"], string=data)
+    assert l1.rpc.datastoreusage(key=["a", "d", "e", "f", "g"]) == {'datastoreusage': {'key': '[a,d,e,f,g]', 'total_bytes': (29 + 1 + 1 + 1 + 1 + 1 + 4)}}
+    assert l1.rpc.datastoreusage() == {'datastoreusage': {'key': '[]', 'total_bytes': (29 + 1 + 1 + 1 + 1 + 1 + 4 + 218)}}
+
+
 @unittest.skipIf(os.getenv('TEST_DB_PROVIDER', 'sqlite3') != 'sqlite3',
                  "This test requires sqlite3")
 def test_torv2_in_db(node_factory):
@@ -3602,3 +3635,93 @@ def test_setconfig(node_factory, bitcoind):
         assert lines[1].startswith('# Inserted by setconfig ')
         assert lines[2] == 'min-capacity-sat=400000'
         assert len(lines) == 3
+
+
+@unittest.skipIf(os.getenv('TEST_DB_PROVIDER', 'sqlite3') != 'sqlite3', "deletes database, which is assumed sqlite3")
+def test_recover_command(node_factory, bitcoind):
+    l1, l2 = node_factory.get_nodes(2)
+
+    l1oldid = l1.info['id']
+
+    def get_hsm_secret(n):
+        """Returns codex32 and hex"""
+        hsmfile = os.path.join(n.daemon.lightning_dir, TEST_NETWORK, "hsm_secret")
+        codex32 = subprocess.check_output(["tools/hsmtool", "getcodexsecret", hsmfile, "leet"]).decode('utf-8').strip()
+        with open(hsmfile, "rb") as f:
+            hexhsm = f.read().hex()
+        return codex32, hexhsm
+
+    l1codex32, l1hex = get_hsm_secret(l1)
+    l2codex32, l2hex = get_hsm_secret(l2)
+
+    # Get the PID for later
+    with open(os.path.join(l1.daemon.lightning_dir,
+                           f"lightningd-{TEST_NETWORK}.pid"), "r") as f:
+        pid = f.read().strip()
+
+    assert l1.rpc.check('recover', hsmsecret=l2codex32) == {'command_to_check': 'recover'}
+    l1.rpc.recover(hsmsecret=l2codex32)
+    l1.daemon.wait_for_log("Server started with public key")
+    # l1.info is cached on start, so won't reflect current reality!
+    assert l1.rpc.getinfo()['id'] == l2.info['id']
+
+    # Won't work if we issue an address...
+    l2.rpc.newaddr()
+
+    with pytest.raises(RpcError, match='Node has already issued bitcoin addresses'):
+        l2.rpc.recover(hsmsecret=l1codex32)
+
+    with pytest.raises(RpcError, match='Node has already issued bitcoin addresses'):
+        l2.rpc.check('recover', hsmsecret=l1codex32)
+
+    # Now try recovering using hex secret (remove old prerecover!)
+    shutil.rmtree(os.path.join(l1.daemon.lightning_dir, TEST_NETWORK,
+                               f"lightning.pre-recover.{pid}"))
+
+    # l1 already has --recover in cmdline: recovering again would add it
+    # twice!
+    with pytest.raises(RpcError, match='Already doing recover'):
+        l1.rpc.check('recover', hsmsecret=l1hex)
+
+    with pytest.raises(RpcError, match='Already doing recover'):
+        l1.rpc.recover(hsmsecret=l1hex)
+
+    l1.restart()
+    assert l1.rpc.check('recover', hsmsecret=l1hex) == {'command_to_check': 'recover'}
+    l1.rpc.recover(hsmsecret=l1hex)
+    l1.daemon.wait_for_log("Server started with public key")
+    assert l1.rpc.getinfo()['id'] == l1oldid
+
+
+def test_even_sendcustommsg(node_factory):
+    l1, l2 = node_factory.get_nodes(2, opts={'log-level': 'io',
+                                             'allow_warning': True})
+    l1.connect(l2)
+
+    # Even-numbered message
+    msg = hex(43690)[2:] + ('ff' * 30) + 'bb'
+
+    # l2 will hang up when it gets this.
+    l1.rpc.sendcustommsg(l2.info['id'], msg)
+    l2.daemon.wait_for_log(r'\[IN\] {}'.format(msg))
+    l1.daemon.wait_for_log('Invalid unknown even msg')
+    wait_for(lambda: l1.rpc.listpeers(l2.info['id'])['peers'] == [])
+
+    # Now with a plugin which allows it
+    l1.connect(l2)
+    l2.rpc.plugin_start(os.path.join(os.getcwd(), "tests/plugins/allow_even_msgs.py"))
+    l2.daemon.wait_for_log("connectd.*Now allowing 1 custom message types")
+
+    l1.rpc.sendcustommsg(l2.info['id'], msg)
+    l2.daemon.wait_for_log(r'\[IN\] {}'.format(msg))
+    l2.daemon.wait_for_log(r'allow_even_msgs.*Got message 43690')
+
+    # And nobody gets upset
+    assert only_one(l1.rpc.listpeers(l2.info['id'])['peers'])['connected']
+
+    # It does if we remove the plugin though!
+    l2.rpc.plugin_stop("allow_even_msgs.py")
+    l1.rpc.sendcustommsg(l2.info['id'], msg)
+    l2.daemon.wait_for_log(r'\[IN\] {}'.format(msg))
+    l1.daemon.wait_for_log('Invalid unknown even msg')
+    wait_for(lambda: l1.rpc.listpeers(l2.info['id'])['peers'] == [])

@@ -527,6 +527,11 @@ static void rcvd_htlc_reply(struct subd *subd, const u8 *msg, const int *fds UNU
 	}
 
 	if (tal_count(failmsg)) {
+		/* It's our job to append the channel_update */
+		if (fromwire_peektype(failmsg) & UPDATE) {
+			const u8 *update = get_channel_update(hout->key.channel);
+			towire(&failmsg, update, tal_bytelen(update));
+		}
 		hout->failmsg = tal_steal(hout, failmsg);
 		if (hout->am_origin) {
 			char *localfail = tal_fmt(msg, "%s: %s",
@@ -2913,10 +2918,10 @@ static struct command_result *json_dev_ignore_htlcs(struct command *cmd,
 	struct peer *peer;
 	bool *ignore;
 
-	if (!param(cmd, buffer, params,
-		   p_req("id", param_node_id, &peerid),
-		   p_req("ignore", param_bool, &ignore),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("id", param_node_id, &peerid),
+			 p_req("ignore", param_bool, &ignore),
+			 NULL))
 		return command_param_failed();
 
 	peer = peer_by_id(cmd->ld, peerid);
@@ -2924,6 +2929,9 @@ static struct command_result *json_dev_ignore_htlcs(struct command *cmd,
 		return command_fail(cmd, LIGHTNINGD,
 				    "Could not find channel with that peer");
 	}
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
+
 	peer->dev_ignore_htlcs = *ignore;
 
 	return command_success(cmd, json_stream_success(cmd));

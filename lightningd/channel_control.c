@@ -587,6 +587,21 @@ static void handle_channel_upgrade(struct channel *channel,
 	wallet_channel_save(channel->peer->ld->wallet, channel);
 }
 
+static void handle_local_channel_update(struct channel *channel,
+					const u8 *msg)
+{
+	bool enable;
+
+	if (!fromwire_channeld_local_channel_update(msg, &enable)) {
+		channel_internal_error(channel,
+				       "bad channeld_local_channel_update %s",
+				       tal_hex(channel, msg));
+		return;
+	}
+
+	tell_gossipd_local_channel_update(channel->peer->ld, channel, enable);
+}
+
 static unsigned channel_msg(struct subd *sd, const u8 *msg, const int *fds)
 {
 	enum channeld_wire t = fromwire_peektype(msg);
@@ -622,12 +637,8 @@ static unsigned channel_msg(struct subd *sd, const u8 *msg, const int *fds)
 	case WIRE_CHANNELD_SEND_ERROR_REPLY:
 		handle_error_channel(sd->channel, msg);
 		break;
-	case WIRE_CHANNELD_USED_CHANNEL_UPDATE:
-		/* This tells gossipd we used it. */
-		get_channel_update(sd->channel);
-		break;
 	case WIRE_CHANNELD_LOCAL_CHANNEL_UPDATE:
-		tell_gossipd_local_channel_update(sd->ld, sd->channel, msg);
+		handle_local_channel_update(sd->channel, msg);
 		break;
 	case WIRE_CHANNELD_LOCAL_CHANNEL_ANNOUNCEMENT:
 		tell_gossipd_local_channel_announce(sd->ld, sd->channel, msg);
@@ -651,8 +662,6 @@ static unsigned channel_msg(struct subd *sd, const u8 *msg, const int *fds)
 	case WIRE_CHANNELD_DEV_REENABLE_COMMIT:
 	case WIRE_CHANNELD_FEERATES:
 	case WIRE_CHANNELD_BLOCKHEIGHT:
-	case WIRE_CHANNELD_CONFIG_CHANNEL:
-	case WIRE_CHANNELD_CHANNEL_UPDATE:
 	case WIRE_CHANNELD_DEV_MEMLEAK:
 	case WIRE_CHANNELD_DEV_QUIESCE:
 		/* Replies go to requests. */
@@ -834,17 +843,12 @@ bool peer_start_channeld(struct channel *channel,
 				       &channel->channel_info.remote_per_commit,
 				       &channel->channel_info.old_remote_per_commit,
 				       channel->opener,
-				       channel->feerate_base,
-				       channel->feerate_ppm,
-				       channel->htlc_minimum_msat,
-				       channel->htlc_maximum_msat,
 				       channel->our_msat,
 				       &channel->local_basepoints,
 				       &channel->local_funding_pubkey,
 				       &ld->id,
 				       &channel->peer->id,
 				       cfg->commit_time_ms,
-				       cfg->cltv_expiry_delta,
 				       channel->last_was_revoke,
 				       channel->last_sent_commit,
 				       channel->next_index[LOCAL],
@@ -878,7 +882,6 @@ bool peer_start_channeld(struct channel *channel,
 					     : (u32 *)&ld->dev_disable_commit,
 				       pbases,
 				       reestablish_only,
-				       channel->channel_update,
 				       ld->experimental_upgrade_protocol);
 
 	/* We don't expect a response: we are triggered by funding_depth_cb. */
@@ -1148,14 +1151,6 @@ void channel_replace_update(struct channel *channel, u8 *update TAKES)
 {
 	tal_free(channel->channel_update);
 	channel->channel_update = tal_dup_talarr(channel, u8, update);
-
-	/* Keep channeld up-to-date */
-	if (!channel->owner || !streq(channel->owner->name, "channeld"))
-		return;
-
-	subd_send_msg(channel->owner,
-		      take(towire_channeld_channel_update(NULL,
-							  channel->channel_update)));
 }
 
 static struct command_result *json_dev_feerate(struct command *cmd,
@@ -1171,10 +1166,10 @@ static struct command_result *json_dev_feerate(struct command *cmd,
 	const u8 *msg;
 	bool more_than_one;
 
-	if (!param(cmd, buffer, params,
-		   p_req("id", param_node_id, &id),
-		   p_req("feerate", param_number, &feerate),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("id", param_node_id, &id),
+			 p_req("feerate", param_number, &feerate),
+			 NULL))
 		return command_param_failed();
 
 	peer = peer_by_id(cmd->ld, id);
@@ -1187,6 +1182,9 @@ static struct command_result *json_dev_feerate(struct command *cmd,
 	/* This is a dev command: fix the api if you need this! */
 	if (more_than_one)
 		return command_fail(cmd, LIGHTNINGD, "More than one channel");
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
 
 	msg = towire_channeld_feerates(NULL, *feerate,
 				       feerate_min(cmd->ld, NULL),
@@ -1232,9 +1230,9 @@ static struct command_result *json_dev_quiesce(struct command *cmd,
 	const u8 *msg;
 	bool more_than_one;
 
-	if (!param(cmd, buffer, params,
-		   p_req("id", param_node_id, &id),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("id", param_node_id, &id),
+			 NULL))
 		return command_param_failed();
 
 	peer = peer_by_id(cmd->ld, id);
@@ -1248,6 +1246,9 @@ static struct command_result *json_dev_quiesce(struct command *cmd,
 	/* This is a dev command: fix the api if you need this! */
 	if (more_than_one)
 		return command_fail(cmd, LIGHTNINGD, "More than one channel");
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
 
 	msg = towire_channeld_dev_quiesce(NULL);
 	subd_req(channel->owner, channel->owner, take(msg), -1, 0,

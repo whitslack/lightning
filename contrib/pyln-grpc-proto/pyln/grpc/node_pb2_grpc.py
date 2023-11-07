@@ -74,6 +74,11 @@ class NodeStub(object):
                 request_serializer=node__pb2.DatastoreRequest.SerializeToString,
                 response_deserializer=node__pb2.DatastoreResponse.FromString,
                 )
+        self.DatastoreUsage = channel.unary_unary(
+                '/cln.Node/DatastoreUsage',
+                request_serializer=node__pb2.DatastoreusageRequest.SerializeToString,
+                response_deserializer=node__pb2.DatastoreusageResponse.FromString,
+                )
         self.CreateOnion = channel.unary_unary(
                 '/cln.Node/CreateOnion',
                 request_serializer=node__pb2.CreateonionRequest.SerializeToString,
@@ -279,6 +284,11 @@ class NodeStub(object):
                 request_serializer=node__pb2.SignmessageRequest.SerializeToString,
                 response_deserializer=node__pb2.SignmessageResponse.FromString,
                 )
+        self.WaitBlockHeight = channel.unary_unary(
+                '/cln.Node/WaitBlockHeight',
+                request_serializer=node__pb2.WaitblockheightRequest.SerializeToString,
+                response_deserializer=node__pb2.WaitblockheightResponse.FromString,
+                )
         self.Stop = channel.unary_unary(
                 '/cln.Node/Stop',
                 request_serializer=node__pb2.StopRequest.SerializeToString,
@@ -371,6 +381,12 @@ class NodeServicer(object):
         raise NotImplementedError('Method not implemented!')
 
     def Datastore(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def DatastoreUsage(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -622,6 +638,12 @@ class NodeServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def WaitBlockHeight(self, request, context):
+        """Missing associated documentation comment in .proto file."""
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
     def Stop(self, request, context):
         """Missing associated documentation comment in .proto file."""
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
@@ -708,6 +730,11 @@ def add_NodeServicer_to_server(servicer, server):
                     servicer.Datastore,
                     request_deserializer=node__pb2.DatastoreRequest.FromString,
                     response_serializer=node__pb2.DatastoreResponse.SerializeToString,
+            ),
+            'DatastoreUsage': grpc.unary_unary_rpc_method_handler(
+                    servicer.DatastoreUsage,
+                    request_deserializer=node__pb2.DatastoreusageRequest.FromString,
+                    response_serializer=node__pb2.DatastoreusageResponse.SerializeToString,
             ),
             'CreateOnion': grpc.unary_unary_rpc_method_handler(
                     servicer.CreateOnion,
@@ -913,6 +940,11 @@ def add_NodeServicer_to_server(servicer, server):
                     servicer.SignMessage,
                     request_deserializer=node__pb2.SignmessageRequest.FromString,
                     response_serializer=node__pb2.SignmessageResponse.SerializeToString,
+            ),
+            'WaitBlockHeight': grpc.unary_unary_rpc_method_handler(
+                    servicer.WaitBlockHeight,
+                    request_deserializer=node__pb2.WaitblockheightRequest.FromString,
+                    response_serializer=node__pb2.WaitblockheightResponse.SerializeToString,
             ),
             'Stop': grpc.unary_unary_rpc_method_handler(
                     servicer.Stop,
@@ -1145,6 +1177,23 @@ class Node(object):
         return grpc.experimental.unary_unary(request, target, '/cln.Node/Datastore',
             node__pb2.DatastoreRequest.SerializeToString,
             node__pb2.DatastoreResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def DatastoreUsage(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/cln.Node/DatastoreUsage',
+            node__pb2.DatastoreusageRequest.SerializeToString,
+            node__pb2.DatastoreusageResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 
@@ -1842,6 +1891,23 @@ class Node(object):
         return grpc.experimental.unary_unary(request, target, '/cln.Node/SignMessage',
             node__pb2.SignmessageRequest.SerializeToString,
             node__pb2.SignmessageResponse.FromString,
+            options, channel_credentials,
+            insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
+
+    @staticmethod
+    def WaitBlockHeight(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(request, target, '/cln.Node/WaitBlockHeight',
+            node__pb2.WaitblockheightRequest.SerializeToString,
+            node__pb2.WaitblockheightResponse.FromString,
             options, channel_credentials,
             insecure, call_credentials, compression, wait_for_ready, timeout, metadata)
 

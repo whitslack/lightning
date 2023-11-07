@@ -26,6 +26,7 @@ pub enum Request {
 	Connect(requests::ConnectRequest),
 	CreateInvoice(requests::CreateinvoiceRequest),
 	Datastore(requests::DatastoreRequest),
+	DatastoreUsage(requests::DatastoreusageRequest),
 	CreateOnion(requests::CreateonionRequest),
 	DelDatastore(requests::DeldatastoreRequest),
 	DelExpiredInvoice(requests::DelexpiredinvoiceRequest),
@@ -67,6 +68,7 @@ pub enum Request {
 	SetChannel(requests::SetchannelRequest),
 	SignInvoice(requests::SigninvoiceRequest),
 	SignMessage(requests::SignmessageRequest),
+	WaitBlockHeight(requests::WaitblockheightRequest),
 	Stop(requests::StopRequest),
 	PreApproveKeysend(requests::PreapprovekeysendRequest),
 	PreApproveInvoice(requests::PreapproveinvoiceRequest),
@@ -89,6 +91,7 @@ pub enum Response {
 	Connect(responses::ConnectResponse),
 	CreateInvoice(responses::CreateinvoiceResponse),
 	Datastore(responses::DatastoreResponse),
+	DatastoreUsage(responses::DatastoreusageResponse),
 	CreateOnion(responses::CreateonionResponse),
 	DelDatastore(responses::DeldatastoreResponse),
 	DelExpiredInvoice(responses::DelexpiredinvoiceResponse),
@@ -130,6 +133,7 @@ pub enum Response {
 	SetChannel(responses::SetchannelResponse),
 	SignInvoice(responses::SigninvoiceResponse),
 	SignMessage(responses::SignmessageResponse),
+	WaitBlockHeight(responses::WaitblockheightResponse),
 	Stop(responses::StopResponse),
 	PreApproveKeysend(responses::PreapprovekeysendResponse),
 	PreApproveInvoice(responses::PreapproveinvoiceResponse),
@@ -432,6 +436,20 @@ pub mod requests {
 
 	impl IntoRequest for DatastoreRequest {
 	    type Response = super::responses::DatastoreResponse;
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct DatastoreusageRequest {
+	}
+
+	impl From<DatastoreusageRequest> for Request {
+	    fn from(r: DatastoreusageRequest) -> Self {
+	        Request::DatastoreUsage(r)
+	    }
+	}
+
+	impl IntoRequest for DatastoreusageRequest {
+	    type Response = super::responses::DatastoreusageResponse;
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1471,6 +1489,23 @@ pub mod requests {
 
 	impl IntoRequest for SignmessageRequest {
 	    type Response = super::responses::SignmessageResponse;
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct WaitblockheightRequest {
+	    pub blockheight: u32,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub timeout: Option<u32>,
+	}
+
+	impl From<WaitblockheightRequest> for Request {
+	    fn from(r: WaitblockheightRequest) -> Self {
+	        Request::WaitBlockHeight(r)
+	    }
+	}
+
+	impl IntoRequest for WaitblockheightRequest {
+	    type Response = super::responses::WaitblockheightResponse;
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
@@ -2548,6 +2583,31 @@ pub mod responses {
 	    fn try_from(response: Response) -> Result<Self, Self::Error> {
 	        match response {
 	            Response::Datastore(response) => Ok(response),
+	            _ => Err(TryFromResponseError)
+	        }
+	    }
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct DatastoreusageDatastoreusage {
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub key: Option<String>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub total_bytes: Option<u64>,
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct DatastoreusageResponse {
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub datastoreusage: Option<DatastoreusageDatastoreusage>,
+	}
+
+	impl TryFrom<Response> for DatastoreusageResponse {
+	    type Error = super::TryFromResponseError;
+
+	    fn try_from(response: Response) -> Result<Self, Self::Error> {
+	        match response {
+	            Response::DatastoreUsage(response) => Ok(response),
 	            _ => Err(TryFromResponseError)
 	        }
 	    }
@@ -4812,6 +4872,22 @@ pub mod responses {
 	    fn try_from(response: Response) -> Result<Self, Self::Error> {
 	        match response {
 	            Response::SignMessage(response) => Ok(response),
+	            _ => Err(TryFromResponseError)
+	        }
+	    }
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct WaitblockheightResponse {
+	    pub blockheight: u32,
+	}
+
+	impl TryFrom<Response> for WaitblockheightResponse {
+	    type Error = super::TryFromResponseError;
+
+	    fn try_from(response: Response) -> Result<Self, Self::Error> {
+	        match response {
+	            Response::WaitBlockHeight(response) => Ok(response),
 	            _ => Err(TryFromResponseError)
 	        }
 	    }

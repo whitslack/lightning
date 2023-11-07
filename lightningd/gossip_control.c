@@ -315,30 +315,11 @@ void gossipd_notify_spends(struct lightningd *ld,
 							  scids)));
 }
 
-/* We unwrap, add the peer id, and send to gossipd. */
+/* Tell gossipd about latest channel_update. */
 void tell_gossipd_local_channel_update(struct lightningd *ld,
 				       struct channel *channel,
-				       const u8 *msg)
+				       bool enable)
 {
-	struct short_channel_id scid;
-	bool disable, public;
-	u16 cltv_expiry_delta;
-	struct amount_msat htlc_minimum_msat;
-	u32 fee_base_msat, fee_proportional_millionths;
-	struct amount_msat htlc_maximum_msat;
-
-	if (!fromwire_channeld_local_channel_update(msg, &scid, &disable,
-						    &cltv_expiry_delta,
-						    &htlc_minimum_msat,
-						    &fee_base_msat,
-						    &fee_proportional_millionths,
-						    &htlc_maximum_msat, &public)) {
-		channel_internal_error(channel,
-				       "bad channeld_local_channel_update %s",
-				       tal_hex(channel, msg));
-		return;
-	}
-
 	/* As we're shutting down, ignore */
 	if (!ld->gossip)
 		return;
@@ -347,14 +328,14 @@ void tell_gossipd_local_channel_update(struct lightningd *ld,
 		      take(towire_gossipd_local_channel_update
 			   (NULL,
 			    &channel->peer->id,
-			    &scid,
-			    disable,
-			    cltv_expiry_delta,
-			    htlc_minimum_msat,
-			    fee_base_msat,
-			    fee_proportional_millionths,
-			    htlc_maximum_msat,
-			    public)));
+			    channel->scid ? channel->scid : channel->alias[LOCAL],
+			    enable,
+			    ld->config.cltv_expiry_delta,
+			    channel->htlc_minimum_msat,
+			    channel->feerate_base,
+			    channel->feerate_ppm,
+			    channel->htlc_maximum_msat,
+			    channel->channel_flags & CHANNEL_FLAGS_ANNOUNCE_CHANNEL)));
 }
 
 void tell_gossipd_local_channel_announce(struct lightningd *ld,
@@ -429,15 +410,15 @@ static struct command_result *json_setleaserates(struct command *cmd,
 	struct amount_msat *channel_fee_base_msat, *lease_base_msat;
 	u32 *lease_basis, *channel_fee_max_ppt, *funding_weight;
 
-	if (!param(cmd, buffer, params,
-		   p_req("lease_fee_base_msat", param_msat, &lease_base_msat),
-		   p_req("lease_fee_basis", param_number, &lease_basis),
-		   p_req("funding_weight", param_number, &funding_weight),
-		   p_req("channel_fee_max_base_msat", param_msat,
-			 &channel_fee_base_msat),
-		   p_req("channel_fee_max_proportional_thousandths",
-			 param_number, &channel_fee_max_ppt),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("lease_fee_base_msat", param_msat, &lease_base_msat),
+			 p_req("lease_fee_basis", param_number, &lease_basis),
+			 p_req("funding_weight", param_number, &funding_weight),
+			 p_req("channel_fee_max_base_msat", param_msat,
+			       &channel_fee_base_msat),
+			 p_req("channel_fee_max_proportional_thousandths",
+			       param_number, &channel_fee_max_ppt),
+			 NULL))
 		return command_param_failed();
 
 	rates = tal(tmpctx, struct lease_rates);
@@ -457,6 +438,9 @@ static struct command_result *json_setleaserates(struct command *cmd,
 	if (channel_fee_base_msat->millisatoshis > rates->channel_fee_max_base_msat) /* Raw: comparison */
 		return command_fail_badparam(cmd, "channel_fee_max_base_msat",
 					     buffer, params, "Overflow");
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
 
 	/* Call gossipd, let them know we've got new rates */
 	subd_send_msg(cmd->ld->gossip,

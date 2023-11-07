@@ -350,6 +350,18 @@ def datastore2py(m):
     })
 
 
+def datastoreusage_datastoreusage2py(m):
+    return remove_default({
+        "key": m.key,  # PrimitiveField in generate_composite
+        "total_bytes": m.total_bytes,  # PrimitiveField in generate_composite
+    })
+
+
+def datastoreusage2py(m):
+    return remove_default({
+    })
+
+
 def createonion2py(m):
     return remove_default({
         "onion": hexlify(m.onion),  # PrimitiveField in generate_composite
@@ -1343,6 +1355,12 @@ def signmessage2py(m):
         "signature": hexlify(m.signature),  # PrimitiveField in generate_composite
         "recid": hexlify(m.recid),  # PrimitiveField in generate_composite
         "zbase": m.zbase,  # PrimitiveField in generate_composite
+    })
+
+
+def waitblockheight2py(m):
+    return remove_default({
+        "blockheight": m.blockheight,  # PrimitiveField in generate_composite
     })
 
 

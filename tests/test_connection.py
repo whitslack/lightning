@@ -236,11 +236,11 @@ def test_remote_addr_port(node_factory, bitcoind):
     l2.daemon.wait_for_log("Already have funding locked in")
     l3.restart()
     l2.rpc.connect(l3.info['id'], 'localhost', l3.port)
-    l2.daemon.wait_for_log("Already have funding locked in")
 
     # if ip discovery would have been enabled, we would have send an updated
     # node_annoucement by now. Check we didn't...
-    assert l2.daemon.wait_for_log("Update our node_announcement for discovered address")
+    l2.daemon.wait_for_logs(["Already have funding locked in",
+                             "Update our node_announcement for discovered address"])
     info = l2.rpc.getinfo()
     assert len(info['address']) == 1
     assert info['address'][0]['type'] == 'ipv4'
@@ -4383,3 +4383,9 @@ def test_reconnect_no_additional_transient_failure(node_factory, bitcoind):
 
     # We should not see a "Peer transient failure" after restart of l1
     assert not l1.daemon.is_in_log(f"{l2id}-chan#1: Peer transient failure in CHANNELD_NORMAL: Disconnected", start=offset1)
+
+
+def test_offline_fd_check(node_factory):
+    # if get_node starts it, it'll expect an address, so do it manually.
+    l1 = node_factory.get_node(options={"offline": None}, start=False)
+    l1.daemon.start()

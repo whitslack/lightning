@@ -14,12 +14,15 @@
  */
 /* eg: { "jsonrpc":"2.0", "method" : "dev-echo", "params" : [ "hello", "Arabella!" ], "id" : "1" } */
 #include "config.h"
+#include <ccan/array_size/array_size.h>
 #include <ccan/asort/asort.h>
 #include <ccan/err/err.h>
 #include <ccan/io/io.h>
 #include <ccan/json_escape/json_escape.h>
 #include <ccan/json_out/json_out.h>
+#include <ccan/tal/path/path.h>
 #include <ccan/tal/str/str.h>
+#include <common/codex32.h>
 #include <common/configdir.h>
 #include <common/json_command.h>
 #include <common/json_filter.h>
@@ -27,9 +30,12 @@
 #include <common/memleak.h>
 #include <common/timeout.h>
 #include <common/trace.h>
+#include <db/common.h>
 #include <db/exec.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <lightningd/jsonrpc.h>
+#include <lightningd/options.h>
 #include <lightningd/plugin_hook.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -45,6 +51,14 @@ static struct command_result param_failed, complete, pending, unknown;
 
 struct command_result *command_param_failed(void)
 {
+	return &param_failed;
+}
+
+/* For our purposes, the same as command_param_failed: we examine
+ * cmd->mode to see if it's really done. */
+struct command_result *command_check_done(struct command *cmd)
+{
+	assert(cmd->mode == CMD_CHECK);
 	return &param_failed;
 }
 
@@ -176,19 +190,14 @@ static const struct json_command help_command = {
 };
 AUTODATA(json_command, &help_command);
 
-static struct command_result *json_stop(struct command *cmd,
-					const char *buffer,
-					const jsmntok_t *obj UNNEEDED,
-					const jsmntok_t *params)
+/* We prepare a canned JSON response, for top level to write as reply
+ * immediately before we exit. */
+static struct command_result *prepare_stop_conn(struct command *cmd,
+						const char *why)
 {
 	struct json_out *jout;
 	const char *p;
 	size_t len;
-
-	if (!param(cmd, buffer, params, NULL))
-		return command_param_failed();
-
-	log_unusual(cmd->ld->log, "JSON-RPC shutdown");
 
 	/* With rpc_command_hook, jcon might have closed in the meantime! */
 	if (!cmd->jcon) {
@@ -207,7 +216,7 @@ static struct command_result *json_stop(struct command *cmd,
 	/* Copy input id token exactly */
 	memcpy(json_out_member_direct(jout, "id", strlen(cmd->id)),
 	       cmd->id, strlen(cmd->id));
-	json_out_addstr(jout, "result", "Shutdown complete");
+	json_out_addstr(jout, "result", why);
 	json_out_end(jout, '}');
 	json_out_finished(jout);
 
@@ -222,6 +231,18 @@ static struct command_result *json_stop(struct command *cmd,
 	return command_still_pending(cmd);
 }
 
+static struct command_result *json_stop(struct command *cmd,
+					const char *buffer,
+					const jsmntok_t *obj UNNEEDED,
+					const jsmntok_t *params)
+{
+	if (!param(cmd, buffer, params, NULL))
+		return command_param_failed();
+
+	log_unusual(cmd->ld->log, "JSON-RPC shutdown");
+	return prepare_stop_conn(cmd, "Shutdown complete");
+}
+
 static const struct json_command stop_command = {
 	"stop",
 	"utility",
@@ -229,6 +250,113 @@ static const struct json_command stop_command = {
 	"Shut down the lightningd process"
 };
 AUTODATA(json_command, &stop_command);
+
+static bool have_channels(struct lightningd *ld)
+{
+	struct peer_node_id_map_iter it;
+	struct peer *peer;
+
+	for (peer = peer_node_id_map_first(ld->peers, &it);
+	     peer;
+	     peer = peer_node_id_map_next(ld->peers, &it)) {
+		if (peer->uncommitted_channel)
+			return true;
+		if (!list_empty(&peer->channels))
+			return true;
+	}
+	return false;
+}
+
+static struct command_result *param_codex32_or_hex(struct command *cmd,
+						   const char *name,
+						   const char *buffer,
+						   const jsmntok_t *tok,
+						   const char **hsm_secret)
+{
+	char *err;
+	const u8 *payload;
+
+	*hsm_secret = json_strdup(cmd, buffer, tok);
+	err = hsm_secret_arg(tmpctx, *hsm_secret, &payload);
+	if (err)
+		return command_fail_badparam(cmd, name, buffer, tok, err);
+	return NULL;
+}
+
+/* We cannot --recover unless these files are not in place. */
+static void move_prerecover_files(const char *dir)
+{
+	const char *files[] = {
+		"lightningd.sqlite3",
+		"emergency.recover",
+		"hsm_secret",
+	};
+
+	if (mkdir(dir, 0770) != 0)
+		fatal("Could not make %s: %s", dir, strerror(errno));
+	for (size_t i = 0; i < ARRAY_SIZE(files); i++) {
+		if (rename(files[i], path_join(tmpctx, dir, files[i])) != 0) {
+			fatal("Could not move %s: %s", files[i], strerror(errno));
+		}
+	}
+}
+
+static struct command_result *json_recover(struct command *cmd,
+					   const char *buffer,
+					   const jsmntok_t *obj UNNEEDED,
+					   const jsmntok_t *params)
+{
+	const char *hsm_secret, *dir;
+
+	if (!param_check(cmd, buffer, params,
+			 p_req("hsmsecret", param_codex32_or_hex, &hsm_secret),
+			 NULL))
+		return command_param_failed();
+
+	/* FIXME: How do we "move" the Postgres DB? */
+	if (!streq(cmd->ld->wallet->db->config->name, "sqlite3"))
+		return command_fail(cmd, LIGHTNINGD,
+				    "Only sqlite3 supported for recover command");
+
+	/* Check this is an empty node! */
+	if (db_get_intvar(cmd->ld->wallet->db, "bip32_max_index", 0) != 0) {
+		return command_fail(cmd, RECOVER_NODE_IN_USE,
+				    "Node has already issued bitcoin addresses!");
+	}
+
+	if (have_channels(cmd->ld)) {
+		return command_fail(cmd, RECOVER_NODE_IN_USE,
+				    "Node has channels!");
+	}
+
+	/* Don't try to add --recover to cmdline twice! */
+	if (cmd->ld->recover != NULL) {
+		return command_fail(cmd, RECOVER_NODE_IN_USE,
+				    "Already doing recover");
+	}
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
+
+	dir = tal_fmt(tmpctx, "lightning.pre-recover.%u", getpid());
+	log_unusual(cmd->ld->log,
+		    "JSON-RPC recovery command: moving existing files to %s", dir);
+
+	move_prerecover_files(dir);
+
+	/* Top level with add --recover=... here */
+	cmd->ld->recover_secret = tal_steal(cmd->ld, hsm_secret);
+	cmd->ld->try_reexec = true;
+	return prepare_stop_conn(cmd, "Recovery restart in progress");
+}
+
+static const struct json_command recover_command = {
+	"recover",
+	"utility",
+	json_recover,
+	"Restart an unused lightning node with --recover"
+};
+AUTODATA(json_command, &recover_command);
 
 struct slowcmd {
 	struct command *cmd;
@@ -388,9 +516,9 @@ static struct command_result *json_help(struct command *cmd,
 	struct json_command **commands;
 	const struct json_command *one_cmd;
 
-	if (!param(cmd, buffer, params,
-		   p_opt("command", param_string, &cmdname),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_opt("command", param_string, &cmdname),
+			 NULL))
 		return command_param_failed();
 
 	commands = cmd->ld->jsonrpc->commands;
@@ -410,6 +538,9 @@ static struct command_result *json_help(struct command *cmd,
 					    cmdname);
 	} else
 		one_cmd = NULL;
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
 
 	asort(commands, tal_count(commands), compare_commands_name, NULL);
 
@@ -458,6 +589,12 @@ struct command_result *command_raw_complete(struct command *cmd,
 	/* If we have a jcon, it will free result for us. */
 	if (cmd->jcon)
 		tal_steal(cmd->jcon, result);
+
+	/* Don't free it here if we're doing `check` */
+	if (command_check_only(cmd)) {
+		cmd->mode = CMD_CHECK_FAILED;
+		return command_param_failed();
+	}
 
 	tal_free(cmd);
 	return &complete;
@@ -1307,7 +1444,7 @@ void command_set_usage(struct command *cmd, const char *usage TAKES)
 
 bool command_check_only(const struct command *cmd)
 {
-	return cmd->mode == CMD_CHECK;
+	return cmd->mode == CMD_CHECK || cmd->mode == CMD_CHECK_FAILED;
 }
 
 void jsonrpc_listen(struct jsonrpc *jsonrpc, struct lightningd *ld)
@@ -1479,12 +1616,6 @@ void jsonrpc_request_end(struct jsonrpc_request *r)
 	json_stream_append(r->stream, "\n\n", strlen("\n\n"));
 }
 
-/* We add this destructor as a canary to detect cmd failing. */
-static void destroy_command_canary(struct command *cmd, bool *failed)
-{
-	*failed = true;
-}
-
 static struct command_result *json_check(struct command *cmd,
 					 const char *buffer,
 					 const jsmntok_t *obj UNNEEDED,
@@ -1492,7 +1623,6 @@ static struct command_result *json_check(struct command *cmd,
 {
 	jsmntok_t *mod_params;
 	const jsmntok_t *name_tok;
-	bool failed;
 	struct json_stream *response;
 	struct command_result *res;
 
@@ -1515,19 +1645,24 @@ static struct command_result *json_check(struct command *cmd,
 	json_tok_remove(&mod_params, mod_params, name_tok, 1);
 
 	cmd->mode = CMD_CHECK;
-	failed = false;
-	tal_add_destructor2(cmd, destroy_command_canary, &failed);
+	/* Make *sure* it doesn't try to manip db! */
+	db_set_readonly(cmd->ld->wallet->db, true);
 	res = cmd->json_cmd->dispatch(cmd, buffer, mod_params, mod_params);
+	db_set_readonly(cmd->ld->wallet->db, false);
 
 	/* CMD_CHECK always makes it "fail" parameter parsing. */
 	assert(res == &param_failed);
-
-	if (failed)
+	if (cmd->mode == CMD_CHECK_FAILED) {
+		tal_free(cmd);
 		return res;
+	}
 
 	response = json_stream_success(cmd);
 	json_add_string(response, "command_to_check", cmd->json_cmd->name);
-	return command_success(cmd, response);
+	res = command_success(cmd, response);
+	/* CMD_CHECK means we don't get freed! */
+	tal_free(cmd);
+	return res;
 }
 
 static const struct json_command check_command = {

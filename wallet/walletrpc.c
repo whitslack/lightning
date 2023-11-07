@@ -744,10 +744,10 @@ static struct command_result *json_signpsbt(struct command *cmd,
 	u32 *input_nums;
 	u32 psbt_version;
 
-	if (!param(cmd, buffer, params,
-		   p_req("psbt", param_psbt, &psbt),
-		   p_opt("signonly", param_input_numbers, &input_nums),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("psbt", param_psbt, &psbt),
+			 p_opt("signonly", param_input_numbers, &input_nums),
+			 NULL))
 		return command_param_failed();
 
 	/* We internally deal with v2 only but we want to return V2 if given */
@@ -779,6 +779,9 @@ static struct command_result *json_signpsbt(struct command *cmd,
 		return command_fail(cmd, LIGHTNINGD,
 				    "No wallet inputs to sign");
 
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
+
 	/* Update the keypaths on any outputs that are in our wallet (change addresses). */
 	match_psbt_outputs_to_wallet(psbt, cmd->ld->wallet);
 
@@ -799,15 +802,28 @@ static struct command_result *json_signpsbt(struct command *cmd,
 				    "HSM gave bad sign_withdrawal_reply %s",
 				    tal_hex(tmpctx, msg));
 
-	if (!psbt_set_version(signed_psbt, psbt_version)) {
+	/* Some signers (VLS) prune the input.utxo data as it's used
+	 * because it is too large to store in the signer. We can
+	 * restore this metadata by combining the signed psbt back
+	 * into a clone of the original psbt. */
+	struct wally_psbt *combined_psbt;
+	combined_psbt = combine_psbt(cmd, psbt, signed_psbt);
+	if (!combined_psbt) {
+		return command_fail(cmd, LIGHTNINGD,
+				    "Unable to combine signed psbt: %s",
+				    type_to_string(tmpctx, struct wally_psbt,
+						   signed_psbt));
+	}
+
+	if (!psbt_set_version(combined_psbt, psbt_version)) {
 		return command_fail(cmd, LIGHTNINGD,
 				    "Signed PSBT unable to have version set: %s",
 					 type_to_string(tmpctx, struct wally_psbt,
-					 	psbt));
+					 	combined_psbt));
 	}
 
 	response = json_stream_success(cmd);
-	json_add_psbt(response, "signed_psbt", signed_psbt);
+	json_add_psbt(response, "signed_psbt", combined_psbt);
 	return command_success(cmd, response);
 }
 
@@ -830,7 +846,7 @@ static struct command_result *json_setpsbtversion(struct command *cmd,
     unsigned int *version;
     struct wally_psbt *psbt;
 
-    if (!param(cmd, buffer, params,
+    if (!param_check(cmd, buffer, params,
            p_req("psbt", param_psbt, &psbt),
            p_req("version", param_number, &version),
            NULL))
@@ -840,6 +856,8 @@ static struct command_result *json_setpsbtversion(struct command *cmd,
         return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
                     "Could not set PSBT version");
     }
+    if (command_check_only(cmd))
+	    return command_check_done(cmd);
 
     response = json_stream_success(cmd);
     json_add_psbt(response, "psbt", psbt);
@@ -961,10 +979,10 @@ static struct command_result *json_sendpsbt(struct command *cmd,
 	struct lightningd *ld = cmd->ld;
 	u32 *reserve_blocks;
 
-	if (!param(cmd, buffer, params,
-		   p_req("psbt", param_psbt, &psbt),
-		   p_opt_def("reserve", param_number, &reserve_blocks, 12 * 6),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("psbt", param_psbt, &psbt),
+			 p_opt_def("reserve", param_number, &reserve_blocks, 12 * 6),
+			 NULL))
 		return command_param_failed();
 
 	sending = tal(cmd, struct sending_psbt);
@@ -992,6 +1010,9 @@ static struct command_result *json_sendpsbt(struct command *cmd,
 	if (res)
 		return res;
 
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
+
 	for (size_t i = 0; i < tal_count(sending->utxos); i++) {
 		if (!wallet_reserve_utxo(ld->wallet, sending->utxos[i],
 					 get_block_height(ld->topology),
@@ -1000,7 +1021,7 @@ static struct command_result *json_sendpsbt(struct command *cmd,
 	}
 
 	/* Now broadcast the transaction */
-	bitcoind_sendrawtx(cmd->ld->topology->bitcoind,
+	bitcoind_sendrawtx(sending, cmd->ld->topology->bitcoind,
 			   cmd->id,
 			   tal_hex(tmpctx,
 				   linearize_wtx(tmpctx, sending->wtx)),

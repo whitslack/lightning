@@ -45,6 +45,7 @@
 #include <lightningd/closing_control.h>
 #include <lightningd/connect_control.h>
 #include <lightningd/dual_open_control.h>
+#include <lightningd/gossip_control.h>
 #include <lightningd/hsm_control.h>
 #include <lightningd/jsonrpc.h>
 #include <lightningd/lightningd.h>
@@ -301,13 +302,14 @@ static struct bitcoin_tx *sign_and_send_last(const tal_t *ctx,
 	tx = sign_last_tx(ctx, channel, last_tx, last_sig);
 	bitcoin_txid(tx, &txid);
 	wallet_transaction_add(ld->wallet, tx->wtx, 0, 0);
+	wallet_extract_owned_outputs(ld->wallet, tx->wtx, false, NULL, NULL);
 
 	/* Remember anchor information for commit_tx_boost */
 	adet = create_anchor_details(NULL, channel, tx);
 
 	/* Keep broadcasting until we say stop (can fail due to dup,
 	 * if they beat us to the broadcast). */
-	broadcast_tx(ld->topology, channel, tx, cmd_id, false, 0,
+	broadcast_tx(channel, ld->topology, channel, tx, cmd_id, false, 0,
 		     commit_tx_send_finished, commit_tx_boost, take(adet));
 
 	return tx;
@@ -2387,10 +2389,10 @@ static struct command_result *json_disconnect(struct command *cmd,
 	struct channel *channel;
 	bool *force;
 
-	if (!param(cmd, buffer, params,
-		   p_req("id", param_peer, &peer),
-		   p_opt_def("force", param_bool, &force, false),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("id", param_peer, &peer),
+			 p_opt_def("force", param_bool, &force, false),
+			 NULL))
 		return command_param_failed();
 
 	if (peer->connected == PEER_DISCONNECTED) {
@@ -2403,6 +2405,9 @@ static struct command_result *json_disconnect(struct command *cmd,
 				    "Peer has (at least one) channel in state %s",
 				    channel_state_name(channel));
 	}
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
 
 	force_peer_disconnect(cmd->ld, peer, "disconnect command");
 
@@ -2814,15 +2819,16 @@ static void set_channel_config(struct command *cmd, struct channel *channel,
 	if (ignore_fee_limits)
 		channel->ignore_fee_limits = *ignore_fee_limits;
 
-	/* tell channeld to make a send_channel_update */
-	if (channel->owner && streq(channel->owner->name, "channeld")) {
-		subd_send_msg(channel->owner,
-			      take(towire_channeld_config_channel(NULL, base, ppm,
-								  htlc_min, htlc_max)));
-		/* Tell it about the new acceptable feerates */
-		if (ignore_fee_limits)
-			channel_update_feerates(cmd->ld, channel);
+	/* Tell channeld about the new acceptable feerates */
+	if (channel->owner
+	    && streq(channel->owner->name, "channeld")
+	    && ignore_fee_limits) {
+		channel_update_feerates(cmd->ld, channel);
 	}
+
+	/* Tell gossipd */
+	/* FIXME: this always enables channel, even if not enabled! */
+	tell_gossipd_local_channel_update(cmd->ld, channel, true);
 
 	/* save values to database */
 	wallet_channel_save(cmd->ld->wallet, channel);
@@ -2868,15 +2874,15 @@ static struct command_result *json_setchannel(struct command *cmd,
 	bool *ignore_fee_limits;
 
 	/* Parse the JSON command */
-	if (!param(cmd, buffer, params,
-		   p_req("id", param_channel_or_all, &channels),
-		   p_opt("feebase", param_msat_u32, &base),
-		   p_opt("feeppm", param_number, &ppm),
-		   p_opt("htlcmin", param_msat, &htlc_min),
-		   p_opt("htlcmax", param_msat, &htlc_max),
-		   p_opt_def("enforcedelay", param_number, &delaysecs, 600),
-		   p_opt("ignorefeelimits", param_bool, &ignore_fee_limits),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("id", param_channel_or_all, &channels),
+			 p_opt("feebase", param_msat_u32, &base),
+			 p_opt("feeppm", param_number, &ppm),
+			 p_opt("htlcmin", param_msat, &htlc_min),
+			 p_opt("htlcmax", param_msat, &htlc_max),
+			 p_opt_def("enforcedelay", param_number, &delaysecs, 600),
+			 p_opt("ignorefeelimits", param_bool, &ignore_fee_limits),
+			 NULL))
 		return command_param_failed();
 
 	/* Prevent obviously incorrect things! */
@@ -2885,6 +2891,9 @@ static struct command_result *json_setchannel(struct command *cmd,
 		return command_fail(cmd, LIGHTNINGD,
 				    "htlcmax cannot be less than htlcmin");
 	}
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
 
 	/* Open JSON response object for later iteration */
 	response = json_stream_success(cmd);
@@ -3054,9 +3063,9 @@ static struct command_result *json_dev_reenable_commit(struct command *cmd,
 	u8 *msg;
 	struct channel *channel;
 
-	if (!param(cmd, buffer, params,
-		   p_req("id", param_dev_channel, &channel),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("id", param_dev_channel, &channel),
+			 NULL))
 		return command_param_failed();
 
 	if (!channel->owner) {
@@ -3068,6 +3077,9 @@ static struct command_result *json_dev_reenable_commit(struct command *cmd,
 		return command_fail(cmd, LIGHTNINGD,
 				    "Peer owned by %s", channel->owner->name);
 	}
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
 
 	msg = towire_channeld_dev_reenable_commit(channel);
 	subd_req(channel, channel->owner, take(msg), -1, 0,
@@ -3131,18 +3143,19 @@ static struct command_result *json_dev_forget_channel(struct command *cmd,
 	struct channel *channel;
 	struct short_channel_id *scid;
 	struct channel_id *find_cid;
-	struct dev_forget_channel_cmd *forget = tal(cmd, struct dev_forget_channel_cmd);
-	forget->cmd = cmd;
-
+	struct dev_forget_channel_cmd *forget;
 	bool *force;
-	if (!param(cmd, buffer, params,
-		   p_req("id", param_peer, &peer),
-		   p_opt("short_channel_id", param_short_channel_id, &scid),
-		   p_opt("channel_id", param_channel_id, &find_cid),
-		   p_opt_def("force", param_bool, &force, false),
-		   NULL))
+
+	if (!param_check(cmd, buffer, params,
+			 p_req("id", param_peer, &peer),
+			 p_opt("short_channel_id", param_short_channel_id, &scid),
+			 p_opt("channel_id", param_channel_id, &find_cid),
+			 p_opt_def("force", param_bool, &force, false),
+			 NULL))
 		return command_param_failed();
 
+	forget = tal(cmd, struct dev_forget_channel_cmd);
+	forget->cmd = cmd;
 	forget->force = *force;
 
 	forget->channel = NULL;
@@ -3178,6 +3191,9 @@ static struct command_result *json_dev_forget_channel(struct command *cmd,
 				    "not safe to forget it. Please use `close` "
 				    "or `dev-fail` instead.");
 	}
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
 
 	if (!channel_state_uncommitted(forget->channel->state))
 		bitcoind_getutxout(cmd->ld->topology->bitcoind,

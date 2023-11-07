@@ -2,7 +2,8 @@ tonic::include_proto!("cln");
 
 #[cfg(feature = "server")]
 pub use crate::pb::convert::*;
-
+#[cfg(feature = "server")]
+pub use cln_rpc::primitives::Sha256;
 #[cfg(feature = "server")]
 mod convert {
     use super::*;
@@ -29,7 +30,7 @@ mod convert {
     impl From<JOutpoint> for Outpoint {
         fn from(a: JOutpoint) -> Self {
             Outpoint {
-                txid: a.txid.to_vec(),
+                txid: <Sha256 as AsRef<[u8]>>::as_ref(&a.txid).to_vec(),
                 outnum: a.outnum,
             }
         }
