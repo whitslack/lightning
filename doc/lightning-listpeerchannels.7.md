@@ -88,8 +88,8 @@ On success, an object containing **channels** is returned.  It is an array of ob
   - **remote** (short\_channel\_id, optional): An alias assigned by the remote node to this channel, usable in routehints and invoices
 - **state\_changes** (array of objects, optional): Prior state changes:
   - **timestamp** (string): UTC timestamp of form YYYY-mm-ddTHH:MM:SS.%03dZ
-  - **old\_state** (string): Previous state (one of "OPENINGD", "CHANNELD\_AWAITING\_LOCKIN", "CHANNELD\_NORMAL", "CHANNELD\_SHUTTING\_DOWN", "CLOSINGD\_SIGEXCHANGE", "CLOSINGD\_COMPLETE", "AWAITING\_UNILATERAL", "FUNDING\_SPEND\_SEEN", "ONCHAIN", "DUALOPEND\_OPEN\_INIT", "DUALOPEND\_AWAITING\_LOCKIN")
-  - **new\_state** (string): New state (one of "OPENINGD", "CHANNELD\_AWAITING\_LOCKIN", "CHANNELD\_NORMAL", "CHANNELD\_SHUTTING\_DOWN", "CLOSINGD\_SIGEXCHANGE", "CLOSINGD\_COMPLETE", "AWAITING\_UNILATERAL", "FUNDING\_SPEND\_SEEN", "ONCHAIN", "DUALOPEND\_OPEN\_INIT", "DUALOPEND\_AWAITING\_LOCKIN")
+  - **old\_state** (string): Previous state (one of "OPENINGD", "CHANNELD\_AWAITING\_LOCKIN", "CHANNELD\_NORMAL", "CHANNELD\_SHUTTING\_DOWN", "CLOSINGD\_SIGEXCHANGE", "CLOSINGD\_COMPLETE", "AWAITING\_UNILATERAL", "FUNDING\_SPEND\_SEEN", "ONCHAIN", "DUALOPEND\_OPEN\_INIT", "DUALOPEND\_AWAITING\_LOCKIN", "CHANNELD\_AWAITING\_SPLICE")
+  - **new\_state** (string): New state (one of "OPENINGD", "CHANNELD\_AWAITING\_LOCKIN", "CHANNELD\_NORMAL", "CHANNELD\_SHUTTING\_DOWN", "CLOSINGD\_SIGEXCHANGE", "CLOSINGD\_COMPLETE", "AWAITING\_UNILATERAL", "FUNDING\_SPEND\_SEEN", "ONCHAIN", "DUALOPEND\_OPEN\_INIT", "DUALOPEND\_AWAITING\_LOCKIN", "CHANNELD\_AWAITING\_SPLICE")
   - **cause** (string): What caused the change (one of "unknown", "local", "user", "remote", "protocol", "onchain")
   - **message** (string): Human-readable explanation
 - **status** (array of strings, optional):
@@ -195,4 +195,4 @@ Main web site: <https://github.com/ElementsProject/lightning> Lightning
 RFC site (BOLT \#9):
 <https://github.com/lightningnetwork/lightning-rfc/blob/master/09-features.md>
 
-[comment]: # ( SHA256STAMP:1f434471983a8224f18c5f5c27f534ea1f01b7e585bee76afb10c039570e4e4b)
+[comment]: # ( SHA256STAMP:23f54e1ffd3a48fe46cceefd534027f310ea63b1620524ca601c72619758f5ba)
