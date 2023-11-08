@@ -948,9 +948,7 @@ static u8 *sending_commitsig_msg(const tal_t *ctx,
 				 struct penalty_base *pbase,
 				 const struct fee_states *fee_states,
 				 const struct height_states *blockheight_states,
-				 const struct htlc **changed_htlcs,
-				 const struct bitcoin_signature *commit_sig,
-				 const struct bitcoin_signature *htlc_sigs)
+				 const struct htlc **changed_htlcs)
 {
 	struct changed_htlc *changed;
 	u8 *msg;
@@ -960,8 +958,7 @@ static u8 *sending_commitsig_msg(const tal_t *ctx,
 	changed = changed_htlc_arr(tmpctx, changed_htlcs);
 	msg = towire_channeld_sending_commitsig(ctx, remote_commit_index,
 						pbase, fee_states,
-						blockheight_states, changed,
-						commit_sig, htlc_sigs);
+						blockheight_states, changed);
 	return msg;
 }
 
@@ -1429,9 +1426,7 @@ static void send_commit(struct peer *peer)
 				    pbase,
 				    peer->channel->fee_states,
 				    peer->channel->blockheight_states,
-				    changed_htlcs,
-				    &commit_sig,
-				    htlc_sigs);
+				    changed_htlcs);
 	/* Message is empty; receiving it is the point. */
 	master_wait_sync_reply(tmpctx, peer, take(msg),
 			       WIRE_CHANNELD_SENDING_COMMITSIG_REPLY);
