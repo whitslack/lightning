@@ -23,6 +23,7 @@
 #include <lightningd/notification.h>
 #include <lightningd/peer_control.h>
 #include <lightningd/peer_fd.h>
+#include <lightningd/peer_htlcs.h>
 #include <wally_bip32.h>
 
 void channel_update_feerates(struct lightningd *ld, const struct channel *channel)

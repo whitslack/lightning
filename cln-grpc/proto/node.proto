@@ -498,15 +498,9 @@ message CreateinvoiceResponse {
 	optional uint64 pay_index = 9;
 	optional Amount amount_received_msat = 10;
 	optional uint64 paid_at = 11;
-	optional CreateinvoicePaid_outpoint paid_outpoint = 17;
 	optional bytes payment_preimage = 12;
 	optional bytes local_offer_id = 13;
 	optional string invreq_payer_note = 15;
-}
-
-message CreateinvoicePaid_outpoint {
-	optional bytes txid = 1;
-	optional uint32 outnum = 2;
 }
 
 message DatastoreRequest {
@@ -680,13 +674,7 @@ message ListinvoicesInvoices {
 	optional uint64 pay_index = 11;
 	optional Amount amount_received_msat = 12;
 	optional uint64 paid_at = 13;
-	optional ListinvoicesInvoicesPaid_outpoint paid_outpoint = 18;
 	optional bytes payment_preimage = 14;
-}
-
-message ListinvoicesInvoicesPaid_outpoint {
-	optional bytes txid = 1;
-	optional uint32 outnum = 2;
 }
 
 message SendonionRequest {
@@ -886,13 +874,7 @@ message WaitanyinvoiceResponse {
 	optional uint64 pay_index = 9;
 	optional Amount amount_received_msat = 10;
 	optional uint64 paid_at = 11;
-	optional WaitanyinvoicePaid_outpoint paid_outpoint = 15;
 	optional bytes payment_preimage = 12;
-}
-
-message WaitanyinvoicePaid_outpoint {
-	optional bytes txid = 1;
-	optional uint32 outnum = 2;
 }
 
 message WaitinvoiceRequest {
@@ -916,13 +898,7 @@ message WaitinvoiceResponse {
 	optional uint64 pay_index = 9;
 	optional Amount amount_received_msat = 10;
 	optional uint64 paid_at = 11;
-	optional WaitinvoicePaid_outpoint paid_outpoint = 15;
 	optional bytes payment_preimage = 12;
-}
-
-message WaitinvoicePaid_outpoint {
-	optional bytes txid = 1;
-	optional uint32 outnum = 2;
 }
 
 message WaitsendpayRequest {
@@ -1344,6 +1320,7 @@ message DecodeResponse {
 		BOLT12_INVOICE_REQUEST = 2;
 		BOLT11_INVOICE = 3;
 		RUNE = 4;
+		EMERGENCY_RECOVER = 5;
 	}
 	DecodeType item_type = 1;
 	bool valid = 2;
@@ -1414,6 +1391,7 @@ message DecodeResponse {
 	repeated DecodeRestrictions restrictions = 73;
 	optional string warning_rune_invalid_utf8 = 74;
 	optional bytes hex = 75;
+	optional bytes decrypted = 76;
 }
 
 message DecodeOffer_paths {

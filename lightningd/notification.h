@@ -1,6 +1,7 @@
 #ifndef LIGHTNING_LIGHTNINGD_NOTIFICATION_H
 #define LIGHTNING_LIGHTNINGD_NOTIFICATION_H
 #include "config.h"
+#include <bitcoin/preimage.h>
 #include <common/coin_mvt.h>
 #include <lightningd/chaintopology.h>
 #include <lightningd/pay.h>
