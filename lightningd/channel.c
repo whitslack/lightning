@@ -150,8 +150,7 @@ new_inflight(struct channel *channel,
 	     const struct amount_msat lease_fee,
 	     const struct amount_sat lease_amt,
 	     s64 splice_amnt,
-	     bool i_am_initiator,
-	     bool force_sign_first)
+	     bool i_am_initiator)
 {
 	struct channel_inflight *inflight
 		= tal(channel, struct channel_inflight);
@@ -184,7 +183,6 @@ new_inflight(struct channel *channel,
 	inflight->lease_amt = lease_amt;
 
 	inflight->i_am_initiator = i_am_initiator;
-	inflight->force_sign_first = force_sign_first;
 	inflight->splice_locked_memonly = false;
 
 	list_add_tail(&channel->inflights, &inflight->list);
