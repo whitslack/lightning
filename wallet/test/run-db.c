@@ -46,6 +46,11 @@ void get_channel_basepoints(struct lightningd *ld UNNEEDED,
 			    struct basepoints *local_basepoints UNNEEDED,
 			    struct pubkey *local_funding_pubkey UNNEEDED)
 { fprintf(stderr, "get_channel_basepoints called!\n"); abort(); }
+/* Generated stub for inflight_set_last_tx */
+void inflight_set_last_tx(struct channel_inflight *inflight UNNEEDED,
+		          struct bitcoin_tx *last_tx STEALS UNNEEDED,
+		          const struct bitcoin_signature last_sig UNNEEDED)
+{ fprintf(stderr, "inflight_set_last_tx called!\n"); abort(); }
 /* Generated stub for logv */
 void logv(struct logger *logger UNNEEDED, enum log_level level UNNEEDED, const struct node_id *node_id UNNEEDED,
 	  bool call_notifier UNNEEDED, const char *fmt UNNEEDED, va_list ap UNNEEDED)

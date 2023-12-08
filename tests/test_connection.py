@@ -516,9 +516,10 @@ def test_disconnect_opener(node_factory):
                        '-WIRE_TX_ADD_OUTPUT',
                        '+WIRE_TX_ADD_OUTPUT',
                        '-WIRE_TX_COMPLETE',
-                       '+WIRE_TX_COMPLETE']
+                       '=WIRE_TX_COMPLETE']
 
-    l1 = node_factory.get_node(disconnect=disconnects)
+    l1 = node_factory.get_node(disconnect=disconnects,
+                               may_reconnect=EXPERIMENTAL_DUAL_FUND)
     l2 = node_factory.get_node(may_reconnect=EXPERIMENTAL_DUAL_FUND)
 
     l1.fundwallet(2000000)
@@ -593,8 +594,7 @@ def test_disconnect_fundee_v2(node_factory):
                    '+WIRE_TX_ADD_INPUT',
                    '-WIRE_TX_ADD_OUTPUT',
                    '+WIRE_TX_ADD_OUTPUT',
-                   '-WIRE_TX_COMPLETE',
-                   '+WIRE_TX_COMPLETE']
+                   '-WIRE_TX_COMPLETE']
 
     l1 = node_factory.get_node()
     l2 = node_factory.get_node(disconnect=disconnects,
@@ -622,13 +622,10 @@ def test_disconnect_fundee_v2(node_factory):
 
 
 @pytest.mark.openchannel('v1')
-@pytest.mark.openchannel('v2')
 def test_disconnect_half_signed(node_factory):
     # Now, these are the corner cases.  Fundee sends funding_signed,
     # but opener doesn't receive it.
     disconnects = ['-WIRE_FUNDING_SIGNED']
-    if EXPERIMENTAL_DUAL_FUND:
-        disconnects = ['-WIRE_COMMITMENT_SIGNED']
     l1 = node_factory.get_node()
     l2 = node_factory.get_node(disconnect=disconnects)
 
@@ -641,6 +638,26 @@ def test_disconnect_half_signed(node_factory):
     # Peer remembers, opener doesn't.
     wait_for(lambda: l1.rpc.listpeers(l2.info['id'])['peers'] == [])
     assert len(l2.rpc.listpeerchannels(l1.info['id'])['channels']) == 1
+
+
+@pytest.mark.openchannel('v2')
+def test_disconnect_half_signed_v2(node_factory):
+    # Now, these are the corner cases.
+    # L1 remembers the channel, L2 doesn't
+    disconnects = ['-WIRE_TX_COMPLETE']
+    l1 = node_factory.get_node(disconnect=disconnects)
+    l2 = node_factory.get_node()
+
+    l1.fundwallet(2000000)
+
+    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
+    with pytest.raises(RpcError):
+        l1.rpc.fundchannel(l2.info['id'], CHANNEL_SIZE)
+
+    # Opener remembers, peer doesn't.
+    wait_for(lambda: l2.rpc.listpeers(l1.info['id'])['peers'] == [])
+    wait_for(lambda: only_one(l1.rpc.listpeers(l2.info['id'])['peers'])['connected'] is False)
+    assert len(l1.rpc.listpeerchannels(l2.info['id'])['channels']) == 1
 
 
 @pytest.mark.openchannel('v1')
@@ -1073,7 +1090,8 @@ def test_funding_all(node_factory, bitcoind):
 def test_funding_all_too_much(node_factory):
     """Add more than max possible funds, fund a channel using all funds we can.
     """
-    l1, l2 = node_factory.line_graph(2, fundchannel=False)
+    # l2 isn't wumbo, so channel should not be!
+    l1, l2 = node_factory.line_graph(2, fundchannel=False, opts=[{}, {'dev-force-features': '-19'}])
 
     addr, txid = l1.fundwallet(2**24 + 10000)
     l1.rpc.fundchannel(l2.info['id'], "all")
@@ -1144,7 +1162,7 @@ def test_funding_fail(node_factory, bitcoind):
 def test_funding_toolarge(node_factory, bitcoind):
     """Try to create a giant channel"""
     l1 = node_factory.get_node()
-    l2 = node_factory.get_node()
+    l2 = node_factory.get_node(options={'dev-force-features': '-19'})
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
 
     # Send funds.
@@ -1283,10 +1301,9 @@ def test_funding_external_wallet_corners(node_factory, bitcoind):
     l1, l2 = node_factory.get_nodes(2, opts={'may_reconnect': True,
                                              'dev-no-reconnect': None})
 
+    # We have Wumbo, it's ok!
     amount = 2**24
     l1.fundwallet(amount + 10000000)
-
-    amount = amount - 1
 
     # make sure we can generate PSBTs.
     addr = l1.rpc.newaddr()['bech32']
@@ -1307,10 +1324,6 @@ def test_funding_external_wallet_corners(node_factory, bitcoind):
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     with pytest.raises(RpcError, match=r'No channel funding in progress.'):
         l1.rpc.fundchannel_complete(l2.info['id'], psbt)
-
-    # Fail to open (too large)
-    with pytest.raises(RpcError, match=r'Amount exceeded 16777215'):
-        l1.rpc.fundchannel_start(l2.info['id'], amount + 1)
 
     start = l1.rpc.fundchannel_start(l2.info['id'], amount)
     with pytest.raises(RpcError, match=r'Already funding channel'):
@@ -1404,10 +1417,9 @@ def test_funding_v2_corners(node_factory, bitcoind):
     l1 = node_factory.get_node(may_reconnect=True)
     l2 = node_factory.get_node(may_reconnect=True)
 
+    # We have wumbo, it's OK
     amount = 2**24
     l1.fundwallet(amount + 10000000)
-
-    amount = amount - 1
 
     # make sure we can generate PSBTs.
     addr = l1.rpc.newaddr()['bech32']
@@ -1429,10 +1441,6 @@ def test_funding_v2_corners(node_factory, bitcoind):
     l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
     with pytest.raises(RpcError, match=r'Unknown channel'):
         l1.rpc.openchannel_signed(nonexist_chanid, psbt)
-
-    # Fail to open (too large)
-    with pytest.raises(RpcError, match=r'Amount exceeded 16777215'):
-        l1.rpc.openchannel_init(l2.info['id'], amount + 1, psbt)
 
     start = l1.rpc.openchannel_init(l2.info['id'], amount, psbt)
     # We can abort a channel
@@ -2011,12 +2019,10 @@ def test_multifunding_disconnect(node_factory):
 @pytest.mark.openchannel('v2')
 def test_multifunding_wumbo(node_factory):
     '''
-    Test wumbo channel imposition in multifundchannel.
+    Test wumbo channel imposition in multifundchannel.  l3 not wumbo :(
     '''
-    l1, l2, l3 = node_factory.get_nodes(3,
-                                        opts=[{'large-channels': None},
-                                              {'large-channels': None},
-                                              {}])
+    l1, l2, l3 = node_factory.get_nodes(3, opts=[{}, {},
+                                                 {'dev-force-features': '-19'}])
 
     l1.fundwallet(1 << 26)
 
@@ -2410,7 +2416,7 @@ def test_update_fee(node_factory, bitcoind):
     # Make payments.
     l1.pay(l2, 200000000)
     # First payment causes fee update.
-    l2.daemon.wait_for_log('peer updated fee to 11000')
+    l2.daemon.wait_for_log('peer updated fee to 11005')
     l2.pay(l1, 100000000)
 
     # Now shutdown cleanly.
@@ -2452,22 +2458,22 @@ def test_fee_limits(node_factory, bitcoind):
     l1.set_feerates((15, 15, 15, 15), False)
     l1.start()
 
-    l1.daemon.wait_for_log('Received WARNING .*: update_fee 253 outside range 1875-75000')
+    l1.daemon.wait_for_log('Received WARNING .*: update_fee 258 outside range 1875-75000')
     # They hang up on *us*
     l1.daemon.wait_for_log('Peer transient failure in CHANNELD_NORMAL: channeld: Owning subdaemon channeld died')
 
     # Disconnects, but does not error.  Make sure it's noted in their status though.
     # FIXME: does not happen for l1!
     # assert 'update_fee 253 outside range 1875-75000' in only_one(l1.rpc.listpeerchannels(l2.info['id'])['channels'])['status'][0]
-    assert 'update_fee 253 outside range 1875-75000' in only_one(l2.rpc.listpeerchannels(l1.info['id'])['channels'])['status'][0]
+    assert 'update_fee 258 outside range 1875-75000' in only_one(l2.rpc.listpeerchannels(l1.info['id'])['channels'])['status'][0]
 
-    assert only_one(l2.rpc.listpeerchannels()['channels'])['feerate']['perkw'] != 253
+    assert only_one(l2.rpc.listpeerchannels()['channels'])['feerate']['perkw'] != 258
     # Make l2 accept those fees, and it should recover.
     assert only_one(l2.rpc.setchannel(l1.get_channel_scid(l2), ignorefeelimits=True)['channels'])['ignore_fee_limits'] is True
     assert only_one(l2.rpc.listpeerchannels()['channels'])['ignore_fee_limits'] is True
 
     # Now we stay happy (and connected!)
-    wait_for(lambda: only_one(l2.rpc.listpeerchannels()['channels'])['feerate']['perkw'] == 253)
+    wait_for(lambda: only_one(l2.rpc.listpeerchannels()['channels'])['feerate']['perkw'] == 258)
     assert only_one(l2.rpc.listpeerchannels()['channels'])['peer_connected'] is True
 
     l1.rpc.close(l2.info['id'])
@@ -2581,19 +2587,19 @@ def test_update_fee_reconnect(node_factory, bitcoind):
     # Make l1 send out feechange; triggers disconnect/reconnect.
     # (Note: < 10% change, so no smoothing here!)
     l1.set_feerates((14000, 14000, 14000, 3750))
-    l1.daemon.wait_for_log('Setting REMOTE feerate to 14000')
-    l2.daemon.wait_for_log('Setting LOCAL feerate to 14000')
+    l1.daemon.wait_for_log('Setting REMOTE feerate to 14005')
+    l2.daemon.wait_for_log('Setting LOCAL feerate to 14005')
     l1.daemon.wait_for_log(r'dev_disconnect: \+WIRE_COMMITMENT_SIGNED')
 
     # Wait for reconnect....
-    l1.daemon.wait_for_log('Feerate:.*LOCAL now 14000')
+    l1.daemon.wait_for_log('Feerate:.*LOCAL now 14005')
 
     l1.pay(l2, 200000000)
     l2.pay(l1, 100000000)
 
     # They should both have gotten commits with correct feerate.
-    assert l1.daemon.is_in_log('got commitsig [0-9]*: feerate 14000')
-    assert l2.daemon.is_in_log('got commitsig [0-9]*: feerate 14000')
+    assert l1.daemon.is_in_log('got commitsig [0-9]*: feerate 14005')
+    assert l2.daemon.is_in_log('got commitsig [0-9]*: feerate 14005')
 
     # Now shutdown cleanly.
     l1.rpc.close(chan)
@@ -3345,7 +3351,7 @@ def test_feerate_spam(node_factory, chainparams):
     l1.pay(l2, 10**9 - slack)
 
     # It will send this once (may have happened before line_graph's wait)
-    wait_for(lambda: l1.daemon.is_in_log('Setting REMOTE feerate to 11000'))
+    wait_for(lambda: l1.daemon.is_in_log('Setting REMOTE feerate to 11005'))
     wait_for(lambda: l1.daemon.is_in_log('peer_out WIRE_UPDATE_FEE'))
 
     # Now change feerates to something l1 can't afford.
@@ -3451,13 +3457,11 @@ def test_pay_disconnect_stress(node_factory, executor):
 @pytest.mark.openchannel('v1')
 @pytest.mark.openchannel('v2')
 def test_wumbo_channels(node_factory, bitcoind):
-    l1, l2, l3 = node_factory.get_nodes(3,
-                                        opts=[{'large-channels': None},
-                                              {'large-channels': None},
-                                              {}])
+    # l3 is not wumbo.
+    l1, l2, l3 = node_factory.get_nodes(3, opts=[{}, {}, {'dev-force-features': '-19'}])
     conn = l1.rpc.connect(l2.info['id'], 'localhost', port=l2.port)
 
-    expected_features = expected_peer_features(wumbo_channels=True)
+    expected_features = expected_peer_features()
     assert conn['features'] == expected_features
     assert only_one(l1.rpc.listpeers(l2.info['id'])['peers'])['features'] == expected_features
 
@@ -3478,7 +3482,7 @@ def test_wumbo_channels(node_factory, bitcoind):
 
     # Make sure channel features are right from channel_announcement
     assert ([c['features'] for c in l3.rpc.listchannels()['channels']]
-            == [expected_channel_features(wumbo_channels=True)] * 2)
+            == [expected_channel_features()] * 2)
 
     # Make sure we can't open a wumbo channel if we don't agree.
     with pytest.raises(RpcError, match='Amount exceeded'):

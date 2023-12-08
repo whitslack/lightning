@@ -948,6 +948,7 @@ static const struct config testnet_config = {
 
 	.max_fee_multiplier = 10,
 	.commit_fee_percent = 100,
+	.feerate_offset = 5,
 };
 
 /* aka. "Dude, where's my coins?" */
@@ -1022,6 +1023,7 @@ static const struct config mainnet_config = {
 
 	.max_fee_multiplier = 10,
 	.commit_fee_percent = 100,
+	.feerate_offset = 5,
 };
 
 static void check_config(struct lightningd *ld)
@@ -1150,9 +1152,7 @@ static bool opt_show_sat(char *buf, size_t len, const struct amount_sat *sat)
 
 static char *opt_set_wumbo(struct lightningd *ld)
 {
-	feature_set_or(ld->our_features,
-		       take(feature_set_for_feature(NULL,
-						    OPTIONAL_FEATURE(OPT_LARGE_CHANNELS))));
+	/* Wumbo is now the default, FIXME: depreacted_apis! */
 	return NULL;
 }
 
@@ -1400,7 +1400,7 @@ static void register_opts(struct lightningd *ld)
 	/* This affects our features, so set early. */
 	opt_register_early_noarg("--large-channels|--wumbo",
 				 opt_set_wumbo, ld,
-				 "Allow channels larger than 0.16777215 BTC");
+				 opt_hidden);
 
 	opt_register_early_noarg("--experimental-dual-fund",
 				 opt_set_dual_fund, ld,
@@ -1559,6 +1559,10 @@ static void register_opts(struct lightningd *ld)
 	clnopt_witharg("--commit-fee", OPT_SHOWINT,
 		       opt_set_u64, opt_show_u64, &ld->config.commit_fee_percent,
 		       "Percentage of fee to request for their commitment");
+	clnopt_witharg("--commit-feerate-offset", OPT_SHOWINT,
+		       opt_set_u32, opt_show_u32, &ld->config.feerate_offset,
+		       "Additional feerate per kw to apply to feerate updates "
+		       "as the channel opener");
 	clnopt_witharg("--min-emergency-msat", OPT_SHOWMSATS,
 		       opt_set_sat_nondust, opt_show_sat, &ld->emergency_sat,
 		       "Amount to leave in wallet for spending anchor closes");

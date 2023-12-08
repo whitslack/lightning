@@ -370,6 +370,12 @@ void drop_to_chain(struct lightningd *ld, struct channel *channel,
 		log_broken(channel->log,
 			   "Cannot broadcast our commitment tx:"
 			   " they have a future one");
+	} else if (channel_state_open_uncommitted(channel->state)) {
+		/* There's no commitment transaction, we can
+		 * safely forget this channel */
+		log_info(channel->log,
+			 "Initialized channel (v2) received error"
+			 ", we're deleting the channel");
 	} else if (invalid_last_tx(channel->last_tx)) {
 		log_broken(channel->log,
 			   "Cannot broadcast our commitment tx:"
@@ -379,10 +385,13 @@ void drop_to_chain(struct lightningd *ld, struct channel *channel,
 
 		/* We need to drop *every* commitment transaction to chain */
 		if (!cooperative && !list_empty(&channel->inflights)) {
-			list_for_each(&channel->inflights, inflight, list)
+			list_for_each(&channel->inflights, inflight, list) {
+				if (!inflight->last_tx)
+					continue;
 				tx = sign_and_send_last(tmpctx, ld, channel, cmd_id,
 							inflight->last_tx,
 							&inflight->last_sig);
+			}
 		} else
 			tx = sign_and_send_last(tmpctx, ld, channel, cmd_id, channel->last_tx,
 						&channel->last_sig);
@@ -421,6 +430,7 @@ void resend_closing_transactions(struct lightningd *ld)
 			case CHANNELD_AWAITING_LOCKIN:
 			case CHANNELD_NORMAL:
 			case DUALOPEND_OPEN_INIT:
+			case DUALOPEND_OPEN_COMMIT_READY:
 			case DUALOPEND_OPEN_COMMITTED:
 			case DUALOPEND_AWAITING_LOCKIN:
 			case CHANNELD_SHUTTING_DOWN:
@@ -920,8 +930,10 @@ static void json_add_channel(struct lightningd *ld,
 						 "our_funding_msat",
 						 inflight->funding->our_funds);
 			/* Add the expected commitment tx id also */
-			bitcoin_txid(inflight->last_tx, &txid);
-			json_add_txid(response, "scratch_txid", &txid);
+			if (inflight->last_tx) {
+				bitcoin_txid(inflight->last_tx, &txid);
+				json_add_txid(response, "scratch_txid", &txid);
+			}
 			json_object_end(response);
 		}
 		json_array_end(response);
@@ -1229,6 +1241,7 @@ static void connect_activate_subd(struct lightningd *ld, struct channel *channel
 					"Awaiting unilateral close");
 		goto send_error;
 
+	case DUALOPEND_OPEN_COMMIT_READY:
 	case DUALOPEND_OPEN_COMMITTED:
 	case DUALOPEND_AWAITING_LOCKIN:
 		assert(!channel->owner);
@@ -1859,6 +1872,7 @@ static enum watch_result funding_depth_cb(struct lightningd *ld,
 		switch (channel->state) {
 		case DUALOPEND_AWAITING_LOCKIN:
 		case DUALOPEND_OPEN_INIT:
+		case DUALOPEND_OPEN_COMMIT_READY:
 		case DUALOPEND_OPEN_COMMITTED:
 			/* Shouldn't be here! */
 			channel_internal_error(channel,
@@ -1914,6 +1928,7 @@ static enum watch_result funding_depth_cb(struct lightningd *ld,
 	/* We should not be in the callback! */
 	case DUALOPEND_AWAITING_LOCKIN:
 	case DUALOPEND_OPEN_INIT:
+	case DUALOPEND_OPEN_COMMIT_READY:
 	case DUALOPEND_OPEN_COMMITTED:
 		abort();
 
@@ -2252,6 +2267,7 @@ static void setup_peer(struct peer *peer, u32 delay)
 	list_for_each(&peer->channels, channel, list) {
 		switch (channel->state) {
 		case DUALOPEND_OPEN_INIT:
+		case DUALOPEND_OPEN_COMMIT_READY:
 		case DUALOPEND_OPEN_COMMITTED:
 			/* Nothing to watch */
 			continue;
@@ -2460,6 +2476,7 @@ static struct command_result *json_getinfo(struct command *cmd,
 			switch (channel->state) {
 			case CHANNELD_AWAITING_LOCKIN:
 			case DUALOPEND_OPEN_INIT:
+			case DUALOPEND_OPEN_COMMIT_READY:
 			case DUALOPEND_OPEN_COMMITTED:
 			case DUALOPEND_AWAITING_LOCKIN:
 				pending_channels++;
@@ -2680,6 +2697,7 @@ static bool channel_state_can_setchannel(enum channel_state state)
 	case DUALOPEND_AWAITING_LOCKIN:
 		return true;
 	case DUALOPEND_OPEN_INIT:
+	case DUALOPEND_OPEN_COMMIT_READY:
 	case DUALOPEND_OPEN_COMMITTED:
 	case CLOSINGD_SIGEXCHANGE:
 	case CHANNELD_SHUTTING_DOWN:

@@ -43,6 +43,9 @@ enum channel_state {
 	/* Dual-funded channel, waiting for lock-in */
 	DUALOPEND_AWAITING_LOCKIN,
 
+	/* Dual-funded channel initial commitment ready */
+	DUALOPEND_OPEN_COMMIT_READY = 14,
+
 };
 #define CHANNEL_STATE_MAX DUALOPEND_AWAITING_LOCKIN
 

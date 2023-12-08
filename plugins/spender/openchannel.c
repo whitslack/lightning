@@ -344,8 +344,11 @@ openchannel_finished(struct multifundchannel_command *mfc)
 			struct json_stream *out;
 
 			plugin_log(mfc->cmd->plugin, LOG_DBG,
-				   "mfc %"PRIu64": %u failed, failing.",
-				   mfc->id, dest->index);
+				   "mfc %"PRIu64": %u failed, failing."
+				  " (%d) %s",
+				   mfc->id, dest->index,
+				   dest->error_code,
+				   dest->error_message);
 
 			out = jsonrpc_stream_fail_data(mfc->cmd,
 						       dest->error_code,
@@ -592,7 +595,14 @@ static struct command_result *json_peer_sigs(struct command *cmd,
 	if (dest->state == MULTIFUNDCHANNEL_UPDATED)
 		dest->state = MULTIFUNDCHANNEL_SIGNED_NOT_SECURED;
 	else {
-		assert(dest->state == MULTIFUNDCHANNEL_SECURED);
+		if (dest->state != MULTIFUNDCHANNEL_SECURED) {
+			plugin_log(cmd->plugin, LOG_BROKEN,
+				   "mfc %"PRIu64":`openchannel_peer_sigs` "
+				   " expected state MULTIFUNDCHANNEL_SECURED (%d),"
+				   " state is %d", dest->mfc->id,
+				   MULTIFUNDCHANNEL_SECURED,
+				   dest->state);
+		}
 		dest->state = MULTIFUNDCHANNEL_SIGNED;
 	}
 

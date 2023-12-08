@@ -253,6 +253,9 @@ static inline enum channel_state channel_state_in_db(enum channel_state s)
 	case DUALOPEND_OPEN_COMMITTED:
 		BUILD_ASSERT(DUALOPEND_OPEN_COMMITTED == 11);
 		return s;
+	case DUALOPEND_OPEN_COMMIT_READY:
+		BUILD_ASSERT(DUALOPEND_OPEN_COMMIT_READY == 14);
+		return s;
 	case DUALOPEND_AWAITING_LOCKIN:
 		BUILD_ASSERT(DUALOPEND_AWAITING_LOCKIN == 12);
 		return s;
@@ -613,6 +616,12 @@ void wallet_inflight_add(struct wallet *w, struct channel_inflight *inflight);
  */
 void wallet_inflight_save(struct wallet *w,
 			  struct channel_inflight *inflight);
+
+/**
+ * Remove any channel inflights that are incomplete.
+ */
+void wallet_channel_inflight_cleanup_incomplete(struct wallet *w,
+						u64 wallet_id);
 
 /**
  * Remove all the inflights from a channel. Also cleans up

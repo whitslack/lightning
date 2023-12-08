@@ -726,7 +726,7 @@ def test_listconfigs(node_factory, bitcoind, chainparams):
             assert c[valfield] == val
             assert 'plugin' not in c
 
-        # These are aliases, but we don't print the (unofficial!) wumbo.
+        # We don't print the (unofficial!) wumbo
         assert 'wumbo' not in configs
         assert configs['large-channels']['set'] is True
         assert configs['large-channels']['source'] == 'cmdline'
@@ -2250,6 +2250,7 @@ def test_list_features_only(node_factory):
                 'option_static_remotekey/odd',
                 'option_payment_secret/even',
                 'option_basic_mpp/odd',
+                'option_support_large_channel/odd',
                 'option_route_blinding/odd',
                 'option_shutdown_anysegwit/odd',
                 'option_channel_type/odd',
@@ -3824,3 +3825,30 @@ def test_even_sendcustommsg(node_factory):
     l2.daemon.wait_for_log(r'\[IN\] {}'.format(msg))
     l1.daemon.wait_for_log('Invalid unknown even msg')
     wait_for(lambda: l1.rpc.listpeers(l2.info['id'])['peers'] == [])
+
+
+def test_set_feerate_offset(node_factory, bitcoind):
+    opts = [{'commit-feerate-offset': 100}, {}]
+    l1, l2 = node_factory.get_nodes(2, opts=opts)
+    assert l1.daemon.is_in_log('Server started with public key')
+    configs = l1.rpc.listconfigs()['configs']
+    assert configs['commit-feerate-offset'] == {'source': 'cmdline',
+                                                'value_int': 100}
+    scid12 = l1.fundchannel(l2)[0]
+    # chanid = l1.get_channel_scid(l2)
+
+    # node 1 sets fees.
+    l1.set_feerates((14000, 11000, 7500, 3750))
+
+    l1.pay(l2, 200000000)
+    # First payment causes fee update, which should reflect the feerate offset.
+    l1.daemon.wait_for_log('lightningd: update_feerates: feerate = 11100, '
+                           'min=1875, max=150000, penalty=7500')
+    l2.daemon.wait_for_log('peer updated fee to 11100')
+    l2.pay(l1, 100000000)
+
+    # Now shutdown cleanly.
+    l1.rpc.close(scid12)
+
+    l1.daemon.wait_for_log(' to CLOSINGD_COMPLETE')
+    l2.daemon.wait_for_log(' to CLOSINGD_COMPLETE')

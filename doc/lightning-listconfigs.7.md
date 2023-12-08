@@ -278,6 +278,9 @@ On success, an object is returned, containing:
   - **commit-fee** (object, optional):
     - **value\_int** (u64): field from config or cmdline, or default
     - **source** (string): source of configuration setting
+  - **commit-feerate-offset** (object, optional):
+    - **value\_int** (u32): field from config or cmdline, or default
+    - **source** (string): source of configuration setting
 - **# version** (string, optional): Special field indicating the current version **deprecated, removal in v24.05**
 - **plugins** (array of objects, optional) **deprecated, removal in v24.05**:
   - **path** (string): Full path of the plugin
@@ -354,6 +357,7 @@ On success, an object is returned, containing:
 - **developer** (boolean, optional): Whether developer mode is enabled *(added v23.08)*
 - **commit-fee** (u64, optional): The percentage of the 6-block fee estimate to use for commitment transactions **deprecated, removal in v24.05** *(added v23.05)*
 - **min-emergency-msat** (msat, optional): field from config or cmdline, or default *(added v23.08)*
+- **commit-feerate-offset** (u32, optional): additional commitment feerate applied by channel owner *(added v23.11)*
 
 [comment]: # (GENERATE-FROM-SCHEMA-END)
 
@@ -423,7 +427,7 @@ EXAMPLE JSON RESPONSE
    "always-use-proxy": false,
    "daemon": "false",
    "wallet": "sqlite3:///media/vincent/Maxtor/sanboxTestWrapperRPC/lightning_dir_dev/testnet/lightningd.sqlite3",
-   "wumbo": false,
+   "wumbo": true,
    "rgb": "03ad98",
    "alias": "BRUCEWAYN-TES-DEV",
    "pid-file": "/media/vincent/Maxtor/sanboxTestWrapperRPC/lightning_dir_dev/lightningd-testne...",
@@ -471,4 +475,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:12073b819d3270912509e8c13e228d845158ac844d47d82de6c3b12876a05b45)
+[comment]: # ( SHA256STAMP:c4a2f53e598751a4f5880c89c2d79874dd8eee81d60a0c95c1678f3172bdeb75)
