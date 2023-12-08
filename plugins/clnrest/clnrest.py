@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 # For --hidden-import gunicorn.glogging gunicorn.workers.sync
 try:
+    from gevent import monkey
+    monkey.patch_ssl()
     import sys
     import os
     import re
@@ -24,6 +26,7 @@ try:
 except ModuleNotFoundError as err:
     # OK, something is not installed?
     import json
+    import sys
     getmanifest = json.loads(sys.stdin.readline())
     print(json.dumps({'jsonrpc': "2.0",
                       'id': getmanifest['id'],
@@ -117,7 +120,7 @@ def add_csp_headers(response):
         response.headers['Content-Security-Policy'] = REST_CSP.replace('\\', '').replace("[\"", '').replace("\"]", '')
         return response
     except Exception as err:
-        plugin.log(f"Error from rest-csp config: {err}", "info")
+        plugin.log(f"Error from clnrest-csp config: {err}", "info")
 
 
 def set_application_options(plugin):

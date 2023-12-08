@@ -164,8 +164,7 @@ static void invoice_payment_notification_serialize(struct json_stream *stream,
 						   const struct json_escape *label)
 {
 	json_object_start(stream, "invoice_payment");
-	json_add_string(stream, "msat",
-			type_to_string(tmpctx, struct amount_msat, &amount));
+	json_add_amount_msat(stream, "msat", amount);
 	json_add_hex(stream, "preimage", &preimage, sizeof(preimage));
 	json_add_escaped_string(stream, "label", label);
 	json_object_end(stream);
@@ -196,9 +195,7 @@ static void invoice_creation_notification_serialize(struct json_stream *stream,
 {
 	json_object_start(stream, "invoice_creation");
 	if (amount != NULL)
-		json_add_string(
-		    stream, "msat",
-		    type_to_string(tmpctx, struct amount_msat, amount));
+		json_add_amount_msat(stream, "msat", *amount);
 
 	json_add_hex(stream, "preimage", &preimage, sizeof(preimage));
 	json_add_escaped_string(stream, "label", label);
