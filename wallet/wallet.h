@@ -30,7 +30,6 @@ struct wallet {
 	struct db *db;
 	struct logger *log;
 	struct invoices *invoices;
-	struct list_head unstored_payments;
 	u64 max_channel_dbid;
 
 	/* Filter matching all outpoints corresponding to our owned outputs,
@@ -380,8 +379,6 @@ static inline enum payment_status payment_status_in_db(enum payment_status w)
  * a UI (alongside invoices) to display the balance history.
  */
 struct wallet_payment {
-	/* If it's in unstored_payments */
-	struct list_node list;
 	u64 id;
 	u32 timestamp;
 	u32 *completed_at;
@@ -419,30 +416,6 @@ struct wallet_payment {
 	/* If we are associated with an internal invoice_request */
 	struct sha256 *local_invreq_id;
 };
-
-struct wallet_payment *wallet_payment_new(const tal_t *ctx,
-					  u64 dbid,
-					  u32 timestamp,
-					  const u32 *completed_at,
-					  const struct sha256 *payment_hash,
-					  u64 partid,
-					  u64 groupid,
-					  enum payment_status status,
-					  /* The destination may not be known if we used `sendonion` */
-					  const struct node_id *destination TAKES,
-					  struct amount_msat msatoshi,
-					  struct amount_msat msatoshi_sent,
-					  struct amount_msat total_msat,
-					  /* If and only if PAYMENT_COMPLETE */
-					  const struct preimage *payment_preimage TAKES,
-					  const struct secret *path_secrets TAKES,
-					  const struct node_id *route_nodes TAKES,
-					  const struct short_channel_id *route_channels TAKES,
-					  const char *invstring TAKES,
-					  const char *label TAKES,
-					  const char *description TAKES,
-					  const u8 *failonion TAKES,
-					  const struct sha256 *local_invreq_id);
 
 struct outpoint {
 	struct bitcoin_outpoint outpoint;
@@ -923,23 +896,34 @@ struct htlc_stub *wallet_htlc_stubs(const tal_t *ctx, struct wallet *wallet,
 				    struct channel *chan, u64 commit_num);
 
 /**
- * wallet_payment_setup - Remember this payment for later committing.
- *
- * Either wallet_payment_store() gets called to put in db once hout
- * is ready to go (and frees @payment), or @payment is tal_free'd.
- *
+ * wallet_add_payment - Store this payment in the db
+ * @ctx: context to allocate returned `struct wallet_payment` off.
  * @wallet: wallet we're going to store it in.
- * @payment: the payment for later committing.
+ * @...: the details
  */
-void wallet_payment_setup(struct wallet *wallet, struct wallet_payment *payment);
-
-/**
- * wallet_payment_store - Record a new incoming/outgoing payment
- *
- * Stores the payment in the database.
- */
-void wallet_payment_store(struct wallet *wallet,
-			  struct wallet_payment *payment TAKES);
+struct wallet_payment *wallet_add_payment(const tal_t *ctx,
+					  struct wallet *wallet,
+					  u32 timestamp,
+					  const u32 *completed_at,
+					  const struct sha256 *payment_hash,
+					  u64 partid,
+					  u64 groupid,
+					  enum payment_status status,
+					  /* The destination may not be known if we used `sendonion` */
+					  const struct node_id *destination TAKES,
+					  struct amount_msat msatoshi,
+					  struct amount_msat msatoshi_sent,
+					  struct amount_msat total_msat,
+					  /* If and only if PAYMENT_COMPLETE */
+					  const struct preimage *payment_preimage TAKES,
+					  const struct secret *path_secrets TAKES,
+					  const struct node_id *route_nodes TAKES,
+					  const struct short_channel_id *route_channels TAKES,
+					  const char *invstring TAKES,
+					  const char *label TAKES,
+					  const char *description TAKES,
+					  const u8 *failonion TAKES,
+					  const struct sha256 *local_invreq_id);
 
 /**
  * wallet_payment_delete - Remove a payment
@@ -1036,23 +1020,76 @@ void wallet_payment_set_failinfo(struct wallet *wallet,
 				 int faildirection);
 
 /**
- * wallet_payment_list - Retrieve a list of payments
+ * payments_first: get first payment, optionally filtering by status
+ * @w: the wallet
  *
- * payment_hash: optional filter for only this payment hash.
+ * Returns NULL if none, otherwise you must call payments_next() or
+ * tal_free(stmt).
  */
-const struct wallet_payment **wallet_payment_list(const tal_t *ctx,
-						  struct wallet *wallet,
-						  const struct sha256 *payment_hash)
-	NON_NULL_ARGS(2);
+struct db_stmt *payments_first(struct wallet *w);
+
+/**
+ * payments_next: get next payment
+ * @w: the wallet
+ * @stmt: the previous stmt from payments_first or payments_next.
+ *
+ * Returns NULL if none, otherwise you must call payments_next() or
+ * tal_free(stmt).
+ */
+struct db_stmt *payments_next(struct wallet *w,
+			      struct db_stmt *stmt);
 
 
 /**
- * wallet_payments_by_invoice_request - Retrieve a list of payments for this local_invreq_id
+ * payments_by_hash: get the payment, if any, by payment_hash.
+ * @w: the wallet
+ * @payment_hash: the payment_hash.
+ *
+ * Returns NULL if none, otherwise call payments_get_details(),
+ * and then tal_free(stmt).
  */
-const struct wallet_payment **
-wallet_payments_by_invoice_request(const tal_t *ctx,
-				   struct wallet *wallet,
-				   const struct sha256 *local_invreq_id);
+struct db_stmt *payments_by_hash(struct wallet *w,
+				 const struct sha256 *payment_hash);
+
+/**
+ * payments_by_status: get the payments, if any, by status.
+ * @w: the wallet
+ * @status: the status.
+ *
+ * Returns NULL if none, otherwise call payments_get_details(),
+ * and then tal_free(stmt).
+ */
+struct db_stmt *payments_by_status(struct wallet *w,
+				   enum payment_status status);
+
+/**
+ * payments_by_label: get the payment, if any, by label.
+ * @w: the wallet
+ * @label: the label.
+ *
+ * Returns NULL if none, otherwise call payments_get_details(),
+ * and then tal_free(stmt).
+ */
+struct db_stmt *payments_by_label(struct wallet *w,
+				  const struct json_escape *label);
+
+/**
+ * payments_by_invoice_request: get payments, if any, for this local_invreq_id
+ * @w: the wallet
+ * @local_invreq_id: the local invreq_id.
+ *
+ * Returns NULL if none, otherwise you must call payments_next() or
+ * tal_free(stmt).
+ */
+struct db_stmt *payments_by_invoice_request(struct wallet *wallet,
+					    const struct sha256 *local_invreq_id);
+
+/**
+ * payments_get_details: get the details of a payment.
+ */
+struct wallet_payment *payment_get_details(const tal_t *ctx,
+					   struct db_stmt *stmt);
+
 
 /**
  * wallet_htlc_sigs_save - Delete all HTLC sigs (including inflights) for the
