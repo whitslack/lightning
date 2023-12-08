@@ -30,6 +30,7 @@ On success, an object is returned, containing:
 [comment]: # (GENERATE-FROM-SCHEMA-END)
 
 The following error codes may occur:
+
 - 1200: the key does not exist
 - 1201: the key does exist, but the generation is wrong
 - -32602: invalid parameters
@@ -42,7 +43,7 @@ Rusty Russell <<rusty@rustcorp.com.au>> is mainly responsible.
 SEE ALSO
 --------
 
-lightning-listdatastore(7), lightning-datastore(7)
+lightning-listdatastore(7), lightning-datastore(7), lightning-datastoreusage(7)
 
 RESOURCES
 ---------

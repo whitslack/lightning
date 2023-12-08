@@ -3,6 +3,7 @@ use anyhow::{anyhow, Error, Result};
 use bitcoin::hashes::Hash as BitcoinHash;
 use serde::{Deserialize, Serialize};
 use serde::{Deserializer, Serializer};
+use serde_json::Value;
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 use std::string::ToString;
@@ -24,6 +25,7 @@ pub enum ChannelState {
     ONCHAIN = 8,
     DUALOPEND_OPEN_INIT = 9,
     DUALOPEND_AWAITING_LOCKIN = 10,
+    CHANNELD_AWAITING_SPLICE = 11,
 }
 
 #[derive(Copy, Clone, Serialize, Deserialize, Debug)]
@@ -164,9 +166,9 @@ impl FromStr for ShortChannelId {
         ))
     }
 }
-impl ToString for ShortChannelId {
-    fn to_string(&self) -> String {
-        format!("{}x{}x{}", self.block(), self.txindex(), self.outnum())
+impl Display for ShortChannelId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}x{}x{}", self.block(), self.txindex(), self.outnum())
     }
 }
 impl ShortChannelId {
@@ -309,6 +311,7 @@ impl TryFrom<i32> for ChannelState {
             8 => Ok(ChannelState::ONCHAIN),
             9 => Ok(ChannelState::DUALOPEND_OPEN_INIT),
             10 => Ok(ChannelState::DUALOPEND_AWAITING_LOCKIN),
+            11 => Ok(ChannelState::CHANNELD_AWAITING_SPLICE),
             _ => Err(anyhow!("Invalid channel state {}", value)),
         }
     }
@@ -466,7 +469,13 @@ impl TryFrom<&str> for Amount {
 
 impl From<Amount> for String {
     fn from(a: Amount) -> String {
-        format!("{}msat", a.msat)
+	// Best effort msat to sat conversion, for methods that accept
+	// sats but not msats
+	if a.msat % 1000 == 0 {
+	    format!("{}sat", a.msat / 1000)
+	} else {
+            format!("{}msat", a.msat)
+	}
     }
 }
 
@@ -557,14 +566,14 @@ mod test {
             (
                 "{\"amount\": \"42sat\"}",
                 Amount { msat: 42_000 },
-                "42000msat",
+                "42sat",
             ),
             (
                 "{\"amount\": \"31337btc\"}",
                 Amount {
                     msat: 3_133_700_000_000_000,
                 },
-                "3133700000000000msat",
+                "3133700000000sat",
             ),
         ];
 
@@ -768,6 +777,7 @@ impl<'de> Deserialize<'de> for Routehint {
 pub struct RpcError {
     pub code: Option<i32>,
     pub message: String,
+    pub data: Option<Value>,
 }
 
 impl Display for RpcError {

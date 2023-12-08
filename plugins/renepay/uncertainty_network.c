@@ -1,5 +1,6 @@
 #include "config.h"
-#include <plugins/renepay/debug.h>
+#include <common/bolt11.h>
+#include <plugins/renepay/pay.h>
 #include <plugins/renepay/uncertainty_network.h>
 
 static bool chan_extra_check_invariants(struct chan_extra *ce)
@@ -140,7 +141,7 @@ void uncertainty_network_update(
  		struct chan_extra *ce = chan_extra_map_get(chan_extra_map,del_list[i]);
 		if(!ce)
 		{
-			debug_err("%s (line %d) unexpected chan_extra ce is NULL",
+			plugin_err(pay_plugin->plugin,"%s (line %d) unexpected chan_extra ce is NULL",
 				__PRETTY_FUNCTION__,
 				__LINE__);
 		}
@@ -168,13 +169,13 @@ void uncertainty_network_update(
 
 			if(!gossmap_chan_get_capacity(gossmap,chan,&cap))
 			{
-				debug_err("%s (line %d) unable to fetch channel capacity",
+				plugin_err(pay_plugin->plugin,"%s (line %d) unable to fetch channel capacity",
 					__PRETTY_FUNCTION__,
 					__LINE__);
 			}
 			if(!amount_sat_to_msat(&cap_msat,cap))
 			{
-				debug_err("%s (line %d) unable convert sat to msat",
+				plugin_err(pay_plugin->plugin,"%s (line %d) unable convert sat to msat",
 					__PRETTY_FUNCTION__,
 					__LINE__);
 			}
@@ -303,22 +304,22 @@ bool uncertainty_network_update_from_listpeerchannels(
 			/* FIXME: features? */
 			gossmap_local_addchan(p->local_gossmods,
 					      &src, &dst, &scidd.scid, NULL);
-			gossmap_local_updatechan(p->local_gossmods,
-						 &scidd.scid,
-
-						 /* TODO(eduardo): does it
-						  * matter to consider HTLC
-						  * limits in our own channel? */
-						 AMOUNT_MSAT(0),capacity,
-
-						 /* fees = */0,0,
-
-						 /* TODO(eduardo): does it
-						  * matter to set this delay? */
-						 /*delay=*/0,
-						 true,
-						 scidd.dir);
 		}
+		gossmap_local_updatechan(p->local_gossmods,
+					 &scidd.scid,
+
+					 /* TODO(eduardo): does it
+					  * matter to consider HTLC
+					  * limits in our own channel? */
+					 AMOUNT_MSAT(0),capacity,
+
+					 /* fees = */0,0,
+
+					 /* TODO(eduardo): does it
+					  * matter to set this delay? */
+					 /*delay=*/0,
+					 true,
+					 scidd.dir);
 
 		/* FIXME: There is a bug with us trying to send more down a local
 		 * channel (after fees) than it has capacity.  For now, we reduce

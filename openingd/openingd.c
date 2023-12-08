@@ -37,14 +37,15 @@
 #define REQ_FD STDIN_FILENO
 #define HSM_FD 4
 
-#if DEVELOPER
-/* If --dev-force-tmp-channel-id is set, it ends up here */
-static struct channel_id *dev_force_tmp_channel_id;
-#endif /* DEVELOPER */
-
 /* Global state structure.  This is only for the one specific peer and channel */
 struct state {
 	struct per_peer_state *pps;
+
+	/* --developer? */
+	bool developer;
+
+	/* If --dev-force-tmp-channel-id is set, it ends up here */
+	struct channel_id *dev_force_tmp_channel_id;
 
 	/* Features they offered */
 	u8 *their_features;
@@ -185,9 +186,7 @@ static u8 *opening_negotiate_msg(const tal_t *ctx, struct state *state,
 	 * form, but we use it in a very limited way. */
 	for (;;) {
 		u8 *msg;
-		char *err;
-		bool warning;
-		struct channel_id actual;
+		const char *err;
 
 		/* The event loop is responsible for freeing tmpctx, so our
 		 * temporary allocations don't grow unbounded. */
@@ -206,42 +205,18 @@ static u8 *opening_negotiate_msg(const tal_t *ctx, struct state *state,
 			continue;
 
 		/* A helper which decodes an error. */
-		if (is_peer_error(tmpctx, msg, &state->channel_id,
-				  &err, &warning)) {
-			/* BOLT #1:
-			 *
-			 *  - if no existing channel is referred to by `channel_id`:
-			 *    - MUST ignore the message.
-			 */
-			/* In this case, is_peer_error returns true, but sets
-			 * err to NULL */
-			if (!err) {
-				tal_free(msg);
-				continue;
-			}
+		err = is_peer_error(tmpctx, msg);
+		if (err) {
 			negotiation_aborted(state,
 					    tal_fmt(tmpctx, "They sent %s",
 						    err));
 			/* Return NULL so caller knows to stop negotiating. */
-			return NULL;
+			return tal_free(msg);
 		}
 
-		/*~ We do not support multiple "live" channels, though the
-		 * protocol has a "channel_id" field in all non-gossip messages
-		 * so it's possible.  Our one-process-one-channel mechanism
-		 * keeps things simple: if we wanted to change this, we would
-		 * probably be best with another daemon to de-multiplex them;
-		 * this could be connectd itself, in fact. */
-		if (is_wrong_channel(msg, &state->channel_id, &actual)
-		    && is_wrong_channel(msg, alternate, &actual)) {
-			status_debug("Rejecting %s for unknown channel_id %s",
-				     peer_wire_name(fromwire_peektype(msg)),
-				     type_to_string(tmpctx, struct channel_id,
-						    &actual));
-			peer_write(state->pps,
-				   take(towire_errorfmt(NULL, &actual,
-							"Multiple channels"
-							" unsupported")));
+		err = is_peer_warning(tmpctx, msg);
+		if (err) {
+			status_info("They sent %s", err);
 			tal_free(msg);
 			continue;
 		}
@@ -253,11 +228,10 @@ static u8 *opening_negotiate_msg(const tal_t *ctx, struct state *state,
 
 static bool setup_channel_funder(struct state *state)
 {
-#if DEVELOPER
 	/* --dev-force-tmp-channel-id specified */
-	if (dev_force_tmp_channel_id)
-		state->channel_id = *dev_force_tmp_channel_id;
-#endif
+	if (state->dev_force_tmp_channel_id)
+		state->channel_id = *state->dev_force_tmp_channel_id;
+
 	/* BOLT #2:
 	 *
 	 * The sending node:
@@ -352,7 +326,7 @@ static u8 *funder_channel_start(struct state *state, u8 channel_flags,
 
 	if (!state->upfront_shutdown_script[LOCAL])
 		state->upfront_shutdown_script[LOCAL]
-			= no_upfront_shutdown_script(state,
+			= no_upfront_shutdown_script(state, state->developer,
 						     state->our_features,
 						     state->their_features);
 
@@ -471,7 +445,7 @@ static u8 *funder_channel_start(struct state *state, u8 channel_flags,
 	/* BOLT #2:
 	 * - if `channel_type` is set, and `channel_type` was set in
 	 *   `open_channel`, and they are not equal types:
-	 *    - MUST reject the channel.
+	 *    - MUST fail the channel.
 	 */
 	if (accept_tlvs->channel_type) {
 		/* Except that v23.05 could set OPT_SCID_ALIAS in reply! */
@@ -632,7 +606,7 @@ static bool funder_finalize_channel_setup(struct state *state,
 	struct wally_tx_output *direct_outputs[NUM_SIDES];
 
 	/*~ Channel is ready; Report the channel parameters to the signer. */
-	msg = towire_hsmd_ready_channel(NULL,
+	msg = towire_hsmd_setup_channel(NULL,
 				       true,	/* is_outbound */
 				       state->funding_sats,
 				       state->push_msat,
@@ -648,8 +622,8 @@ static bool funder_finalize_channel_setup(struct state *state,
 				       state->channel_type);
 	wire_sync_write(HSM_FD, take(msg));
 	msg = wire_sync_read(tmpctx, HSM_FD);
-	if (!fromwire_hsmd_ready_channel_reply(msg))
-		status_failed(STATUS_FAIL_HSM_IO, "Bad ready_channel_reply %s",
+	if (!fromwire_hsmd_setup_channel_reply(msg))
+		status_failed(STATUS_FAIL_HSM_IO, "Bad setup_channel_reply %s",
 			      tal_hex(tmpctx, msg));
 
 	/*~ Now we can initialize the `struct channel`.  This represents
@@ -1146,7 +1120,7 @@ static u8 *fundee_channel(struct state *state, const u8 *open_channel_msg)
 
 	if (!state->upfront_shutdown_script[LOCAL])
 		state->upfront_shutdown_script[LOCAL]
-			= no_upfront_shutdown_script(state,
+			= no_upfront_shutdown_script(state, state->developer,
 						     state->our_features,
 						     state->their_features);
 
@@ -1222,7 +1196,7 @@ static u8 *fundee_channel(struct state *state, const u8 *open_channel_msg)
 	}
 
 	/*~ Channel is ready; Report the channel parameters to the signer. */
-	msg = towire_hsmd_ready_channel(NULL,
+	msg = towire_hsmd_setup_channel(NULL,
 				       false,	/* is_outbound */
 				       state->funding_sats,
 				       state->push_msat,
@@ -1238,8 +1212,8 @@ static u8 *fundee_channel(struct state *state, const u8 *open_channel_msg)
 				       state->channel_type);
 	wire_sync_write(HSM_FD, take(msg));
 	msg = wire_sync_read(tmpctx, HSM_FD);
-	if (!fromwire_hsmd_ready_channel_reply(msg))
-		status_failed(STATUS_FAIL_HSM_IO, "Bad ready_channel_reply %s",
+	if (!fromwire_hsmd_setup_channel_reply(msg))
+		status_failed(STATUS_FAIL_HSM_IO, "Bad setup_channel_reply %s",
 			      tal_hex(tmpctx, msg));
 
 	/* Now we can create the channel structure. */
@@ -1412,7 +1386,7 @@ static u8 *handle_peer_in(struct state *state)
 		return fundee_channel(state, msg);
 
 	/* Handles error cases. */
-	if (handle_peer_error(state->pps, &state->channel_id, msg))
+	if (handle_peer_error_or_warning(state->pps, msg))
 		return NULL;
 
 	extracted = extract_channel_id(msg, &channel_id);
@@ -1431,11 +1405,6 @@ static u8 *handle_peer_in(struct state *state)
 	peer_failed_connection_lost();
 }
 
-/* Memory leak detection is DEVELOPER-only because we go to great lengths to
- * record the backtrace when allocations occur: without that, the leak
- * detection tends to be useless for diagnosing where the leak came from, but
- * it has significant overhead. */
-#if DEVELOPER
 static void handle_dev_memleak(struct state *state, const u8 *msg)
 {
 	struct htable *memtable;
@@ -1450,12 +1419,11 @@ static void handle_dev_memleak(struct state *state, const u8 *msg)
 	memleak_scan_obj(memtable, state);
 
 	/* If there's anything left, dump it to logs, and return true. */
-	found_leak = dump_memleak(memtable, memleak_status_broken);
+	found_leak = dump_memleak(memtable, memleak_status_broken, NULL);
 	wire_sync_write(REQ_FD,
 			take(towire_openingd_dev_memleak_reply(NULL,
 							      found_leak)));
 }
-#endif /* DEVELOPER */
 
 /* Standard lightningd-fd-is-ready-to-read demux code.  Again, we could hang
  * here, but if we can't trust our parent, who can we trust? */
@@ -1506,10 +1474,11 @@ static u8 *handle_master_in(struct state *state)
 		negotiation_aborted(state, "Channel open canceled by RPC");
 		return NULL;
 	case WIRE_OPENINGD_DEV_MEMLEAK:
-#if DEVELOPER
-		handle_dev_memleak(state, msg);
-		return NULL;
-#endif
+		if (state->developer) {
+			handle_dev_memleak(state, msg);
+			return NULL;
+		}
+		/* fall thru */
 	case WIRE_OPENINGD_DEV_MEMLEAK_REPLY:
 	case WIRE_OPENINGD_INIT:
 	case WIRE_OPENINGD_FUNDER_REPLY:
@@ -1533,9 +1502,8 @@ int main(int argc, char *argv[])
 	struct pollfd pollfd[2];
 	struct state *state = tal(NULL, struct state);
 	struct secret *none;
-	struct channel_id *force_tmp_channel_id;
 
-	subdaemon_setup(argc, argv);
+	state->developer = subdaemon_setup(argc, argv);
 
 	/*~ This makes status_failed, status_debug etc work synchronously by
 	 * writing to REQ_FD */
@@ -1554,13 +1522,9 @@ int main(int argc, char *argv[])
 				    &state->our_funding_pubkey,
 				    &state->minimum_depth,
 				    &state->min_feerate, &state->max_feerate,
-				    &force_tmp_channel_id,
+				    &state->dev_force_tmp_channel_id,
 				    &state->allowdustreserve))
 		master_badmsg(WIRE_OPENINGD_INIT, msg);
-
-#if DEVELOPER
-	dev_force_tmp_channel_id = force_tmp_channel_id;
-#endif
 
 	/* 3 == peer, 4 = hsmd */
 	state->pps = new_per_peer_state(state);

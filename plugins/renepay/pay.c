@@ -12,7 +12,6 @@
 #include <common/pseudorand.h>
 #include <common/type_to_string.h>
 #include <errno.h>
-#include <plugins/renepay/debug.h>
 #include <plugins/renepay/pay.h>
 #include <plugins/renepay/pay_flow.h>
 #include <plugins/renepay/uncertainty_network.h>
@@ -38,7 +37,7 @@ void amount_msat_accumulate_(struct amount_msat *dst,
 {
 	if (amount_msat_add(dst, *dst, src))
 		return;
-	debug_err("Overflow adding %s (%s) into %s (%s)",
+	plugin_err(pay_plugin->plugin,"Overflow adding %s (%s) into %s (%s)",
 		   srcname, type_to_string(tmpctx, struct amount_msat, &src),
 		   dstname, type_to_string(tmpctx, struct amount_msat, dst));
 }
@@ -50,19 +49,17 @@ void amount_msat_reduce_(struct amount_msat *dst,
 {
 	if (amount_msat_sub(dst, *dst, src))
 		return;
-	debug_err("Underflow subtracting %s (%s) from %s (%s)",
+	plugin_err(pay_plugin->plugin,"Underflow subtracting %s (%s) from %s (%s)",
 		   srcname, type_to_string(tmpctx, struct amount_msat, &src),
 		   dstname, type_to_string(tmpctx, struct amount_msat, dst));
 }
 
 
-#if DEVELOPER
 static void memleak_mark(struct plugin *p, struct htable *memtable)
 {
 	memleak_scan_obj(memtable, pay_plugin);
 	memleak_scan_htable(memtable, &pay_plugin->chan_extra_map->raw);
 }
-#endif
 
 static const char *init(struct plugin *p,
 			const char *buf UNUSED, const jsmntok_t *config UNUSED)
@@ -107,9 +104,7 @@ static const char *init(struct plugin *p,
 
 	uncertainty_network_update(pay_plugin->gossmap,
 				   pay_plugin->chan_extra_map);
-#if DEVELOPER
 	plugin_set_memleak_handler(p, memleak_mark);
-#endif
 	return NULL;
 }
 
@@ -289,7 +284,7 @@ static struct command_result *flow_sendpay_failed(struct command *cmd,
 
 	plugin_log(pay_plugin->plugin,LOG_DBG,"calling %s",__PRETTY_FUNCTION__);
 
-	debug_assert(payment);
+	assert(payment);
 
 	if (json_scan(tmpctx, buf, err,
 		      "{code:%,message:%}",
@@ -559,7 +554,7 @@ static struct command_result *json_paystatus(struct command *cmd,
 		{
 			case PAYMENT_SUCCESS:
 				json_add_string(ret,"status","complete");
-				debug_assert(p->preimage);
+				assert(p->preimage);
 				json_add_preimage(ret,"payment_preimage",p->preimage);
 				json_add_amount_msat(ret, "amount_sent_msat", p->total_sent);
 
@@ -603,8 +598,6 @@ payment_listsendpays_previous(
 		const jsmntok_t *result,
 		struct payment * payment)
 {
-	debug_info("calling %s",__PRETTY_FUNCTION__);
-
 	size_t i;
 	const jsmntok_t *t, *arr;
 
@@ -658,10 +651,10 @@ payment_listsendpays_previous(
 		if (streq(status, "complete")) {
 			/* Now we know the payment completed. */
 			if(!amount_msat_add(&complete_msat,complete_msat,this_msat))
-				debug_err("%s (line %d) msat overflow.",
+				plugin_err(pay_plugin->plugin,"%s (line %d) msat overflow.",
 					__PRETTY_FUNCTION__,__LINE__);
 			if(!amount_msat_add(&complete_sent,complete_sent,this_sent))
-				debug_err("%s (line %d) msat overflow.",
+				plugin_err(pay_plugin->plugin,"%s (line %d) msat overflow.",
 					__PRETTY_FUNCTION__,__LINE__);
 			json_scan(tmpctx, buf, t,
 				  "{created_at:%"
@@ -783,16 +776,14 @@ static struct command_result *json_pay(struct command *cmd,
  		   p_opt("localofferid", param_sha256, &local_offer_id),
  		   p_opt("description", param_string, &description),
  		   p_opt("label", param_string, &label),
-#if DEVELOPER
 		   // MCF parameters
 		   // TODO(eduardo): are these parameters read correctly?
-		   p_opt_def("base_fee_penalty", param_millionths, &base_fee_penalty,10),
- 		   p_opt_def("prob_cost_factor", param_millionths, &prob_cost_factor,10),
-		   p_opt_def("riskfactor", param_millionths,&riskfactor_millionths,1),
-		   p_opt_def("min_prob_success", param_millionths,
+		   p_opt_dev("dev_base_fee_penalty", param_millionths, &base_fee_penalty,10),
+ 		   p_opt_dev("dev_prob_cost_factor", param_millionths, &prob_cost_factor,10),
+		   p_opt_dev("dev_riskfactor", param_millionths,&riskfactor_millionths,1),
+		   p_opt_dev("dev_min_prob_success", param_millionths,
 		   	&min_prob_success_millionths,900000),// default is 90%
-		   p_opt_def("use_shadow", param_bool, &use_shadow, true),
-#endif
+		   p_opt_dev("dev_use_shadow", param_bool, &use_shadow, true),
 		   NULL))
 		return command_param_failed();
 
@@ -945,21 +936,6 @@ static struct command_result *json_pay(struct command *cmd,
 	if (now_sec > invexpiry)
 		return command_fail(cmd, PAY_INVOICE_EXPIRED, "Invoice expired");
 
-#if !DEVELOPER
-	/* Please renepay try to give me a reliable payment 90% chances of
-	 * success, once you do, then minimize as much as possible those fees. */
-	base_fee_penalty = tal(tmpctx, u64);
-	*base_fee_penalty = 10;
-	prob_cost_factor = tal(tmpctx, u64);
-	*prob_cost_factor = 10;
-	riskfactor_millionths = tal(tmpctx, u64);
-	*riskfactor_millionths = 1;
-	min_prob_success_millionths = tal(tmpctx, u64);
-	*min_prob_success_millionths = 90;
-	use_shadow = tal(tmpctx, bool);
-	*use_shadow = 1;
-#endif
-
 	/* Payment is allocated off cmd to start, in case we fail cmd
 	 * (e.g. already in progress, already succeeded).  Once it's
 	 * actually started, it persists beyond the command, so we
@@ -1060,7 +1036,7 @@ static struct pf_result *handle_sendpay_failure_payment(struct pay_flow *pf STEA
 	struct short_channel_id errscid;
 	const u8 *update;
 
-	debug_assert(pf);
+	assert(pf);
 
 	/* Final node is usually a hard failure */
 	if (erridx == tal_count(pf->path_scidds)) {
@@ -1142,7 +1118,7 @@ static void handle_sendpay_failure_flow(struct pay_flow *pf,
 					u32 erridx,
 					u32 onionerr)
 {
-	debug_assert(pf);
+	assert(pf);
 
 	/* we know that all channels before erridx where able to commit to this payment */
 	uncertainty_network_channel_can_send(

@@ -111,6 +111,9 @@ enum jsonrpc_errcode {
 	/* Errors from delforward command */
 	DELFORWARD_NOT_FOUND = 1401,
 
+	/* Errors from recover command */
+	RECOVER_NODE_IN_USE = 1600,
+
 	/* Errors from wait* commands */
 	WAIT_TIMEOUT = 2000,
 };

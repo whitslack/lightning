@@ -51,11 +51,10 @@ struct subd {
 	 * error message we sent them if any. */
 	void (*errcb)(void *channel,
 		      struct peer_fd *peer_fd,
-		      const struct channel_id *channel_id,
 		      const char *desc,
-		      bool warning,
-		      bool aborted,
-		      const u8 *err_for_them);
+		      const u8 *err_for_them,
+		      bool disconnect,
+		      bool warning);
 
 	/* Callback to display information for listpeers RPC */
 	void (*billboardcb)(void *channel, bool perm, const char *happenings);
@@ -134,11 +133,10 @@ struct subd *new_channel_subd_(const tal_t *ctx,
 						     const int *fds),
 			       void (*errcb)(void *channel,
 					     struct peer_fd *peer_fd,
-					     const struct channel_id *channel_id,
 					     const char *desc,
-					     bool warning,
-					     bool aborted,
-					     const u8 *err_for_them),
+					     const u8 *err_for_them,
+					     bool disconnect,
+					     bool warning),
 			       void (*billboardcb)(void *channel, bool perm,
 						   const char *happenings),
 			       ...);
@@ -152,8 +150,7 @@ struct subd *new_channel_subd_(const tal_t *ctx,
 			  typesafe_cb_postargs(void, void *, (errcb),	\
 					       (channel),		\
 					       struct peer_fd *,	\
-					       const struct channel_id *, \
-					       const char *, bool, bool, const u8 *), \
+					       const char *, const u8 *, bool, bool), \
 			  typesafe_cb_postargs(void, void *, (billboardcb), \
 					       (channel), bool,		\
 					       const char *),		\
@@ -238,9 +235,7 @@ const char *find_my_abspath(const tal_t *ctx, const char *argv0);
 /* lightningd captures SIGCHLD and waits, but so does subd. */
 void maybe_subd_child(struct lightningd *ld, int childpid, int wstatus);
 
-#if DEVELOPER
 char *opt_subd_dev_disconnect(const char *optarg, struct lightningd *ld);
 
 bool dev_disconnect_permanent(struct lightningd *ld);
-#endif /* DEVELOPER */
 #endif /* LIGHTNING_LIGHTNINGD_SUBD_H */

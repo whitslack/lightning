@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pyln-testing"
-version = "23.08"
+version = "23.11"
 description = "Test your Core Lightning integration, plugins or whatever you want"
 authors = ["Christian Decker <decker.christian@gmail.com>"]
 license = "BSD-MIT"
@@ -21,6 +21,7 @@ pyln-client = ">=23"
 Flask = "^2"
 cheroot = "^8"
 psutil = "^5.9"
+requests = "^2.31.0"
 
 grpcio = { version = "^1", optional = true }
 pyln-grpc-proto = { version = "^0.1", optional = true }

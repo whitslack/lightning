@@ -370,11 +370,11 @@ void json_add_timeabs(struct json_stream *result, const char *fieldname,
 		      struct timeabs t)
 {
 	json_add_primitive_fmt(result, fieldname,
-			       "%" PRIu64 ".%03" PRIu64,
-			       (u64)t.ts.tv_sec, (u64)t.ts.tv_nsec / 1000000);
+			       "%" PRIu64 ".%09" PRIu64,
+			       (u64)t.ts.tv_sec, (u64)t.ts.tv_nsec);
 }
 
-void json_add_time(struct json_stream *result, const char *fieldname,
+void json_add_timestr(struct json_stream *result, const char *fieldname,
 			  struct timespec ts)
 {
 	char timebuf[100];
@@ -387,15 +387,15 @@ void json_add_time(struct json_stream *result, const char *fieldname,
 
 void json_add_timeiso(struct json_stream *result,
 		      const char *fieldname,
-		      struct timeabs *time)
+		      struct timeabs time)
 {
 	char iso8601_msec_fmt[sizeof("YYYY-mm-ddTHH:MM:SS.%03dZ")];
 	char iso8601_s[sizeof("YYYY-mm-ddTHH:MM:SS.nnnZ")];
 
 	strftime(iso8601_msec_fmt, sizeof(iso8601_msec_fmt),
-		 "%FT%T.%%03dZ", gmtime(&time->ts.tv_sec));
+		 "%FT%T.%%03dZ", gmtime(&time.ts.tv_sec));
 	snprintf(iso8601_s, sizeof(iso8601_s),
-		 iso8601_msec_fmt, (int) time->ts.tv_nsec / 1000000);
+		 iso8601_msec_fmt, (int) time.ts.tv_nsec / 1000000);
 
 	json_add_string(result, fieldname, iso8601_s);
 }
@@ -614,7 +614,7 @@ void json_add_amount_msat(struct json_stream *result,
 			  const char *msatfieldname,
 			  struct amount_msat msat)
 {
-	assert(strends(msatfieldname, "_msat"));
+	assert(strends(msatfieldname, "_msat") || streq(msatfieldname, "msat"));
 	json_add_u64(result, msatfieldname, msat.millisatoshis); /* Raw: low-level helper */
 }
 

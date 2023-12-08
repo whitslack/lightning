@@ -30,6 +30,7 @@ On success, an object containing **datastore** is returned.  It is an array of o
 [comment]: # (GENERATE-FROM-SCHEMA-END)
 
 The following error codes may occur:
+
 - -32602: invalid parameters.
 
 AUTHOR
@@ -40,7 +41,7 @@ Rusty Russell <<rusty@rustcorp.com.au>> is mainly responsible.
 SEE ALSO
 --------
 
-lightning-datastore(7), lightning-deldatastore(7)
+lightning-datastore(7), lightning-deldatastore(7), lightning-datastoreusage(7)
 
 RESOURCES
 ---------

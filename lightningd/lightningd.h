@@ -92,6 +92,9 @@ struct config {
 
 	/* Percent of CONSERVATIVE/2 feerate we'll use for commitment txs. */
 	u64 commit_fee_percent;
+
+	/* Commit feerate offset above min_feerate to use as a channel opener */
+	u32 feerate_offset;
 };
 
 typedef STRMAP(const char *) alt_subdaemon_map;
@@ -126,6 +129,9 @@ struct lightningd {
 	 * shutdown, which frees all pending cmds in a DB
 	 * transaction. */
 	struct jsonrpc *jsonrpc;
+
+	/* --developer? */
+	bool developer;
 
 	/* Configuration file name */
 	char *config_filename;
@@ -229,8 +235,6 @@ struct lightningd {
 
 	/* Outstanding waitsendpay commands. */
 	struct list_head waitsendpay_commands;
-	/* Outstanding sendpay commands. */
-	struct list_head sendpay_commands;
 	/* Outstanding close commands. */
 	struct list_head close_commands;
 	/* Outstanding ping commands. */
@@ -268,7 +272,6 @@ struct lightningd {
 	/* Contains the codex32 string used with --recover flag */
 	char *recover;
 
-#if DEVELOPER
 	/* If we want to debug a subdaemon/plugin. */
 	char *dev_debug_subprocess;
 
@@ -324,7 +327,6 @@ struct lightningd {
 
 	/* Tell channeld not to worry about pings. */
 	bool dev_no_ping_timer;
-#endif /* DEVELOPER */
 
 	/* tor support */
 	struct wireaddr *proxyaddr;
@@ -361,6 +363,8 @@ struct lightningd {
 
 	/* Should we re-exec ourselves instead of just exiting? */
 	bool try_reexec;
+	/* If set, we are to restart with --recover=... */
+	const char *recover_secret;
 
 	/* Array of (even) TLV types that we should allow. This is required
 	 * since we otherwise would outright reject them. */

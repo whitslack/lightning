@@ -97,6 +97,23 @@ void delete_channel(struct channel *channel STEALS)
 	maybe_delete_peer(peer);
 }
 
+bool maybe_cleanup_last_inflight(struct channel *channel)
+{
+	struct channel_inflight *inflight;
+	inflight = channel_current_inflight(channel);
+	if (!inflight)
+		return false;
+
+	if (inflight->last_tx)
+		return false;
+
+	/* Remove from database */
+	wallet_channel_inflight_cleanup_incomplete(
+			channel->peer->ld->wallet, channel->dbid);
+	tal_free(inflight);
+	return true;
+}
+
 void get_channel_basepoints(struct lightningd *ld,
 			    const struct node_id *peer_id,
 			    const u64 dbid,
@@ -126,8 +143,6 @@ new_inflight(struct channel *channel,
 	     struct amount_sat total_funds,
 	     struct amount_sat our_funds,
 	     struct wally_psbt *psbt STEALS,
-	     struct bitcoin_tx *last_tx,
-	     const struct bitcoin_signature last_sig,
 	     const u32 lease_expiry,
 	     const secp256k1_ecdsa_signature *lease_commit_sig,
 	     const u32 lease_chan_max_msat, const u16 lease_chan_max_ppt,
@@ -135,7 +150,6 @@ new_inflight(struct channel *channel,
 	     const struct amount_msat lease_fee,
 	     const struct amount_sat lease_amt)
 {
-	struct wally_psbt *last_tx_psbt_clone;
 	struct channel_inflight *inflight
 		= tal(channel, struct channel_inflight);
 	struct funding_info *funding
@@ -150,11 +164,7 @@ new_inflight(struct channel *channel,
 	inflight->channel = channel;
 	inflight->remote_tx_sigs = false;
 	inflight->funding_psbt = tal_steal(inflight, psbt);
-
-	/* Make a 'clone' of this tx */
-	last_tx_psbt_clone = clone_psbt(inflight, last_tx->psbt);
-	inflight->last_tx = bitcoin_tx_with_psbt(inflight, last_tx_psbt_clone);
-	inflight->last_sig = last_sig;
+	inflight->last_tx = NULL;
 	inflight->tx_broadcast = false;
 
 	/* Channel lease infos */
@@ -173,6 +183,19 @@ new_inflight(struct channel *channel,
 	tal_add_destructor(inflight, destroy_inflight);
 
 	return inflight;
+}
+
+void inflight_set_last_tx(struct channel_inflight *inflight,
+		          struct bitcoin_tx *last_tx,
+		          const struct bitcoin_signature last_sig)
+{
+	struct wally_psbt *last_tx_psbt_clone;
+	assert(inflight->last_tx == NULL);
+	assert(last_tx);
+
+	last_tx_psbt_clone = clone_psbt(inflight, last_tx->psbt);
+	inflight->last_tx = bitcoin_tx_with_psbt(inflight, last_tx_psbt_clone);
+	inflight->last_sig = last_sig;
 }
 
 struct open_attempt *new_channel_open_attempt(struct channel *channel)
@@ -225,6 +248,7 @@ struct channel *new_unsaved_channel(struct peer *peer,
 	channel->next_index[LOCAL] = 1;
 	channel->next_index[REMOTE] = 1;
 	channel->next_htlc_id = 0;
+	channel->funding_spend_watch = NULL;
 	/* FIXME: remove push when v1 deprecated */
 	channel->push = AMOUNT_MSAT(0);
 	channel->closing_fee_negotiation_step = 50;
@@ -452,6 +476,7 @@ struct channel *new_channel(struct peer *peer, u64 dbid,
 	channel->next_htlc_id = next_htlc_id;
 	channel->funding = *funding;
 	channel->funding_sats = funding_sats;
+	channel->funding_spend_watch = NULL;
 	channel->push = push;
 	channel->our_funds = our_funds;
 	channel->remote_channel_ready = remote_channel_ready;
@@ -466,7 +491,8 @@ struct channel *new_channel(struct peer *peer, u64 dbid,
 	if (channel->last_tx) {
 		channel->last_tx->chainparams = chainparams;
 	}
-	channel->last_sig = *last_sig;
+	if (last_sig)
+		channel->last_sig = *last_sig;
 	channel->last_htlc_sigs = tal_steal(channel, last_htlc_sigs);
 	channel->channel_info = *channel_info;
 	channel->fee_states = dup_fee_states(channel, fee_states);
@@ -563,32 +589,14 @@ const char *channel_state_str(enum channel_state state)
 	return "unknown";
 }
 
-struct channel *peer_any_active_channel(struct peer *peer, bool *others)
+struct channel *peer_any_channel(struct peer *peer,
+				 bool (*channel_state_filter)(enum channel_state),
+				 bool *others)
 {
 	struct channel *channel, *ret = NULL;
 
 	list_for_each(&peer->channels, channel, list) {
-		if (!channel_active(channel))
-			continue;
-		/* Already found one? */
-		if (ret) {
-			if (others)
-				*others = true;
-		} else {
-			if (others)
-				*others = false;
-			ret = channel;
-		}
-	}
-	return ret;
-}
-
-struct channel *peer_any_unsaved_channel(struct peer *peer, bool *others)
-{
-	struct channel *channel, *ret = NULL;
-
-	list_for_each(&peer->channels, channel, list) {
-		if (!channel_unsaved(channel))
+		if (channel_state_filter && !channel_state_filter(channel->state))
 			continue;
 		/* Already found one? */
 		if (ret) {
@@ -776,7 +784,7 @@ void channel_set_state(struct channel *channel,
 	struct timeabs timestamp;
 
 	/* set closer, if known */
-	if (state > CHANNELD_NORMAL && channel->closer == NUM_SIDES) {
+	if (channel_state_closing(state) && channel->closer == NUM_SIDES) {
 		if (reason == REASON_LOCAL)   channel->closer = LOCAL;
 		if (reason == REASON_USER)    channel->closer = LOCAL;
 		if (reason == REASON_REMOTE)  channel->closer = REMOTE;
@@ -805,7 +813,7 @@ void channel_set_state(struct channel *channel,
 		timestamp = time_now();
 		wallet_state_change_add(channel->peer->ld->wallet,
 					channel->dbid,
-					&timestamp,
+					timestamp,
 					old_state,
 					state,
 					reason,
@@ -814,7 +822,7 @@ void channel_set_state(struct channel *channel,
 					     &channel->peer->id,
 					     &channel->cid,
 					     channel->scid,
-					     &timestamp,
+					     timestamp,
 					     old_state,
 					     state,
 					     reason,
@@ -865,12 +873,15 @@ void channel_fail_permanent(struct channel *channel,
 	/* Drop non-cooperatively (unilateral) to chain. */
 	drop_to_chain(ld, channel, false);
 
-	if (channel_active(channel))
+	if (channel_state_wants_onchain_fail(channel->state))
 		channel_set_state(channel,
 				  channel->state,
 				  AWAITING_UNILATERAL,
 				  reason,
 				  why);
+
+	if (channel_state_open_uncommitted(channel->state))
+		delete_channel(channel);
 
 	tal_free(why);
 }
@@ -960,7 +971,8 @@ void channel_internal_error(struct channel *channel, const char *fmt, ...)
 
 	channel_cleanup_commands(channel, why);
 
-	if (channel_unsaved(channel)) {
+	/* Nothing ventured, nothing lost! */
+	if (channel_state_uncommitted(channel->state)) {
 		channel_set_owner(channel, NULL);
 		delete_channel(channel);
 		tal_free(why);
@@ -968,12 +980,11 @@ void channel_internal_error(struct channel *channel, const char *fmt, ...)
 	}
 
 	/* Don't expose internal error causes to remove unless doing dev */
-#if DEVELOPER
-	channel_fail_permanent(channel,
-			       REASON_LOCAL, "Internal error: %s", why);
-#else
-	channel_fail_permanent(channel, REASON_LOCAL, "Internal error");
-#endif
+	if (channel->peer->ld->developer)
+		channel_fail_permanent(channel,
+				       REASON_LOCAL, "Internal error: %s", why);
+	else
+		channel_fail_permanent(channel, REASON_LOCAL, "Internal error");
 	tal_free(why);
 }
 
@@ -994,7 +1005,7 @@ void channel_set_billboard(struct channel *channel, bool perm, const char *str)
 	}
 }
 
-static void channel_err(struct channel *channel, const char *why)
+static void channel_err(struct channel *channel, bool disconnect, const char *why)
 {
 	/* Nothing to do if channel isn't actually owned! */
 	if (!channel->owner)
@@ -1003,23 +1014,28 @@ static void channel_err(struct channel *channel, const char *why)
 	log_info(channel->log, "Peer transient failure in %s: %s",
 		 channel_state_name(channel), why);
 
-#if DEVELOPER
 	if (dev_disconnect_permanent(channel->peer->ld)) {
 		channel_fail_permanent(channel,
 				       REASON_LOCAL,
 				       "dev_disconnect permfail");
 		return;
 	}
-#endif
+
 	channel_set_owner(channel, NULL);
+
+	/* Force a disconnect in case the issue is with TCP */
+	if (disconnect) {
+		force_peer_disconnect(channel->peer->ld, channel->peer,
+				      "One channel had an error");
+	}
 }
 
-void channel_fail_transient(struct channel *channel, const char *fmt, ...)
+void channel_fail_transient(struct channel *channel, bool disconnect, const char *fmt, ...)
 {
 	va_list ap;
 
 	va_start(ap, fmt);
-	channel_err(channel, tal_vfmt(tmpctx, fmt, ap));
+	channel_err(channel, disconnect, tal_vfmt(tmpctx, fmt, ap));
 	va_end(ap);
 }
 

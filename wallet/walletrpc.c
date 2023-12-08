@@ -78,13 +78,6 @@ encode_pubkey_to_addr(const tal_t *ctx,
 	return out;
 }
 
-enum addrtype {
-	/* Deprecated! */
-	ADDR_P2SH_SEGWIT = 1,
-	ADDR_BECH32 = 2,
-	ADDR_ALL = (ADDR_P2SH_SEGWIT + ADDR_BECH32)
-};
-
 /* Extract bool indicating "bech32" */
 static struct command_result *param_newaddr(struct command *cmd,
 					    const char *name,
@@ -107,6 +100,29 @@ static struct command_result *param_newaddr(struct command *cmd,
 	return NULL;
 }
 
+bool WARN_UNUSED_RESULT newaddr_inner(struct command *cmd, struct pubkey *pubkey, enum addrtype addrtype)
+{
+	s64 keyidx;
+	u8 *b32script;
+
+	keyidx = wallet_get_newindex(cmd->ld);
+	if (keyidx < 0) {
+		// return command_fail(cmd, LIGHTNINGD, "Keys exhausted ");
+		return false;
+	}
+
+	bip32_pubkey(cmd->ld, pubkey, keyidx);
+
+	b32script = scriptpubkey_p2wpkh(tmpctx, pubkey);
+	if (addrtype & ADDR_BECH32)
+		txfilter_add_scriptpubkey(cmd->ld->owned_txfilter, b32script);
+	if (cmd->ld->deprecated_apis && (addrtype & ADDR_P2SH_SEGWIT))
+		txfilter_add_scriptpubkey(cmd->ld->owned_txfilter,
+					  scriptpubkey_p2sh(tmpctx, b32script));
+	return true;
+}
+
+
 static struct command_result *json_newaddr(struct command *cmd,
 					   const char *buffer,
 					   const jsmntok_t *obj UNNEEDED,
@@ -115,28 +131,16 @@ static struct command_result *json_newaddr(struct command *cmd,
 	struct json_stream *response;
 	struct pubkey pubkey;
 	enum addrtype *addrtype;
-	s64 keyidx;
 	char *p2sh, *bech32;
-	u8 *b32script;
 
 	if (!param(cmd, buffer, params,
 		   p_opt_def("addresstype", param_newaddr, &addrtype, ADDR_BECH32),
 		   NULL))
 		return command_param_failed();
 
-	keyidx = wallet_get_newindex(cmd->ld);
-	if (keyidx < 0) {
+	if (!newaddr_inner(cmd, &pubkey, *addrtype)) {
 		return command_fail(cmd, LIGHTNINGD, "Keys exhausted ");
-	}
-
-	bip32_pubkey(cmd->ld, &pubkey, keyidx);
-
-	b32script = scriptpubkey_p2wpkh(tmpctx, &pubkey);
-	if (*addrtype & ADDR_BECH32)
-		txfilter_add_scriptpubkey(cmd->ld->owned_txfilter, b32script);
-	if (cmd->ld->deprecated_apis && (*addrtype & ADDR_P2SH_SEGWIT))
-		txfilter_add_scriptpubkey(cmd->ld->owned_txfilter,
-					  scriptpubkey_p2sh(tmpctx, b32script));
+	};
 
 	p2sh = encode_pubkey_to_addr(cmd, &pubkey, true, NULL);
 	bech32 = encode_pubkey_to_addr(cmd, &pubkey, false, NULL);
@@ -157,8 +161,8 @@ static const struct json_command newaddr_command = {
 	"newaddr",
 	"bitcoin",
 	json_newaddr,
-	"Get a new {bech32} (or all) address to fund a channel", false,
-	"Generates a new address that belongs to the internal wallet. Funds sent to these addresses will be managed by lightningd. Use `withdraw` to withdraw funds to an external wallet."
+	"Get a new {bech32} (or all) address to fund a channel",
+	.verbose = "Generates a new address that belongs to the internal wallet. Funds sent to these addresses will be managed by lightningd. Use `withdraw` to withdraw funds to an external wallet."
 };
 AUTODATA(json_command, &newaddr_command);
 
@@ -230,8 +234,8 @@ static const struct json_command listaddrs_command = {
 	"developer",
 	json_listaddrs,
 	"Show addresses list up to derivation {index} (default is the last bip32 index)",
-	false,
-	"Show addresses of your internal wallet. Use `newaddr` to generate a new address."
+	.verbose = "Show addresses of your internal wallet. Use `newaddr` to generate a new address.",
+	.dev_only = true,
 };
 AUTODATA(json_command, &listaddrs_command);
 
@@ -314,7 +318,7 @@ static struct command_result *json_listfunds(struct command *cmd,
 	struct json_stream *response;
 	struct peer *p;
 	struct peer_node_id_map_iter it;
-	struct utxo **utxos, **reserved_utxos, **spent_utxos;
+	struct utxo **utxos;
 	bool *spent;
 
 	if (!param(cmd, buffer, params,
@@ -324,18 +328,13 @@ static struct command_result *json_listfunds(struct command *cmd,
 
 	response = json_stream_success(cmd);
 
-	utxos = wallet_get_utxos(cmd, cmd->ld->wallet, OUTPUT_STATE_AVAILABLE);
-	reserved_utxos = wallet_get_utxos(cmd, cmd->ld->wallet, OUTPUT_STATE_RESERVED);
+	if (*spent)
+		utxos = wallet_get_all_utxos(cmd, cmd->ld->wallet);
+	else
+		utxos = wallet_get_unspent_utxos(cmd, cmd->ld->wallet);
 
 	json_array_start(response, "outputs");
 	json_add_utxos(response, cmd->ld->wallet, utxos);
-	json_add_utxos(response, cmd->ld->wallet, reserved_utxos);
-
-	if (*spent) {
-		spent_utxos = wallet_get_utxos(cmd, cmd->ld->wallet, OUTPUT_STATE_SPENT);
-		json_add_utxos(response, cmd->ld->wallet, spent_utxos);
-	}
-
 	json_array_end(response);
 
 	/* Add funds that are allocated to channels */
@@ -346,7 +345,7 @@ static struct command_result *json_listfunds(struct command *cmd,
 		struct channel *c;
 		list_for_each(&p->channels, c, list) {
 			/* We don't print out uncommitted channels */
-			if (channel_unsaved(c))
+			if (channel_state_uncommitted(c->state))
 				continue;
 			json_object_start(response, NULL);
 			json_add_node_id(response, "peer_id", &p->id);
@@ -383,8 +382,7 @@ static const struct json_command listfunds_command = {
 	"utility",
 	json_listfunds,
 	"Show available funds from the internal wallet",
-	false,
-	"Returns a list of funds (outputs) that can be used "
+	.verbose = "Returns a list of funds (outputs) that can be used "
 	"by the internal wallet to open new channels "
 	"or can be withdrawn, using the `withdraw` command, to another wallet. "
 	"Includes spent outputs if {spent} is set to true."
@@ -446,7 +444,7 @@ static struct command_result *json_dev_rescan_outputs(struct command *cmd,
 
 	/* Open the outputs structure so we can incrementally add results */
 	json_array_start(rescan->response, "outputs");
-	rescan->utxos = wallet_get_utxos(rescan, cmd->ld->wallet, OUTPUT_STATE_ANY);
+	rescan->utxos = wallet_get_all_utxos(rescan, cmd->ld->wallet);
 	if (tal_count(rescan->utxos) == 0) {
 		json_array_end(rescan->response);
 		return command_success(cmd, rescan->response);
@@ -463,8 +461,8 @@ static const struct json_command dev_rescan_output_command = {
 	"developer",
 	json_dev_rescan_outputs,
 	"Synchronize the state of our funds with bitcoind",
-	false,
-	"For each output stored in the internal wallet ask `bitcoind` whether we are in sync with its state (spent vs. unspent)"
+	.verbose = "For each output stored in the internal wallet ask `bitcoind` whether we are in sync with its state (spent vs. unspent)",
+	.dev_only = true,
 };
 AUTODATA(json_command, &dev_rescan_output_command);
 
@@ -565,8 +563,7 @@ static const struct json_command listtransactions_command = {
     "payment",
     json_listtransactions,
     "List transactions that we stored in the wallet",
-    false,
-    "Returns transactions tracked in the wallet. This includes deposits, "
+    .verbose = "Returns transactions tracked in the wallet. This includes deposits, "
     "withdrawals and transactions related to channels. A transaction may have "
     "multiple types, e.g., a transaction may both be a close and a deposit if "
     "it closes the channel and returns funds to the wallet."
@@ -709,10 +706,10 @@ static struct command_result *json_signpsbt(struct command *cmd,
 	struct utxo **utxos;
 	u32 *input_nums;
 
-	if (!param(cmd, buffer, params,
-		   p_req("psbt", param_psbt, &psbt),
-		   p_opt("signonly", param_input_numbers, &input_nums),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("psbt", param_psbt, &psbt),
+			 p_opt("signonly", param_input_numbers, &input_nums),
+			 NULL))
 		return command_param_failed();
 
 	/* Sanity check! */
@@ -735,6 +732,9 @@ static struct command_result *json_signpsbt(struct command *cmd,
 		return command_fail(cmd, LIGHTNINGD,
 				    "No wallet inputs to sign");
 
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
+
 	/* Update the keypaths on any outputs that are in our wallet (change addresses). */
 	match_psbt_outputs_to_wallet(psbt, cmd->ld->wallet);
 
@@ -755,8 +755,21 @@ static struct command_result *json_signpsbt(struct command *cmd,
 				    "HSM gave bad sign_withdrawal_reply %s",
 				    tal_hex(tmpctx, msg));
 
+	/* Some signers (VLS) prune the input.utxo data as it's used
+	 * because it is too large to store in the signer. We can
+	 * restore this metadata by combining the signed psbt back
+	 * into a clone of the original psbt. */
+	struct wally_psbt *combined_psbt;
+	combined_psbt = combine_psbt(cmd, psbt, signed_psbt);
+	if (!combined_psbt) {
+		return command_fail(cmd, LIGHTNINGD,
+				    "Unable to combine signed psbt: %s",
+				    type_to_string(tmpctx, struct wally_psbt,
+						   signed_psbt));
+	}
+
 	response = json_stream_success(cmd);
-	json_add_psbt(response, "signed_psbt", signed_psbt);
+	json_add_psbt(response, "signed_psbt", combined_psbt);
 	return command_success(cmd, response);
 }
 
@@ -869,10 +882,10 @@ static struct command_result *json_sendpsbt(struct command *cmd,
 	struct lightningd *ld = cmd->ld;
 	u32 *reserve_blocks;
 
-	if (!param(cmd, buffer, params,
-		   p_req("psbt", param_psbt, &psbt),
-		   p_opt_def("reserve", param_number, &reserve_blocks, 12 * 6),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("psbt", param_psbt, &psbt),
+			 p_opt_def("reserve", param_number, &reserve_blocks, 12 * 6),
+			 NULL))
 		return command_param_failed();
 
 	sending = tal(cmd, struct sending_psbt);
@@ -900,6 +913,9 @@ static struct command_result *json_sendpsbt(struct command *cmd,
 	if (res)
 		return res;
 
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
+
 	for (size_t i = 0; i < tal_count(sending->utxos); i++) {
 		if (!wallet_reserve_utxo(ld->wallet, sending->utxos[i],
 					 get_block_height(ld->topology),
@@ -908,7 +924,7 @@ static struct command_result *json_sendpsbt(struct command *cmd,
 	}
 
 	/* Now broadcast the transaction */
-	bitcoind_sendrawtx(cmd->ld->topology->bitcoind,
+	bitcoind_sendrawtx(sending, cmd->ld->topology->bitcoind,
 			   cmd->id,
 			   tal_hex(tmpctx,
 				   linearize_wtx(tmpctx, sending->wtx)),

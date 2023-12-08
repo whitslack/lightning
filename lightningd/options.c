@@ -656,7 +656,6 @@ static char *opt_set_hsm_password(struct lightningd *ld)
 	return NULL;
 }
 
-#if DEVELOPER
 static char *opt_force_privkey(const char *optarg, struct lightningd *ld)
 {
 	tal_free(ld->dev_force_privkey);
@@ -772,7 +771,7 @@ static void dev_register_opts(struct lightningd *ld)
 	/* We might want to debug plugins, which are started before normal
 	 * option parsing */
 	clnopt_witharg("--dev-debugger=<subprocess>", OPT_EARLY|OPT_DEV,
-		       opt_set_charp, NULL,
+		       opt_set_charp, opt_show_charp,
 		       &ld->dev_debug_subprocess,
 		       "Invoke gdb at start of <subprocess>");
 	clnopt_noarg("--dev-no-plugin-checksum", OPT_EARLY|OPT_DEV,
@@ -887,7 +886,6 @@ static void dev_register_opts(struct lightningd *ld)
 		       &ld->config.allowdustreserve,
 		       "If true, we allow the `fundchannel` RPC command and the `openchannel` plugin hook to set a reserve that is below the dust limit.");
 }
-#endif /* DEVELOPER */
 
 static const struct config testnet_config = {
 	/* 6 blocks to catch cheating attempts. */
@@ -950,6 +948,7 @@ static const struct config testnet_config = {
 
 	.max_fee_multiplier = 10,
 	.commit_fee_percent = 100,
+	.feerate_offset = 5,
 };
 
 /* aka. "Dude, where's my coins?" */
@@ -1024,6 +1023,7 @@ static const struct config mainnet_config = {
 
 	.max_fee_multiplier = 10,
 	.commit_fee_percent = 100,
+	.feerate_offset = 5,
 };
 
 static void check_config(struct lightningd *ld)
@@ -1152,9 +1152,7 @@ static bool opt_show_sat(char *buf, size_t len, const struct amount_sat *sat)
 
 static char *opt_set_wumbo(struct lightningd *ld)
 {
-	feature_set_or(ld->our_features,
-		       take(feature_set_for_feature(NULL,
-						    OPTIONAL_FEATURE(OPT_LARGE_CHANNELS))));
+	/* Wumbo is now the default, FIXME: depreacted_apis! */
 	return NULL;
 }
 
@@ -1258,25 +1256,45 @@ static char *opt_set_announce_dns(const char *optarg, struct lightningd *ld)
 	return opt_set_bool_arg(optarg, &ld->announce_dns);
 }
 
-static char *opt_set_codex32(const char *arg, struct lightningd *ld)
+char *hsm_secret_arg(const tal_t *ctx,
+		     const char *arg,
+		     const u8 **hsm_secret)
+{
+	char *codex32_fail;
+	struct codex32 *codex32;
+
+	/* We accept hex, or codex32.  hex is very very very unlikely to
+	 * give a valid codex32, so try that first */
+	codex32 = codex32_decode(tmpctx, "cl", arg, &codex32_fail);
+	if (codex32) {
+		*hsm_secret = tal_steal(ctx, codex32->payload);
+		if (codex32->threshold != 0
+		    || codex32->type != CODEX32_ENCODING_SECRET) {
+			return "This is only one share of codex32!";
+		}
+	} else {
+		/* Not codex32, was it hex? */
+		*hsm_secret = tal_hexdata(ctx, arg, strlen(arg));
+		if (!*hsm_secret) {
+			/* It's not hex!  So give codex32 error */
+ 			return codex32_fail;
+		}
+	}
+
+	if (tal_count(*hsm_secret) != 32)
+		return "Invalid length: must be 32 bytes";
+
+	return NULL;
+}
+
+static char *opt_set_codex32_or_hex(const char *arg, struct lightningd *ld)
 {
 	char *err;
-	struct codex32 *parts = codex32_decode(tmpctx, "cl", arg, &err);
+	const u8 *payload;
 
-	if (!parts) {
+	err = hsm_secret_arg(tmpctx, arg, &payload);
+	if (err)
 		return err;
-	}
-
-	if (parts->type != CODEX32_ENCODING_SECRET) {
-		return tal_fmt(tmpctx, "Not a valid codex32 secret!");
-	}
-
-	if (tal_bytelen(parts->payload) != 32) {
-		return tal_fmt(tmpctx, "Expected 32 Byte secret: %s",
-					tal_hexstr(tmpctx,
-						   parts->payload,
-						   tal_bytelen(parts->payload)));
-	}
 
 	/* Checks if hsm_secret exists */
 	int fd = open("hsm_secret", O_CREAT|O_EXCL|O_WRONLY, 0400);
@@ -1289,7 +1307,7 @@ static char *opt_set_codex32(const char *arg, struct lightningd *ld)
 			       strerror(errno));
 	}
 
-	if (!write_all(fd, parts->payload, tal_count(parts->payload))) {
+	if (!write_all(fd, payload, tal_count(payload))) {
 		unlink_noerr("hsm_secret");
 		return tal_fmt(tmpctx, "Writing HSM: %s",
 			   strerror(errno));
@@ -1374,7 +1392,7 @@ static void register_opts(struct lightningd *ld)
 			       &ld->wallet_dsn,
 			       "Location of the wallet database.");
 
-	opt_register_early_arg("--recover", opt_set_codex32, NULL,
+	opt_register_early_arg("--recover", opt_set_codex32_or_hex, NULL,
 				ld,
 				"Populate hsm_secret with the given codex32 secret"
 				" and starts the node in `offline` mode.");
@@ -1382,7 +1400,7 @@ static void register_opts(struct lightningd *ld)
 	/* This affects our features, so set early. */
 	opt_register_early_noarg("--large-channels|--wumbo",
 				 opt_set_wumbo, ld,
-				 "Allow channels larger than 0.16777215 BTC");
+				 opt_hidden);
 
 	opt_register_early_noarg("--experimental-dual-fund",
 				 opt_set_dual_fund, ld,
@@ -1541,6 +1559,10 @@ static void register_opts(struct lightningd *ld)
 	clnopt_witharg("--commit-fee", OPT_SHOWINT,
 		       opt_set_u64, opt_show_u64, &ld->config.commit_fee_percent,
 		       "Percentage of fee to request for their commitment");
+	clnopt_witharg("--commit-feerate-offset", OPT_SHOWINT,
+		       opt_set_u32, opt_show_u32, &ld->config.feerate_offset,
+		       "Additional feerate per kw to apply to feerate updates "
+		       "as the channel opener");
 	clnopt_witharg("--min-emergency-msat", OPT_SHOWMSATS,
 		       opt_set_sat_nondust, opt_show_sat, &ld->emergency_sat,
 		       "Amount to leave in wallet for spending anchor closes");
@@ -1568,9 +1590,7 @@ static void register_opts(struct lightningd *ld)
 		       "Set to true to allow database upgrades even on non-final releases (WARNING: you won't be able to downgrade!)");
 	opt_register_logging(ld);
 
-#if DEVELOPER
 	dev_register_opts(ld);
-#endif
 }
 
 /* We are in ld->config_netdir when this is run! */
@@ -1674,15 +1694,16 @@ void setup_color_and_alias(struct lightningd *ld)
 		name = tal_fmt(ld, "%s%s",
 			       codename_adjective[adjective],
 			       codename_noun[noun]);
-#if DEVELOPER
-		assert(strlen(name) < 32);
-		int taillen = 31 - strlen(name);
-		if (taillen > strlen(version()))
-			taillen = strlen(version());
-		/* Fit as much of end of version() as possible */
-		tal_append_fmt(&name, "-%s",
-			       version() + strlen(version()) - taillen);
-#endif
+
+		if (ld->developer) {
+			assert(strlen(name) < 32);
+			int taillen = 31 - strlen(name);
+			if (taillen > strlen(version()))
+				taillen = strlen(version());
+			/* Fit as much of end of version() as possible */
+			tal_append_fmt(&name, "-%s",
+				       version() + strlen(version()) - taillen);
+		}
 		assert(strlen(name) <= 32);
 		ld->alias = tal_arrz(ld, u8, 33);
 		strcpy((char*)ld->alias, name);
@@ -1699,6 +1720,11 @@ void handle_early_opts(struct lightningd *ld, int argc, char *argv[])
 	clnopt_noarg("--list-features-only", OPT_EARLY|OPT_EXITS,
 		     list_features_and_exit,
 		     ld, "List the features configured, and exit immediately");
+
+	/*~ We need to know this super-early, as it controls other options */
+	clnopt_noarg("--developer", OPT_EARLY|OPT_SHOWBOOL,
+		     opt_set_bool, &ld->developer,
+		     "Enable developer commands/options, disable legacy APIs");
 
 	/*~ This does enough parsing to get us the base configuration options */
 	ld->configvars = initial_config_opts(ld, &argc, argv, true,
@@ -1746,6 +1772,10 @@ void handle_early_opts(struct lightningd *ld, int argc, char *argv[])
 			      ld->config_netdir, strerror(errno));
 	}
 
+	/* --developer changes default for APIs */
+	if (ld->developer)
+		ld->deprecated_apis = false;
+
 	/*~ We move files from old locations on first upgrade. */
 	promote_missing_files(ld);
 
@@ -1755,17 +1785,52 @@ void handle_early_opts(struct lightningd *ld, int argc, char *argv[])
 
 	/* Now, first-pass of parsing.  But only handle the early
 	 * options (testnet, plugins etc), others may be added on-demand */
-	parse_configvars_early(ld->configvars);
+	parse_configvars_early(ld->configvars, ld->developer);
 
 	/* Finalize the logging subsystem now. */
 	logging_options_parsed(ld->log_book);
 }
 
+/* Free *str, set *str to copy with `cln` prepended */
+static void prefix_cln(const char **str STEALS)
+{
+	const char *newstr = tal_fmt(tal_parent(*str), "cln%s", *str);
+	tal_free(*str);
+	*str = newstr;
+}
+
+/* Due to a conflict between the widely-deployed clightning-rest plugin and
+ * our own clnrest plugin, and people wanting to run both, in v23.11 we
+ * renamed some options.  This breaks perfectly working v23.08 deployments who
+ * don't care about clightning-rest, so we work around it here. */
+static void fixup_clnrest_options(struct lightningd *ld)
+{
+	for (size_t i = 0; i < tal_count(ld->configvars); i++) {
+		struct configvar *cv = ld->configvars[i];
+
+		/* These worked for v23.08 */
+		if (!strstarts(cv->configline, "rest-port=")
+		    && !strstarts(cv->configline, "rest-protocol=")
+		    && !strstarts(cv->configline, "rest-host=")
+		    && !strstarts(cv->configline, "rest-certs="))
+			continue;
+		/* Did some (plugin) claim it? */
+		if (opt_find_long(cv->configline, &cv->optarg))
+			continue;
+		log_unusual(ld->log, "Option %s deprecated in v23.11, renaming to cln%s",
+			    cv->configline, cv->configline);
+		prefix_cln(&cv->configline);
+	}
+}
+
 void handle_opts(struct lightningd *ld)
 {
+	if (ld->deprecated_apis)
+		fixup_clnrest_options(ld);
+
 	/* Now we know all the options, finish parsing and finish
 	 * populating ld->configvars with cmdline. */
-	parse_configvars_final(ld->configvars, true);
+	parse_configvars_final(ld->configvars, true, ld->developer);
 
 	/* We keep a separate variable rather than overriding always_use_proxy,
 	 * so listconfigs shows the correct thing. */
@@ -2010,10 +2075,6 @@ void add_config_deprecated(struct lightningd *ld,
 					tal_append_fmt(&answer, ",%"PRIu64,
 						       ld->accept_extra_tlv_types[i]);
 			}
-#if DEVELOPER
-		} else if (strstarts(name, "dev-")) {
-			/* Ignore dev settings */
-#endif
 		}
 		/* We ignore future additions, since these are deprecated anyway! */
 	}
@@ -2042,14 +2103,11 @@ bool is_known_opt_cb_arg(char *(*cb_arg)(const char *, void *))
 		|| cb_arg == (void *)opt_set_db_upgrade
 		|| cb_arg == (void *)arg_log_to_file
 		|| cb_arg == (void *)opt_add_accept_htlc_tlv
-		|| cb_arg == (void *)opt_set_codex32
-#if DEVELOPER
+		|| cb_arg == (void *)opt_set_codex32_or_hex
 		|| cb_arg == (void *)opt_subd_dev_disconnect
 		|| cb_arg == (void *)opt_force_featureset
 		|| cb_arg == (void *)opt_force_privkey
 		|| cb_arg == (void *)opt_force_bip32_seed
 		|| cb_arg == (void *)opt_force_channel_secrets
-		|| cb_arg == (void *)opt_force_tmp_channel_id
-#endif
-		;
+		|| cb_arg == (void *)opt_force_tmp_channel_id;
 }

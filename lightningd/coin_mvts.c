@@ -82,9 +82,25 @@ struct channel_coin_mvt *new_channel_mvt_routed_hout(const tal_t *ctx,
 
 static bool report_chan_balance(const struct channel *chan)
 {
-	return (channel_active(chan)
-	       || chan->state == AWAITING_UNILATERAL)
-	       && !channel_pre_open(chan);
+	switch (chan->state) {
+	case CHANNELD_AWAITING_LOCKIN:
+	case DUALOPEND_OPEN_INIT:
+	case DUALOPEND_OPEN_COMMIT_READY:
+	case DUALOPEND_OPEN_COMMITTED:
+	case DUALOPEND_AWAITING_LOCKIN:
+	case CLOSINGD_COMPLETE:
+	case AWAITING_UNILATERAL:
+	case ONCHAIN:
+	case CLOSED:
+		return false;
+
+	case CHANNELD_NORMAL:
+	case CHANNELD_SHUTTING_DOWN:
+	case CLOSINGD_SIGEXCHANGE:
+	case FUNDING_SPEND_SEEN:
+		return true;
+	}
+	abort();
 }
 
 void send_account_balance_snapshot(struct lightningd *ld, u32 blockheight)
@@ -95,10 +111,6 @@ void send_account_balance_snapshot(struct lightningd *ld, u32 blockheight)
 	struct channel *chan;
 	struct peer *p;
 	struct peer_node_id_map_iter it;
-	/* Available + reserved utxos are A+, as reserved things have not yet
-	 * been spent */
-	enum output_status utxo_states[] = {OUTPUT_STATE_AVAILABLE,
-					    OUTPUT_STATE_RESERVED};
 
 	snap->blockheight = blockheight;
 	snap->timestamp = time_now().ts.tv_sec;
@@ -111,18 +123,17 @@ void send_account_balance_snapshot(struct lightningd *ld, u32 blockheight)
 	bal->acct_id = WALLET;
 	bal->bip173_name = chainparams->lightning_hrp;
 
-	for (size_t i = 0; i < ARRAY_SIZE(utxo_states); i++) {
-		utxos = wallet_get_utxos(NULL, ld->wallet, utxo_states[i]);
-		for (size_t j = 0; j < tal_count(utxos); j++) {
-			/* Don't count unconfirmed utxos! */
-			if (!utxos[j]->spendheight && !utxos[j]->blockheight)
-				continue;
-			if (!amount_msat_add_sat(&bal->balance,
-						 bal->balance, utxos[j]->amount))
-				fatal("Overflow adding node balance");
-		}
-		tal_free(utxos);
+	utxos = wallet_get_unspent_utxos(NULL, ld->wallet);
+	for (size_t j = 0; j < tal_count(utxos); j++) {
+		/* Don't count unconfirmed utxos! */
+		if (!utxos[j]->spendheight && !utxos[j]->blockheight)
+			continue;
+		if (!amount_msat_add_sat(&bal->balance,
+					 bal->balance, utxos[j]->amount))
+			fatal("Overflow adding node balance");
 	}
+	tal_free(utxos);
+
 	snap->accts[0] = bal;
 
 	/* Add channel balances */

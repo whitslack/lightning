@@ -590,7 +590,6 @@ struct onionreply *db_col_onionreply(const tal_t *ctx,
 
 void db_col_ignore(struct db_stmt *stmt, const char *colname)
 {
-#if DEVELOPER
-	db_query_colnum(stmt, colname);
-#endif
+	if (stmt->db->developer)
+		db_query_colnum(stmt, colname);
 }

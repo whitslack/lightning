@@ -18,20 +18,20 @@ sudo apt install valgrind cppcheck shellcheck libsecp256k1-dev libpq-dev
 Re-run `configure` and build using `make`:
 
 ```shell
-./configure --enable-developer
+./configure
 make -j$(nproc)
 ```
 
 ## Debugging
 
-You can build Core Lightning with `DEVELOPER=1` to use dev commands listed in `cli/lightning-cli help`. `./configure --enable-developer` will do that. You can log console messages with log_info() in lightningd and status_debug() in other subdaemons.
+There are various development options enabled by running with `--developer`.  You can log console messages with log_info() in lightningd and status_debug() in other subdaemons.
 
 You can debug crashing subdaemons with the argument `--dev-debugger=channeld`, where `channeld` is the subdaemon name.  It will run `gnome-terminal` by default with a gdb attached to the subdaemon when it starts.  You can change the terminal used by setting the `DEBUG_TERM` environment variable, such as `DEBUG_TERM="xterm -e"` or `DEBUG_TERM="konsole -e"`.
 
 It will also print out (to stderr) the gdb command for manual connection.  The subdaemon will be stopped (it sends itself a `SIGSTOP`); you'll need to `continue` in gdb.
 
 ```shell
-./configure --enable-developer
+./configure
 make -j$(nproc)
 ```
 
@@ -110,7 +110,7 @@ Here's a checklist for the release process.
 2. Use `devtools/changelog.py` to collect the changelog entries from pull request commit messages and merge them into the manually maintained `CHANGELOG.md`.  This does API queries to GitHub, which are severely  
    ratelimited unless you use an API token: set the `GH_TOKEN` environment variable to a Personal Access Token from <https://github.com/settings/tokens>
 3. Create a new CHANGELOG.md heading to `v<VERSION>rc1`, and create a link at the bottom. Note that you should exactly copy the date and name format from a previous release, as the `build-release.sh` script relies on this.
-4. Update the contrib/pyln package versions: `make update-pyln-versions NEW_VERSION=<VERSION>`
+4. Update the contrib/pyln package versions: `make update-py-versions NEW_VERSION=<VERSION>`
 5. Create a PR with the above.
 
 ### Releasing -rc1
@@ -130,7 +130,7 @@ Here's a checklist for the release process.
 ### Releasing -rc2, ..., -rcN
 
 1. Change rc(N-1) to rcN in CHANGELOG.md.
-2. Update the contrib/pyln package versions: `make update-pyln-versions NEW_VERSION=<VERSION>`
+2. Update the contrib/pyln package versions: `make update-py-versions NEW_VERSION=<VERSION>`
 3. Add a PR with the rcN.
 4. Tag it `git pull && git tag -s v<VERSION>rcN && git push --tags`
 5. Announce tagged rc release on core-lightning's release-chat channel on Discord & [BuildOnL2](https://community.corelightning.org/c/general-questions/).

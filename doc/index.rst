@@ -13,6 +13,7 @@ Core Lightning Documentation
 
  .. block_start manpages
    lightning-addgossip <lightning-addgossip.7.md>
+   lightning-addpsbtoutput <lightning-addpsbtoutput.7.md>
    lightning-autoclean-once <lightning-autoclean-once.7.md>
    lightning-autoclean-status <lightning-autoclean-status.7.md>
    lightning-batching <lightning-batching.7.md>
@@ -34,6 +35,7 @@ Core Lightning Documentation
    lightning-createinvoice <lightning-createinvoice.7.md>
    lightning-createonion <lightning-createonion.7.md>
    lightning-datastore <lightning-datastore.7.md>
+   lightning-datastoreusage <lightning-datastoreusage.7.md>
    lightning-decode <lightning-decode.7.md>
    lightning-decodepay <lightning-decodepay.7.md>
    lightning-deldatastore <lightning-deldatastore.7.md>
@@ -95,6 +97,7 @@ Core Lightning Documentation
    lightning-plugin <lightning-plugin.7.md>
    lightning-preapproveinvoice <lightning-preapproveinvoice.7.md>
    lightning-preapprovekeysend <lightning-preapprovekeysend.7.md>
+   lightning-recover <lightning-recover.7.md>
    lightning-recoverchannel <lightning-recoverchannel.7.md>
    lightning-renepay <lightning-renepay.7.md>
    lightning-renepaystatus <lightning-renepaystatus.7.md>

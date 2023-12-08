@@ -255,13 +255,13 @@ void json_add_timeabs(struct json_stream *result, const char *fieldname,
 		      struct timeabs t);
 
 /* used in log.c and notification.c*/
-void json_add_time(struct json_stream *result, const char *fieldname,
+void json_add_timestr(struct json_stream *result, const char *fieldname,
 			  struct timespec ts);
 
 /* Add ISO_8601 timestamp string, i.e. "2019-09-07T15:50+01:00" */
 void json_add_timeiso(struct json_stream *result,
 		      const char *fieldname,
-		      struct timeabs *time);
+		      struct timeabs time);
 
 /* Add any json token */
 void json_add_tok(struct json_stream *result, const char *fieldname,

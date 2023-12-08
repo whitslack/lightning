@@ -350,6 +350,18 @@ def datastore2py(m):
     })
 
 
+def datastoreusage_datastoreusage2py(m):
+    return remove_default({
+        "key": m.key,  # PrimitiveField in generate_composite
+        "total_bytes": m.total_bytes,  # PrimitiveField in generate_composite
+    })
+
+
+def datastoreusage2py(m):
+    return remove_default({
+    })
+
+
 def createonion2py(m):
     return remove_default({
         "onion": hexlify(m.onion),  # PrimitiveField in generate_composite
@@ -1133,6 +1145,7 @@ def decode2py(m):
         "restrictions": [decode_restrictions2py(i) for i in m.restrictions],  # ArrayField[composite] in generate_composite
         "warning_rune_invalid_utf8": m.warning_rune_invalid_utf8,  # PrimitiveField in generate_composite
         "hex": hexlify(m.hex),  # PrimitiveField in generate_composite
+        "decrypted": hexlify(m.decrypted),  # PrimitiveField in generate_composite
     })
 
 
@@ -1203,6 +1216,32 @@ def feerates_onchain_fee_estimates2py(m):
 def feerates2py(m):
     return remove_default({
         "warning_missing_feerates": m.warning_missing_feerates,  # PrimitiveField in generate_composite
+    })
+
+
+def fetchinvoice_changes2py(m):
+    return remove_default({
+        "description_appended": m.description_appended,  # PrimitiveField in generate_composite
+        "description": m.description,  # PrimitiveField in generate_composite
+        "vendor_removed": m.vendor_removed,  # PrimitiveField in generate_composite
+        "vendor": m.vendor,  # PrimitiveField in generate_composite
+        "amount_msat": amount2msat(m.amount_msat),  # PrimitiveField in generate_composite
+    })
+
+
+def fetchinvoice_next_period2py(m):
+    return remove_default({
+        "counter": m.counter,  # PrimitiveField in generate_composite
+        "starttime": m.starttime,  # PrimitiveField in generate_composite
+        "endtime": m.endtime,  # PrimitiveField in generate_composite
+        "paywindow_start": m.paywindow_start,  # PrimitiveField in generate_composite
+        "paywindow_end": m.paywindow_end,  # PrimitiveField in generate_composite
+    })
+
+
+def fetchinvoice2py(m):
+    return remove_default({
+        "invoice": m.invoice,  # PrimitiveField in generate_composite
     })
 
 
@@ -1342,6 +1381,12 @@ def signmessage2py(m):
         "signature": hexlify(m.signature),  # PrimitiveField in generate_composite
         "recid": hexlify(m.recid),  # PrimitiveField in generate_composite
         "zbase": m.zbase,  # PrimitiveField in generate_composite
+    })
+
+
+def waitblockheight2py(m):
+    return remove_default({
+        "blockheight": m.blockheight,  # PrimitiveField in generate_composite
     })
 
 

@@ -710,7 +710,7 @@ char *fmt_bitcoin_tx(const tal_t *ctx, const struct bitcoin_tx *tx)
 	return s;
 }
 
-static char *fmt_bitcoin_txid(const tal_t *ctx, const struct bitcoin_txid *txid)
+char *fmt_bitcoin_txid(const tal_t *ctx, const struct bitcoin_txid *txid)
 {
 	char *hexstr = tal_arr(ctx, char, hex_str_size(sizeof(*txid)));
 
@@ -967,11 +967,15 @@ struct amount_sat change_amount(struct amount_sat excess, u32 feerate_perkw,
 
 u32 tx_feerate(const struct bitcoin_tx *tx)
 {
-	struct amount_sat fee = bitcoin_tx_compute_fee(tx);
+
+	u32 feerate;
 
 	/* Fee should not overflow! */
-	if (!amount_sat_mul(&fee, fee, 1000))
+	if (!amount_feerate(&feerate,
+			    bitcoin_tx_compute_fee(tx),
+			    bitcoin_tx_weight(tx))) {
 		abort();
+	}
 
-	return amount_sat_div(fee, bitcoin_tx_weight(tx)).satoshis; /* Raw: txfee */
+	return feerate;
 }

@@ -18,11 +18,11 @@
 #include <common/peer_io.h>
 #include <common/psbt_internal.h>
 #include <common/psbt_open.h>
-#include <common/read_peer_msg.h>
 #include <common/setup.h>
 #include <common/status.h>
 #include <common/subdaemon.h>
 #include <common/type_to_string.h>
+#include <common/wire_error.h>
 
 /*
  * BOLT-f53ca2301232db780843e894f55d95d512f297f9 #2:
@@ -97,8 +97,7 @@ static u8 *read_next_msg(const tal_t *ctx,
 	u8 *msg = NULL;
 
 	for (;;) {
-		char *desc;
-		bool warning;
+		const char *desc;
 		enum peer_wire t;
 
 		/* Prevent runaway memory usage from many messages */
@@ -118,20 +117,19 @@ static u8 *read_next_msg(const tal_t *ctx,
 			continue;
 
 		/* A helper which decodes an error. */
-		if (is_peer_error(msg, msg, &state->channel_id,
-				  &desc, &warning)) {
-			/* In this case, is_peer_error returns true, but sets
-			 * desc to NULL */
-			if (!desc)
-				continue;
+		desc = is_peer_error(msg, msg);
+		if (desc) {
+			*error = tal_fmt(ctx, "They sent an error: %s", desc);
 
-			*error = tal_fmt(ctx, "They sent a %s: %s",
-					 warning ? "warning" : "error",
-					 desc);
-
-			tal_free(msg);
 			/* Return NULL so caller knows to stop negotiating. */
-			return NULL;
+			return tal_free(msg);
+		}
+
+		desc = is_peer_warning(msg, msg);
+		if (desc) {
+			status_info("They sent %s", desc);
+			tal_free(msg);
+			continue;
 		}
 
 		/* In theory, we're in the middle of an open/RBF/splice, but

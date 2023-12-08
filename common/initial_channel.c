@@ -114,10 +114,6 @@ struct bitcoin_tx *initial_channel_tx(const tal_t *ctx,
 					  channel->opener,
 					  side);
 
-	*wscript = bitcoin_redeem_2of2(ctx,
-				       &channel->funding_pubkey[side],
-				       &channel->funding_pubkey[!side]);
-
 	init_tx = initial_commit_tx(ctx, &channel->funding,
 				    channel->funding_sats,
 				    channel->funding_pubkey,
@@ -142,6 +138,12 @@ struct bitcoin_tx *initial_channel_tx(const tal_t *ctx,
 				      &channel->funding_pubkey[side]);
 		psbt_input_add_pubkey(init_tx->psbt, 0,
 				      &channel->funding_pubkey[!side]);
+	}
+
+	if (wscript) {
+		*wscript = bitcoin_redeem_2of2(ctx,
+					       &channel->funding_pubkey[side],
+					       &channel->funding_pubkey[!side]);
 	}
 
 	return init_tx;

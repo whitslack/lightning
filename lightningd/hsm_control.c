@@ -114,13 +114,13 @@ struct ext_key *hsm_init(struct lightningd *ld)
 
 	ld->hsm_fd = fds[0];
 	if (!wire_sync_write(ld->hsm_fd, towire_hsmd_init(tmpctx,
-							 &chainparams->bip32_key_version,
-							 chainparams,
-							 ld->config.keypass,
-							 IFDEV(ld->dev_force_privkey, NULL),
-							 IFDEV(ld->dev_force_bip32_seed, NULL),
-							 IFDEV(ld->dev_force_channel_secrets, NULL),
-							  IFDEV(ld->dev_force_channel_secrets_shaseed, NULL),
+							  &chainparams->bip32_key_version,
+							  chainparams,
+							  ld->config.keypass,
+							  ld->dev_force_privkey,
+							  ld->dev_force_bip32_seed,
+							  ld->dev_force_channel_secrets,
+							  ld->dev_force_channel_secrets_shaseed,
 							  HSM_MIN_VERSION,
 							  HSM_MAX_VERSION)))
 		err(EXITCODE_HSM_GENERIC_ERROR, "Writing init msg to hsm");
@@ -233,10 +233,10 @@ static struct command_result *json_makesecret(struct command *cmd,
 	struct json_stream *response;
 	struct secret secret;
 
-	if (!param(cmd, buffer, params,
-		   p_opt("hex", param_bin_from_hex, &data),
-		   p_opt("string", param_string, &strdata),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_opt("hex", param_bin_from_hex, &data),
+			 p_opt("string", param_string, &strdata),
+			 NULL))
 		return command_param_failed();
 
 	if (strdata) {
@@ -250,6 +250,8 @@ static struct command_result *json_makesecret(struct command *cmd,
 					    "Must have either hex or string");
 	}
 
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
 
 	u8 *msg = towire_hsmd_derive_secret(cmd, data);
 	if (!wire_sync_write(cmd->ld->hsm_fd, take(msg)))

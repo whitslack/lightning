@@ -811,22 +811,6 @@ static void tell_master_local_cupdates(struct daemon *daemon)
 	}
 }
 
-/* Disables all channels connected to our node. */
-static void gossip_disable_local_channels(struct daemon *daemon)
-{
-	struct node *local_node = get_node(daemon->rstate, &daemon->id);
-	struct chan_map_iter i;
-	struct chan *c;
-
-	/* We don't have a local_node, so we don't have any channels yet
-	 * either */
-	if (!local_node)
-		return;
-
-	for (c = first_chan(local_node, &i); c; c = next_chan(local_node, &i))
-		local_disable_chan(daemon, c, half_chan_idx(local_node, c));
-}
-
 struct peer *first_random_peer(struct daemon *daemon,
 			       struct peer_node_id_map_iter *it)
 {
@@ -894,9 +878,6 @@ static void gossip_init(struct daemon *daemon, const u8 *msg)
 	if (daemon->rstate->last_timestamp > timestamp)
 		daemon->rstate->last_timestamp = timestamp;
 
-	/* Now disable all local channels, they can't be connected yet. */
-	gossip_disable_local_channels(daemon);
-
 	/* If that announced channels, we can announce ourselves (options
 	 * or addresses might have changed!) */
 	maybe_send_own_node_announce(daemon, true);
@@ -952,7 +933,6 @@ static void new_blockheight(struct daemon *daemon, const u8 *msg)
 			 take(towire_gossipd_new_blockheight_reply(NULL)));
 }
 
-#if DEVELOPER
 static void dev_gossip_memleak(struct daemon *daemon, const u8 *msg)
 {
 	struct htable *memtable;
@@ -964,7 +944,7 @@ static void dev_gossip_memleak(struct daemon *daemon, const u8 *msg)
 	memleak_scan_obj(memtable, daemon);
 	memleak_scan_htable(memtable, &daemon->peers->raw);
 
-	found_leak = dump_memleak(memtable, memleak_status_broken);
+	found_leak = dump_memleak(memtable, memleak_status_broken, NULL);
 	daemon_conn_send(daemon->master,
 			 take(towire_gossipd_dev_memleak_reply(NULL,
 							      found_leak)));
@@ -985,12 +965,11 @@ static void dev_gossip_set_time(struct daemon *daemon, const u8 *msg)
 
 	if (!fromwire_gossipd_dev_set_time(msg, &time))
 		master_badmsg(WIRE_GOSSIPD_DEV_SET_TIME, msg);
-	if (!daemon->rstate->gossip_time)
-		daemon->rstate->gossip_time = tal(daemon->rstate, struct timeabs);
-	daemon->rstate->gossip_time->ts.tv_sec = time;
-	daemon->rstate->gossip_time->ts.tv_nsec = 0;
+	if (!daemon->rstate->dev_gossip_time)
+		daemon->rstate->dev_gossip_time = tal(daemon->rstate, struct timeabs);
+	daemon->rstate->dev_gossip_time->ts.tv_sec = time;
+	daemon->rstate->dev_gossip_time->ts.tv_nsec = 0;
 }
-#endif /* DEVELOPER */
 
 /*~ We queue incoming channel_announcement pending confirmation from lightningd
  * that it really is an unspent output.  Here's its reply. */
@@ -1189,26 +1168,30 @@ static struct io_plan *recv_req(struct io_conn *conn,
 	case WIRE_GOSSIPD_DISCOVERED_IP:
 		handle_discovered_ip(daemon, msg);
 		goto done;
-#if DEVELOPER
 	case WIRE_GOSSIPD_DEV_SET_MAX_SCIDS_ENCODE_SIZE:
-		dev_set_max_scids_encode_size(daemon, msg);
-		goto done;
+		if (daemon->developer) {
+			dev_set_max_scids_encode_size(daemon, msg);
+			goto done;
+		}
+		/* fall thru */
 	case WIRE_GOSSIPD_DEV_MEMLEAK:
-		dev_gossip_memleak(daemon, msg);
-		goto done;
+		if (daemon->developer) {
+			dev_gossip_memleak(daemon, msg);
+			goto done;
+		}
+		/* fall thru */
 	case WIRE_GOSSIPD_DEV_COMPACT_STORE:
-		dev_compact_store(daemon, msg);
-		goto done;
+		if (daemon->developer) {
+			dev_compact_store(daemon, msg);
+			goto done;
+		}
+		/* fall thru */
 	case WIRE_GOSSIPD_DEV_SET_TIME:
-		dev_gossip_set_time(daemon, msg);
-		goto done;
-#else
-	case WIRE_GOSSIPD_DEV_SET_MAX_SCIDS_ENCODE_SIZE:
-	case WIRE_GOSSIPD_DEV_MEMLEAK:
-	case WIRE_GOSSIPD_DEV_COMPACT_STORE:
-	case WIRE_GOSSIPD_DEV_SET_TIME:
-		break;
-#endif /* !DEVELOPER */
+		if (daemon->developer) {
+			dev_gossip_set_time(daemon, msg);
+			goto done;
+		}
+		/* fall thru */
 
 	/* We send these, we don't receive them */
 	case WIRE_GOSSIPD_INIT_CUPDATE:
@@ -1233,13 +1216,15 @@ done:
 
 int main(int argc, char *argv[])
 {
+	struct daemon *daemon;
+	bool developer;
+
 	setup_locale();
 
-	struct daemon *daemon;
-
-	subdaemon_setup(argc, argv);
+	developer = subdaemon_setup(argc, argv);
 
 	daemon = tal(NULL, struct daemon);
+	daemon->developer = developer;
 	daemon->peers = tal(daemon, struct peer_node_id_map);
 	peer_node_id_map_init(daemon->peers);
 	daemon->deferred_txouts = tal_arr(daemon, struct short_channel_id, 0);

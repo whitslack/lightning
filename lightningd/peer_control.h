@@ -62,10 +62,8 @@ struct peer {
 	/* If we open a channel our direction will be this */
 	u8 direction;
 
-#if DEVELOPER
 	/* Swallow incoming HTLCs (for testing) */
-	bool ignore_htlcs;
-#endif
+	bool dev_ignore_htlcs;
 };
 
 struct peer *find_peer_by_dbid(struct lightningd *ld, u64 dbid);
@@ -93,11 +91,10 @@ void peer_spoke(struct lightningd *ld, const u8 *msg);
 
 void channel_errmsg(struct channel *channel,
 		    struct peer_fd *peer_fd,
-		    const struct channel_id *channel_id,
 		    const char *desc,
-		    bool warning,
-		    bool aborted,
-		    const u8 *err_for_them);
+		    const u8 *err_for_them,
+		    bool disconnect,
+		    bool warning);
 
 u8 *p2wpkh_for_keyidx(const tal_t *ctx, struct lightningd *ld, u64 keyidx);
 
@@ -112,7 +109,12 @@ void resend_closing_transactions(struct lightningd *ld);
 
 void drop_to_chain(struct lightningd *ld, struct channel *channel, bool cooperative);
 
+void update_channel_from_inflight(struct lightningd *ld,
+				  struct channel *channel,
+				  const struct channel_inflight *inflight);
+
 void channel_watch_funding(struct lightningd *ld, struct channel *channel);
+
 /* If this channel has a "wrong funding" shutdown, watch that too. */
 void channel_watch_wrong_funding(struct lightningd *ld, struct channel *channel);
 
@@ -126,19 +128,18 @@ struct amount_msat channel_amount_receivable(const struct channel *channel);
  * Returns any HTLCs we have to resubmit via htlcs_resubmit. */
 struct htlc_in_map *load_channels_from_wallet(struct lightningd *ld);
 
-#if DEVELOPER
 struct leak_detect;
 void peer_dev_memleak(struct lightningd *ld, struct leak_detect *leaks);
-#endif /* DEVELOPER */
 
 /* Triggered at each new block.  */
 void waitblockheight_notify_new_block(struct lightningd *ld,
 				      u32 block_height);
 
 
-/* JSON parameter by channel_id or scid */
+/* JSON parameter by channel_id or scid (caller must check state!) */
 struct command_result *
 command_find_channel(struct command *cmd,
+		     const char *name,
 		     const char *buffer, const jsmntok_t *tok,
 		     struct channel **channel);
 
