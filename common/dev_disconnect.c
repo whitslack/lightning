@@ -10,7 +10,6 @@
 #include <unistd.h>
 #include <wire/peer_wire.h>
 
-#if DEVELOPER
 /* We move the fd if and only if we do a disconnect. */
 static int dev_disconnect_fd = -1;
 static char dev_disconnect_line[200];
@@ -71,7 +70,8 @@ enum dev_disconnect dev_disconnect(const struct node_id *id, int pkt_type)
 		err(1, "lseek failure");
 	}
 
-	status_peer_debug(id, "dev_disconnect: %s (%s)", dev_disconnect_line,
+	status_peer_debug(id, "dev_disconnect: %s (%s)",
+			  dev_disconnect_line,
 			  peer_wire_name(pkt_type));
 	return dev_disconnect_line[0];
 }
@@ -105,4 +105,3 @@ void dev_sabotage_fd(int fd, bool close_fd)
 	dup2(fds[1], fd);
 	close(fds[1]);
 }
-#endif

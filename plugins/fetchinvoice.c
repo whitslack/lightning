@@ -182,15 +182,13 @@ static struct command_result *handle_invreq_response(struct command *cmd,
 		goto badinv;
 	}
 
-#if DEVELOPER
 	/* Raw send?  Just fwd reply. */
-	if (!sent->offer) {
+	if (plugin_developer_mode(cmd->plugin) && !sent->offer) {
 		out = jsonrpc_stream_success(sent->cmd);
 		json_add_string(out, "invoice", invoice_encode(tmpctx, inv));
 		discard_result(command_finished(sent->cmd, out));
 		return command_hook_success(cmd);
 	}
-#endif /* DEVELOPER */
 
 	/* BOLT-offers #12:
 	 * - if the invoice is a response to an `invoice_request`:
@@ -424,7 +422,6 @@ static struct command_result *param_offer(struct command *cmd,
 					  struct tlv_offer **offer)
 {
 	char *fail;
-	int badf;
 
 	*offer = offer_decode(cmd, buffer + tok->start, tok->end - tok->start,
 			      plugin_feature_set(cmd->plugin), chainparams,
@@ -434,64 +431,6 @@ static struct command_result *param_offer(struct command *cmd,
 					     tal_fmt(cmd,
 						     "Unparsable offer: %s",
 						     fail));
-	/* BOLT-offers #12:
-	 * A reader of an offer:
-	 * - if the offer contains any TLV fields greater or equal to 80:
-	 *   - MUST NOT respond to the offer.
-	 * - if `offer_features` contains unknown _odd_ bits that are non-zero:
-	 *     - MUST ignore the bit.
-	 * - if `offer_features` contains unknown _even_ bits that are non-zero:
-	 *   - MUST NOT respond to the offer.
-	 *   - SHOULD indicate the unknown bit to the user.
-	 */
-	for (size_t i = 0; i < tal_count((*offer)->fields); i++) {
-		if ((*offer)->fields[i].numtype > 80) {
-			return command_fail_badparam(cmd, name, buffer, tok,
-						     tal_fmt(tmpctx,
-							     "Offer %"PRIu64
-							     " field >= 80",
-							     (*offer)->fields[i].numtype));
-		}
-	}
-
-	badf = features_unsupported(plugin_feature_set(cmd->plugin),
-				    (*offer)->offer_features,
-				    BOLT12_OFFER_FEATURE);
-	if (badf != -1) {
-		return command_fail_badparam(cmd, name, buffer, tok,
-					     tal_fmt(tmpctx,
-						     "unknown feature %i",
-						     badf));
-	}
-
-	/* BOLT-offers #12:
-	 * - if `offer_description` is not set:
-	 *   - MUST NOT respond to the offer.
-	 * - if `offer_node_id` is not set:
-	 *   - MUST NOT respond to the offer.
-	 */
-	if (!(*offer)->offer_description)
-		return command_fail_badparam(cmd, name, buffer, tok,
-					     "Offer does not contain a description");
-	if (!(*offer)->offer_node_id)
-		return command_fail_badparam(cmd, name, buffer, tok,
-					     "Offer does not contain a node_id");
-
-	/* BOLT-offers #12:
-	 * - if `offer_chains` is not set:
-	 *    - if the node does not accept bitcoin invoices:
-	 *      - MUST NOT respond to the offer
-	 * - otherwise: (`offer_chains` is set):
-	 *    - if the node does not accept invoices for any of the `chains`:
-	 *      - MUST NOT respond to the offer
-	 */
-	if (!bolt12_chains_match((*offer)->offer_chains,
-				 tal_count((*offer)->offer_chains),
-				 chainparams)) {
-		return command_fail_badparam(cmd, name, buffer, tok,
-					     "Offer for wrong chains");
-	}
-
 	return NULL;
 }
 
@@ -929,56 +868,6 @@ static struct command_result *invreq_done(struct command *cmd,
 	return sendinvreq_after_connect(cmd, NULL, NULL, sent);
 }
 
-/* If they hand us the payer secret, we sign it directly, bypassing checks
- * about periods etc. */
-static struct command_result *
-force_payer_secret(struct command *cmd,
-		   struct sent *sent,
-		   struct tlv_invoice_request *invreq STEALS,
-		   const struct secret *payer_secret)
-{
-	struct sha256 merkle, sha;
-	secp256k1_keypair kp;
-
-	if (secp256k1_keypair_create(secp256k1_ctx, &kp, payer_secret->data) != 1)
-		return command_fail(cmd, LIGHTNINGD, "Bad payer_secret");
-
-	invreq->invreq_payer_id = tal(invreq, struct pubkey);
-	/* Docs say this only happens if arguments are invalid! */
-	if (secp256k1_keypair_pub(secp256k1_ctx,
-				  &invreq->invreq_payer_id->pubkey,
-				  &kp) != 1)
-		plugin_err(cmd->plugin,
-			   "secp256k1_keypair_pub failed on %s?",
-			   type_to_string(tmpctx, struct secret, payer_secret));
-
-	/* Re-calculate ->fields */
-	tal_free(invreq->fields);
-	invreq->fields = tlv_make_fields(invreq, tlv_invoice_request);
-
-	sent->invreq = tal_steal(sent, invreq);
-	merkle_tlv(sent->invreq->fields, &merkle);
-	sighash_from_merkle("invoice_request", "signature", &merkle, &sha);
-
-	sent->invreq->signature = tal(invreq, struct bip340sig);
-	if (!secp256k1_schnorrsig_sign32(secp256k1_ctx,
-				       sent->invreq->signature->u8,
-				       sha.u.u8,
-				       &kp,
-				       NULL)) {
-		return command_fail(cmd, LIGHTNINGD,
-				    "Failed to sign with payer_secret");
-	}
-
-	sent->path = path_to_node(sent, cmd->plugin,
-				  sent->invreq->invreq_payer_id);
-	if (!sent->path)
-		return connect_direct(cmd, sent->invreq->offer_node_id,
-				      sendinvreq_after_connect, sent);
-
-	return sendinvreq_after_connect(cmd, NULL, NULL, sent);
-}
-
 /* Fetches an invoice for this offer, and makes sure it corresponds. */
 static struct command_result *json_fetchinvoice(struct command *cmd,
 						const char *buffer,
@@ -989,7 +878,6 @@ static struct command_result *json_fetchinvoice(struct command *cmd,
 	struct out_req *req;
 	struct tlv_invoice_request *invreq;
 	struct sent *sent = tal(cmd, struct sent);
-	struct secret *payer_secret = NULL;
 	u32 *timeout;
 	u64 *quantity;
 	u32 *recurrence_counter, *recurrence_start;
@@ -1003,9 +891,6 @@ static struct command_result *json_fetchinvoice(struct command *cmd,
 		   p_opt("recurrence_label", param_string, &rec_label),
 		   p_opt_def("timeout", param_number, &timeout, 60),
 		   p_opt("payer_note", param_string, &payer_note),
-#if DEVELOPER
-		   p_opt("payer_secret", param_secret, &payer_secret),
-#endif
 		   NULL))
 		return command_param_failed();
 
@@ -1117,8 +1002,8 @@ static struct command_result *json_fetchinvoice(struct command *cmd,
 		}
 
 		/* recurrence_label uniquely identifies this series of
-		 * payments (unless they supply secret themselves)! */
-		if (!rec_label && !payer_secret)
+		 * payments */
+		if (!rec_label)
 			return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
 					    "needs recurrence_label");
 	} else {
@@ -1162,11 +1047,6 @@ static struct command_result *json_fetchinvoice(struct command *cmd,
 							payer_note,
 							strlen(payer_note),
 							0);
-
-	/* They can provide a secret, and we don't assume it's our job
-	 * to pay. */
-	if (payer_secret)
-		return force_payer_secret(cmd, sent, invreq, payer_secret);
 
 	/* Make the invoice request (fills in payer_key and payer_info) */
 	req = jsonrpc_request_start(cmd->plugin, cmd, "createinvoicerequest",
@@ -1529,7 +1409,6 @@ static struct command_result *json_sendinvoice(struct command *cmd,
 	return sign_invoice(cmd, sent);
 }
 
-#if DEVELOPER
 /* This version doesn't do sanity checks! */
 static struct command_result *param_raw_invreq(struct command *cmd,
 					       const char *name,
@@ -1550,9 +1429,9 @@ static struct command_result *param_raw_invreq(struct command *cmd,
 	return NULL;
 }
 
-static struct command_result *json_rawrequest(struct command *cmd,
-					      const char *buffer,
-					      const jsmntok_t *params)
+static struct command_result *json_dev_rawrequest(struct command *cmd,
+						  const char *buffer,
+						  const jsmntok_t *params)
 {
 	struct sent *sent = tal(cmd, struct sent);
 	u32 *timeout;
@@ -1578,7 +1457,6 @@ static struct command_result *json_rawrequest(struct command *cmd,
 
 	return sendinvreq_after_connect(cmd, NULL, NULL, sent);
 }
-#endif /* DEVELOPER */
 
 static const struct plugin_command commands[] = {
 	{
@@ -1595,15 +1473,14 @@ static const struct plugin_command commands[] = {
 		NULL,
 		json_sendinvoice,
 	},
-#if DEVELOPER
 	{
 		"dev-rawrequest",
 		"util",
 		"Send {invreq} to {nodeid}, wait {timeout} (60 seconds by default)",
 		NULL,
-		json_rawrequest,
+		json_dev_rawrequest,
+		.dev_only = true,
 	},
-#endif /* DEVELOPER */
 };
 
 static const char *init(struct plugin *p, const char *buf UNUSED,

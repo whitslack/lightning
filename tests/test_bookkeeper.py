@@ -23,7 +23,6 @@ def find_first_tag(evs, tag):
     return ev[0]
 
 
-@pytest.mark.developer("dev-ignore-htlcs")
 @unittest.skipIf(TEST_NETWORK != 'regtest', "fixme: broadcast fails, dusty")
 def test_bookkeeping_closing_trimmed_htlcs(node_factory, bitcoind, executor):
     l1, l2 = node_factory.line_graph(2)
@@ -367,7 +366,7 @@ def test_bookkeeping_missed_chans_leases(node_factory, bitcoind):
     bitcoind.generate_block(1, wait_for_mempool=[txid])
     wait_for(lambda: l1.channel_state(l2) == 'CHANNELD_NORMAL')
     scid = l1.get_channel_scid(l2)
-    l1.wait_channel_active(scid)
+    l1.wait_local_channel_active(scid)
     channel_id = first_channel_id(l1, l2)
 
     l1.pay(l2, invoice_msat)
@@ -432,7 +431,7 @@ def test_bookkeeping_missed_chans_pushed(node_factory, bitcoind):
     bitcoind.generate_block(1, wait_for_mempool=[txid])
     wait_for(lambda: l1.channel_state(l2) == 'CHANNELD_NORMAL')
     scid = l1.get_channel_scid(l2)
-    l1.wait_channel_active(scid)
+    l1.wait_local_channel_active(scid)
     channel_id = first_channel_id(l1, l2)
 
     # Send l2 funds via the channel
@@ -499,7 +498,7 @@ def test_bookkeeping_missed_chans_pay_after(node_factory, bitcoind):
     bitcoind.generate_block(1, wait_for_mempool=[txid])
     wait_for(lambda: l1.channel_state(l2) == 'CHANNELD_NORMAL')
     scid = l1.get_channel_scid(l2)
-    l1.wait_channel_active(scid)
+    l1.wait_local_channel_active(scid)
     channel_id = first_channel_id(l1, l2)
 
     # Now turn the bookkeeper on and restart
@@ -520,7 +519,8 @@ def test_bookkeeping_missed_chans_pay_after(node_factory, bitcoind):
         assert channel_id in accts
 
     # Send a payment, should be ok.
-    l1.wait_channel_active(scid)
+    l1.rpc.connect(l2.info['id'], 'localhost', l2.port)
+    l1.wait_local_channel_active(scid)
     l1.pay(l2, invoice_msat)
     l1.daemon.wait_for_log(r'coin movement:.*\'invoice\'')
 
@@ -545,7 +545,6 @@ def test_bookkeeping_missed_chans_pay_after(node_factory, bitcoind):
 
 
 @unittest.skipIf(os.getenv('TEST_DB_PROVIDER', 'sqlite3') != 'sqlite3', "turns off bookkeeper at start")
-@pytest.mark.developer("wait for announce times out otherwise")
 def test_bookkeeping_onchaind_txs(node_factory, bitcoind):
     """
     Test for a channel that's closed, but whose close tx

@@ -72,6 +72,7 @@
 #include <lightningd/io_loop_with_timers.h>
 #include <lightningd/lightningd.h>
 #include <lightningd/onchain_control.h>
+#include <lightningd/peer_htlcs.h>
 #include <lightningd/plugin.h>
 #include <lightningd/plugin_hook.h>
 #include <lightningd/subd.h>
@@ -81,10 +82,8 @@
 #include <wally_bip32.h>
 
 static void destroy_alt_subdaemons(struct lightningd *ld);
-#if DEVELOPER
 static void memleak_help_alt_subdaemons(struct htable *memtable,
 					struct lightningd *ld);
-#endif /* DEVELOPER */
 
 /*~ The core lightning object: it's passed everywhere, and is basically a
  * global variable.  This new_xxx pattern is something we'll see often:
@@ -115,11 +114,13 @@ static struct lightningd *new_lightningd(const tal_t *ctx)
 	 * us to use const more liberally: the style rule here is that you
 	 * should use 'const' on pointers if you can. */
 
-	/*~ Note that we generally EXPLICITLY #if-wrap DEVELOPER code.  This
-	 * is a nod to keeping it minimal and explicit: we need this code for
-	 * testing, but its existence means we're not actually testing the
-	 * same exact code users will be running. */
-#if DEVELOPER
+	/* They can turn this on with --developer */
+	ld->developer = false;
+
+	/*~ We used to EXPLICITLY #if-wrap DEVELOPER code, but as our test
+	 * matrix grew, we turned them into a --developer runtime option.
+	 * We still use the `dev` prefix everywhere to make the developer-
+	 * only variations explicit though. */
 	ld->dev_debug_subprocess = NULL;
 	ld->dev_no_plugin_checksum = false;
 	ld->dev_disconnect_fd = -1;
@@ -140,7 +141,6 @@ static struct lightningd *new_lightningd(const tal_t *ctx)
 	ld->dev_ignore_modern_onion = false;
 	ld->dev_disable_commit = -1;
 	ld->dev_no_ping_timer = false;
-#endif
 
 	/*~ This is a CCAN list: an embedded double-linked list.  It's not
 	 * really typesafe, but relies on convention to access the contents.
@@ -212,7 +212,6 @@ static struct lightningd *new_lightningd(const tal_t *ctx)
 	ld->recover = NULL;
 	list_head_init(&ld->connects);
 	list_head_init(&ld->waitsendpay_commands);
-	list_head_init(&ld->sendpay_commands);
 	list_head_init(&ld->close_commands);
 	list_head_init(&ld->ping_commands);
 	list_head_init(&ld->disconnect_commands);
@@ -238,6 +237,7 @@ static struct lightningd *new_lightningd(const tal_t *ctx)
 	ld->autolisten = true;
 	ld->reconnect = true;
 	ld->try_reexec = false;
+	ld->recover_secret = NULL;
 	ld->db_upgrade_ok = NULL;
 
 	/* --experimental-upgrade-protocol */
@@ -371,13 +371,11 @@ static void destroy_alt_subdaemons(struct lightningd *ld)
 	strmap_clear(&ld->alt_subdaemons);
 }
 
-#if DEVELOPER
 static void memleak_help_alt_subdaemons(struct htable *memtable,
 					struct lightningd *ld)
 {
 	memleak_scan_strmap(memtable, &ld->alt_subdaemons);
 }
-#endif /* DEVELOPER */
 
 const char *subdaemon_path(const tal_t *ctx, const struct lightningd *ld, const char *name)
 {
@@ -873,6 +871,7 @@ static struct feature_set *default_features(const tal_t *ctx)
 		COMPULSORY_FEATURE(OPT_VAR_ONION),
 		COMPULSORY_FEATURE(OPT_PAYMENT_SECRET),
 		OPTIONAL_FEATURE(OPT_BASIC_MPP),
+		OPTIONAL_FEATURE(OPT_LARGE_CHANNELS),
 		OPTIONAL_FEATURE(OPT_GOSSIP_QUERIES_EX),
 		OPTIONAL_FEATURE(OPT_STATIC_REMOTEKEY),
 		OPTIONAL_FEATURE(OPT_SHUTDOWN_ANYSEGWIT),
@@ -1038,6 +1037,7 @@ int main(int argc, char *argv[])
 	 * variables. */
 	ld = new_lightningd(NULL);
 	ld->state = LD_STATE_INITIALIZING;
+	log_info(ld->log, "%s", version());
 
 	/*~ We store an copy of our arguments before parsing mangles them, so
 	 * we can re-exec if versions of subdaemons change.  Note the use of
@@ -1094,12 +1094,11 @@ int main(int argc, char *argv[])
 	pidfile_create(ld);
 
 	/*~ Make sure we can reach the subdaemons, and versions match.
-	 * This can be turned off in DEVELOPER builds with --dev-skip-version-checks,
-	 * but the `dev_no_version_checks` field of `ld` doesn't even exist
-	 * if DEVELOPER isn't defined, so we use IFDEV(devoption,non-devoption):
-	 */
+	 * This can be turned off with --dev-skip-version-checks,
+	 * which can only be set after --developer.
+ 	 */
 	trace_span_start("test_subdaemons", ld);
-	if (IFDEV(!ld->dev_no_version_checks, 1))
+	if (!ld->dev_no_version_checks)
 		test_subdaemons(ld);
 	trace_span_end(ld);
 
@@ -1380,8 +1379,15 @@ stop:
 
 	/* Gather these before we free ld! */
 	try_reexec = ld->try_reexec;
-	if (try_reexec)
+	if (try_reexec) {
+		/* Maybe we reexec with --recover, due to recover command */
+		if (ld->recover_secret) {
+			tal_arr_insert(&orig_argv, argc,
+				       tal_fmt(orig_argv, "--recover=%s",
+					       ld->recover_secret));
+		}
 		tal_steal(NULL, orig_argv);
+	}
 
 	/* Free this last: other things may clean up timers. */
 	timers = tal_steal(NULL, ld->timers);
@@ -1408,7 +1414,7 @@ stop:
 		/* Close all filedescriptors except stdin/stdout/stderr */
 		closefrom(STDERR_FILENO + 1);
 		execv(orig_argv[0], orig_argv);
-		err(1, "Failed to re-exec ourselves after version change");
+		err(1, "Failed to re-exec ourselves after version change/recover");
 	}
 
 	/*~ Farewell.  Next stop: hsmd/hsmd.c. */

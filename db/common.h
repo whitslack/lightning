@@ -61,6 +61,12 @@ struct db {
 	u32 data_version;
 
 	void (*report_changes_fn)(struct db *);
+
+	/* Set by --developer */
+	bool developer;
+
+	/* Fatal if we try to write to db */
+	bool readonly;
 };
 
 struct db_query {
@@ -128,10 +134,9 @@ struct db_stmt {
 
 	int row;
 
-#if DEVELOPER
-	/* Map as we reference into a SELECT statement in query. */
+	/* --developer: map as we reference into a SELECT statement
+	 * in query. */
 	struct strset *cols_used;
-#endif
 };
 
 struct db_query_set {

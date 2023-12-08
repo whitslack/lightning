@@ -19,7 +19,7 @@ jobs:
         run: |
           export PATH="/usr/local/opt:/Users/runner/.local/bin:/Users/runner/Library/Python/3.10/bin:$PATH"
 
-          export BITCOIN_VERSION=25.0
+          export BITCOIN_VERSION=25.1
           brew install wget autoconf automake libtool python@3.10 gnu-sed gettext libsodium
 
           (
@@ -57,5 +57,5 @@ jobs:
               slow_test: marks tests as slow (deselect with '-m "not slow_test"')
           EOF
 
-          python3.10 -m poetry run ./configure --enable-developer --disable-valgrind --disable-compat
+          python3.10 -m poetry run ./configure --disable-valgrind --disable-compat
           python3.10 -m poetry run make

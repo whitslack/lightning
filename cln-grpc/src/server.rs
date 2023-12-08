@@ -410,6 +410,38 @@ async fn datastore(
 
 }
 
+async fn datastore_usage(
+    &self,
+    request: tonic::Request<pb::DatastoreusageRequest>,
+) -> Result<tonic::Response<pb::DatastoreusageResponse>, tonic::Status> {
+    let req = request.into_inner();
+    let req: requests::DatastoreusageRequest = req.into();
+    debug!("Client asked for datastore_usage");
+    trace!("datastore_usage request: {:?}", req);
+    let mut rpc = ClnRpc::new(&self.rpc_path)
+        .await
+        .map_err(|e| Status::new(Code::Internal, e.to_string()))?;
+    let result = rpc.call(Request::DatastoreUsage(req))
+        .await
+        .map_err(|e| Status::new(
+           Code::Unknown,
+           format!("Error calling method DatastoreUsage: {:?}", e)))?;
+    match result {
+        Response::DatastoreUsage(r) => {
+           trace!("datastore_usage response: {:?}", r);
+           Ok(tonic::Response::new(r.into()))
+        },
+        r => Err(Status::new(
+            Code::Internal,
+            format!(
+                "Unexpected result {:?} to method call DatastoreUsage",
+                r
+            )
+        )),
+    }
+
+}
+
 async fn create_onion(
     &self,
     request: tonic::Request<pb::CreateonionRequest>,
@@ -1402,6 +1434,38 @@ async fn feerates(
 
 }
 
+async fn fetch_invoice(
+    &self,
+    request: tonic::Request<pb::FetchinvoiceRequest>,
+) -> Result<tonic::Response<pb::FetchinvoiceResponse>, tonic::Status> {
+    let req = request.into_inner();
+    let req: requests::FetchinvoiceRequest = req.into();
+    debug!("Client asked for fetch_invoice");
+    trace!("fetch_invoice request: {:?}", req);
+    let mut rpc = ClnRpc::new(&self.rpc_path)
+        .await
+        .map_err(|e| Status::new(Code::Internal, e.to_string()))?;
+    let result = rpc.call(Request::FetchInvoice(req))
+        .await
+        .map_err(|e| Status::new(
+           Code::Unknown,
+           format!("Error calling method FetchInvoice: {:?}", e)))?;
+    match result {
+        Response::FetchInvoice(r) => {
+           trace!("fetch_invoice response: {:?}", r);
+           Ok(tonic::Response::new(r.into()))
+        },
+        r => Err(Status::new(
+            Code::Internal,
+            format!(
+                "Unexpected result {:?} to method call FetchInvoice",
+                r
+            )
+        )),
+    }
+
+}
+
 async fn fund_channel(
     &self,
     request: tonic::Request<pb::FundchannelRequest>,
@@ -1715,6 +1779,38 @@ async fn sign_message(
             Code::Internal,
             format!(
                 "Unexpected result {:?} to method call SignMessage",
+                r
+            )
+        )),
+    }
+
+}
+
+async fn wait_block_height(
+    &self,
+    request: tonic::Request<pb::WaitblockheightRequest>,
+) -> Result<tonic::Response<pb::WaitblockheightResponse>, tonic::Status> {
+    let req = request.into_inner();
+    let req: requests::WaitblockheightRequest = req.into();
+    debug!("Client asked for wait_block_height");
+    trace!("wait_block_height request: {:?}", req);
+    let mut rpc = ClnRpc::new(&self.rpc_path)
+        .await
+        .map_err(|e| Status::new(Code::Internal, e.to_string()))?;
+    let result = rpc.call(Request::WaitBlockHeight(req))
+        .await
+        .map_err(|e| Status::new(
+           Code::Unknown,
+           format!("Error calling method WaitBlockHeight: {:?}", e)))?;
+    match result {
+        Response::WaitBlockHeight(r) => {
+           trace!("wait_block_height response: {:?}", r);
+           Ok(tonic::Response::new(r.into()))
+        },
+        r => Err(Status::new(
+            Code::Internal,
+            format!(
+                "Unexpected result {:?} to method call WaitBlockHeight",
                 r
             )
         )),

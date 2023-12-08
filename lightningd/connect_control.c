@@ -188,11 +188,11 @@ static struct command_result *json_connect(struct command *cmd,
 
 	id_addr.host = NULL;
 	id_addr.port = NULL;
-	if (!param(cmd, buffer, params,
-		   p_req("id", param_id_maybe_addr, &id_addr),
-		   p_opt("host", param_id_addr_string, &id_addr.host),
-		   p_opt("port", param_id_addr_u16, &id_addr.port),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("id", param_id_maybe_addr, &id_addr),
+			 p_opt("host", param_id_addr_string, &id_addr.host),
+			 p_opt("port", param_id_addr_u16, &id_addr.port),
+			 NULL))
 		return command_param_failed();
 
 	/* If we have a host, convert */
@@ -228,6 +228,9 @@ static struct command_result *json_connect(struct command *cmd,
 			return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
 					    "Can't specify port without host");
 	}
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
 
 	/* If we know about peer, see if it's already connected. */
 	peer = peer_by_id(cmd->ld, &id_addr.id);
@@ -355,7 +358,7 @@ static void try_connect(const tal_t *ctx,
 	if (peer) {
 		struct channel *channel;
 		list_for_each(&peer->channels, channel, list) {
-			if (!channel_active(channel))
+			if (!channel_state_wants_peercomms(channel->state))
 				continue;
 			channel_set_billboard(channel, false,
 					      tal_fmt(tmpctx,
@@ -390,8 +393,7 @@ void try_reconnect(const tal_t *ctx,
 	/* Did we last attempt to connect recently?  Enter backoff mode. */
 	if (time_less(time_between(time_now(), peer->last_connect_attempt),
 		      time_from_sec(MAX_WAIT_SECONDS * 2))) {
-		u32 max = DEV_FAST_RECONNECT(peer->ld->dev_fast_reconnect,
-					     3, MAX_WAIT_SECONDS);
+		u32 max = peer->ld->dev_fast_reconnect ? 3 : MAX_WAIT_SECONDS;
 		peer->reconnect_delay *= 2;
 		if (peer->reconnect_delay > max)
 			peer->reconnect_delay = max;
@@ -426,7 +428,7 @@ static void connect_failed(struct lightningd *ld,
 
 	/* If we have an active channel, then reconnect. */
 	peer = peer_by_id(ld, id);
-	if (peer && peer_any_active_channel(peer, NULL)) {
+	if (peer && peer_any_channel(peer, channel_state_wants_peercomms, NULL)) {
 		try_reconnect(peer, peer, addrhint);
 	} else
 		log_peer_debug(ld->log, id, "Not reconnecting: %s",
@@ -580,6 +582,7 @@ static unsigned connectd_msg(struct subd *connectd, const u8 *msg, const int *fd
 	case WIRE_CONNECTD_SEND_ONIONMSG:
 	case WIRE_CONNECTD_CUSTOMMSG_OUT:
 	case WIRE_CONNECTD_START_SHUTDOWN:
+	case WIRE_CONNECTD_SET_CUSTOMMSGS:
 	/* This is a reply, so never gets through to here. */
 	case WIRE_CONNECTD_INIT_REPLY:
 	case WIRE_CONNECTD_ACTIVATE_REPLY:
@@ -613,6 +616,37 @@ static unsigned connectd_msg(struct subd *connectd, const u8 *msg, const int *fd
 		break;
 	}
 	return 0;
+}
+
+void force_peer_disconnect(struct lightningd *ld,
+			   const struct peer *peer,
+			   const char *why)
+{
+	struct channel *c, *next;
+
+	/* Don't bother on shutting down */
+	if (!ld->connectd)
+		return;
+
+	/* Disconnect subds */
+	if (peer->uncommitted_channel)
+		kill_uncommitted_channel(peer->uncommitted_channel, why);
+
+	list_for_each_safe(&peer->channels, c, next, list) {
+		if (!c->owner)
+			continue;
+
+		log_debug(c->log, "Forcing disconnect due to %s", why);
+		/* This frees c! */
+		if (channel_state_uncommitted(c->state))
+			channel_unsaved_close_conn(c, why);
+		else
+			channel_set_owner(c, NULL);
+	}
+
+	subd_send_msg(peer->ld->connectd,
+		      take(towire_connectd_discard_peer(NULL, &peer->id,
+							peer->connectd_counter)));
 }
 
 static void connect_init_done(struct subd *connectd,
@@ -666,11 +700,9 @@ int connectd_init(struct lightningd *ld)
 	ld->connectd = new_global_subd(ld, "lightning_connectd",
 				       connectd_wire_name, connectd_msg,
 				       take(&hsmfd), take(&fds[1]),
-#if DEVELOPER
 				       /* Not take(): we share it */
 				       ld->dev_disconnect_fd >= 0 ?
 				       &ld->dev_disconnect_fd : NULL,
-#endif
 				       NULL);
 	if (!ld->connectd)
 		err(1, "Could not subdaemon connectd");
@@ -694,15 +726,15 @@ int connectd_init(struct lightningd *ld)
 	    wireaddrs,
 	    listen_announce,
 	    ld->proxyaddr, ld->always_use_proxy || ld->pure_tor_setup,
-	    IFDEV(ld->dev_allow_localhost, false), ld->config.use_dns,
+	    ld->dev_allow_localhost, ld->config.use_dns,
 	    ld->tor_service_password ? ld->tor_service_password : "",
 	    ld->config.connection_timeout_secs,
 	    websocket_helper_path,
 	    ld->websocket_port,
 	    !ld->deprecated_apis,
-	    IFDEV(ld->dev_fast_gossip, false),
-	    IFDEV(ld->dev_disconnect_fd >= 0, false),
-	    IFDEV(ld->dev_no_ping_timer, false));
+	    ld->dev_fast_gossip,
+	    ld->dev_disconnect_fd >= 0,
+	    ld->dev_no_ping_timer);
 
 	subd_req(ld->connectd, ld->connectd, take(msg), -1, 0,
 		 connect_init_done, NULL);
@@ -762,10 +794,10 @@ static struct command_result *json_sendcustommsg(struct command *cmd,
 	u8 *msg;
 	int type;
 
-	if (!param(cmd, buffer, params,
-		   p_req("node_id", param_node_id, &dest),
-		   p_req("msg", param_bin_from_hex, &msg),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("node_id", param_node_id, &dest),
+			 p_req("msg", param_bin_from_hex, &msg),
+			 NULL))
 		return command_param_failed();
 
 	type = fromwire_peektype(msg);
@@ -782,13 +814,12 @@ static struct command_result *json_sendcustommsg(struct command *cmd,
 	}
 
 	if (type % 2 == 0) {
-		return command_fail(
-		    cmd, JSONRPC2_INVALID_REQUEST,
-		    "Cannot send even-typed %d custom message. Currently "
-		    "custom messages are limited to odd-numbered message "
-		    "types, as even-numbered types might result in "
-		    "disconnections.",
-		    type);
+		/* INFO the first time, then DEBUG */
+		static enum log_level level = LOG_INFORM;
+		log_(cmd->ld->log, level, dest, false,
+		     "sendcustommsg id=%s sending a custom even message (%u)",
+		     cmd->id, type);
+		level = LOG_DBG;
 	}
 
 	peer = peer_by_id(cmd->ld, dest);
@@ -803,6 +834,9 @@ static struct command_result *json_sendcustommsg(struct command *cmd,
 	if (peer->connected == PEER_DISCONNECTED)
 		return command_fail(cmd, JSONRPC2_INVALID_REQUEST,
 				    "Peer is not connected");
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
 
 	subd_send_msg(cmd->ld->connectd,
 		      take(towire_connectd_custommsg_out(cmd, dest, msg)));
@@ -824,21 +858,6 @@ static const struct json_command sendcustommsg_command = {
 
 AUTODATA(json_command, &sendcustommsg_command);
 
-#ifdef COMPAT_V0100
-#ifdef DEVELOPER
-static const struct json_command dev_sendcustommsg_command = {
-    "dev-sendcustommsg",
-    "utility",
-    json_sendcustommsg,
-    "Send a custom message to the peer with the given {node_id}",
-    .verbose = "dev-sendcustommsg node_id hexcustommsg",
-};
-
-AUTODATA(json_command, &dev_sendcustommsg_command);
-#endif  /* DEVELOPER */
-#endif /* COMPAT_V0100 */
-
-#if DEVELOPER
 static struct command_result *json_dev_suppress_gossip(struct command *cmd,
 						       const char *buffer,
 						       const jsmntok_t *obj UNNEEDED,
@@ -857,7 +876,8 @@ static const struct json_command dev_suppress_gossip = {
 	"dev-suppress-gossip",
 	"developer",
 	json_dev_suppress_gossip,
-	"Stop this node from sending any more gossip."
+	"Stop this node from sending any more gossip.",
+	.dev_only = true,
 };
 AUTODATA(json_command, &dev_suppress_gossip);
 
@@ -879,7 +899,7 @@ static const struct json_command dev_report_fds = {
 	"dev-report-fds",
 	"developer",
 	json_dev_report_fds,
-	"Ask connectd to report status of all its open files."
+	"Ask connectd to report status of all its open files.",
+	.dev_only = true,
 };
 AUTODATA(json_command, &dev_report_fds);
-#endif /* DEVELOPER */

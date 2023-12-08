@@ -58,6 +58,9 @@ struct subd {
 
 	/* Output buffer */
 	struct msg_queue *outq;
+
+	/* After we've told it to tx_abort, we don't send anything else. */
+	bool rcvd_tx_abort;
 };
 
 static struct subd *find_subd(struct peer *peer,
@@ -65,6 +68,10 @@ static struct subd *find_subd(struct peer *peer,
 {
 	for (size_t i = 0; i < tal_count(peer->subds); i++) {
 		struct subd *subd = peer->subds[i];
+
+		/* Once we sent it tx_abort, we pretend it doesn't exist */
+		if (subd->rcvd_tx_abort)
+			continue;
 
 		/* Once we see a message using the real channel_id, we
 		 * clear the temporary_channel_id */
@@ -108,7 +115,7 @@ static void close_subd_timeout(struct subd *subd)
 	io_close(subd->conn);
 }
 
-static void drain_peer(struct peer *peer)
+void drain_peer(struct peer *peer)
 {
 	status_debug("drain_peer");
 	assert(!peer->draining);
@@ -273,7 +280,7 @@ void setup_peer_gossip_store(struct peer *peer,
 	}
 
 	peer->gs.gossip_timer = gossip_stream_timer(peer);
-	peer->gs.active = IFDEV(!peer->daemon->dev_suppress_gossip, true);
+	peer->gs.active = !peer->daemon->dev_suppress_gossip;
 	peer->gs.timestamp_min = 0;
 	peer->gs.timestamp_max = UINT32_MAX;
 
@@ -338,7 +345,7 @@ static void set_urgent_flag(struct peer *peer, bool urgent)
 	if (setsockopt(io_conn_fd(peer->to_peer),
 		       IPPROTO_TCP, opt, &val, sizeof(val)) != 0
 	    /* This actually happens in testing, where we blackhole the fd */
-	    && IFDEV(peer->daemon->dev_disconnect_fd == -1, true)) {
+	    && peer->daemon->dev_disconnect_fd == -1) {
 		status_broken("setsockopt %s=1 fd=%u: %s",
 			      optname, io_conn_fd(peer->to_peer),
 			      strerror(errno));
@@ -418,7 +425,6 @@ static struct io_plan *encrypt_and_send(struct peer *peer,
 {
 	int type = fromwire_peektype(msg);
 
-#if DEVELOPER
 	switch (dev_disconnect(&peer->id, type)) {
 	case DEV_DISCONNECT_BEFORE:
 		if (taken(msg))
@@ -427,7 +433,8 @@ static struct io_plan *encrypt_and_send(struct peer *peer,
 	case DEV_DISCONNECT_AFTER:
 		/* Disallow reads from now on */
 		peer->dev_read_enabled = false;
-		next = (void *)io_close_cb;
+		/* Using io_close here can lose the data we're about to send! */
+		next = io_sock_shutdown_cb;
 		break;
 	case DEV_DISCONNECT_BLACKHOLE:
 		/* Disable both reads and writes from now on */
@@ -436,29 +443,22 @@ static struct io_plan *encrypt_and_send(struct peer *peer,
 		break;
 	case DEV_DISCONNECT_NORMAL:
 		break;
+	case DEV_DISCONNECT_DROP:
+		/* Drop this message and continue */
+		if (taken(msg))
+			tal_free(msg);
+		/* Tell them to read again, */
+		io_wake(&peer->subds);
+		return msg_queue_wait(peer->to_peer, peer->peer_outq,
+				      next, peer);
 	case DEV_DISCONNECT_DISABLE_AFTER:
 		peer->dev_read_enabled = false;
 		peer->dev_writes_enabled = tal(peer, u32);
 		*peer->dev_writes_enabled = 1;
 		break;
 	}
-#endif
+
 	set_urgent_flag(peer, is_urgent(type));
-
-	/* BOLT #1:
-	 *
-	 * A sending node:
-	 *...
-	 *  - MAY close the connection after sending.
-	 */
-	if (type == WIRE_ERROR || type == WIRE_WARNING) {
-		/* Might already be draining... */
-		if (!peer->draining)
-			drain_peer(peer);
-
-		/* Close as soon as we've sent this. */
-		next = io_sock_shutdown_cb;
-	}
 
 	/* We free this and the encrypted version in next write_to_peer */
 	peer->sent_to_peer = cryptomsg_encrypt_msg(peer, &peer->cs, msg);
@@ -472,8 +472,6 @@ static struct io_plan *encrypt_and_send(struct peer *peer,
 static void wake_gossip(struct peer *peer)
 {
 	bool flush_gossip_filter = true;
-
-#if DEVELOPER
 	/* With dev-fast-gossip, we clean every 2 seconds, which is too
 	 * fast for our slow tests!  So we only call this one time in 5
 	 * actually twice that, as it's not per-peer! */
@@ -481,13 +479,12 @@ static void wake_gossip(struct peer *peer)
 
 	if (peer->daemon->dev_fast_gossip && gossip_age_count++ % 5 != 0)
 		flush_gossip_filter = false;
-#endif
 
 	/* Don't remember sent per-peer gossip forever. */
 	if (flush_gossip_filter)
 		gossip_rcvd_filter_age(peer->gs.grf);
 
-	peer->gs.active = IFDEV(!peer->daemon->dev_suppress_gossip, true);
+	peer->gs.active = !peer->daemon->dev_suppress_gossip;
 	io_wake(peer->peer_outq);
 
 	/* And go again in 60 seconds (from now, now when we finish!) */
@@ -500,7 +497,7 @@ static u8 *maybe_from_gossip_store(const tal_t *ctx, struct peer *peer)
 	u8 *msg;
 
 	/* dev-mode can suppress all gossip */
-	if (IFDEV(peer->daemon->dev_suppress_gossip, false))
+	if (peer->daemon->dev_suppress_gossip)
 		return NULL;
 
 	/* Not streaming right now? */
@@ -536,7 +533,7 @@ static void send_ping(struct peer *peer);
 
 static void set_ping_timer(struct peer *peer)
 {
-	if (IFDEV(peer->daemon->dev_no_ping_timer, false)) {
+	if (peer->daemon->dev_no_ping_timer) {
 		peer->ping_timer = NULL;
 		return;
 	}
@@ -565,6 +562,15 @@ static void send_ping(struct peer *peer)
 	}
 
 	set_ping_timer(peer);
+}
+
+void set_custommsgs(struct daemon *daemon, const u8 *msg)
+{
+	tal_free(daemon->custom_msgs);
+	if (!fromwire_connectd_set_custommsgs(daemon, msg, &daemon->custom_msgs))
+		master_badmsg(WIRE_CONNECTD_SET_CUSTOMMSGS, msg);
+	status_debug("Now allowing %zu custom message types",
+		     tal_count(daemon->custom_msgs));
 }
 
 void send_custommsg(struct daemon *daemon, const u8 *msg)
@@ -709,24 +715,44 @@ static void handle_gossip_timestamp_filter_in(struct peer *peer, const u8 *msg)
 		wake_gossip(peer);
 }
 
+static bool find_custom_msg(const u16 *custom_msgs, u16 type)
+{
+	for (size_t i = 0; i < tal_count(custom_msgs); i++) {
+		if (custom_msgs[i] == type)
+			return true;
+	}
+	return false;
+}
+
 static bool handle_custommsg(struct daemon *daemon,
 			     struct peer *peer,
 			     const u8 *msg)
 {
 	enum peer_wire type = fromwire_peektype(msg);
-	if (type % 2 == 1 && !peer_wire_is_internal(type)) {
-		/* The message is not part of the messages we know how to
-		 * handle. Assuming this is a custommsg, we just forward it to the
-		 * master. */
-		status_peer_io(LOG_IO_IN, &peer->id, msg);
-		daemon_conn_send(daemon->master,
-				 take(towire_connectd_custommsg_in(NULL,
-								   &peer->id,
-								   msg)));
-		return true;
-	} else {
+
+	/* Messages we expect to handle ourselves. */
+	if (peer_wire_is_internal(type))
 		return false;
+
+	/* We log it, since it's not going to a subdaemon */
+	status_peer_io(LOG_IO_IN, &peer->id, msg);
+
+	/* Even unknown messages must be explicitly allowed */
+	if (type % 2 == 0 && !find_custom_msg(daemon->custom_msgs, type)) {
+		send_warning(peer, "Invalid unknown even msg %s",
+			     tal_hex(msg, msg));
+		/* We "handled" it... */
+		return true;
 	}
+
+	/* The message is not part of the messages we know how to
+	 * handle. Assuming this is a custommsg, we just forward it to the
+	 * master. */
+	daemon_conn_send(daemon->master,
+			 take(towire_connectd_custommsg_in(NULL,
+							   &peer->id,
+							   msg)));
+	return true;
 }
 
 /* We handle pings and gossip messages. */
@@ -964,7 +990,6 @@ static struct io_plan *write_to_peer(struct io_conn *peer_conn,
 	}
 
 	/* dev_disconnect can disable writes */
-#if DEVELOPER
 	if (peer->dev_writes_enabled) {
 		if (*peer->dev_writes_enabled == 0) {
 			tal_free(msg);
@@ -973,7 +998,6 @@ static struct io_plan *write_to_peer(struct io_conn *peer_conn,
 		}
 		(*peer->dev_writes_enabled)--;
 	}
-#endif
 
 	return encrypt_and_send(peer, take(msg), write_to_peer);
 }
@@ -1057,6 +1081,7 @@ static struct subd *new_subd(struct peer *peer,
 	subd->temporary_channel_id = NULL;
 	subd->opener_revocation_basepoint = NULL;
 	subd->conn = NULL;
+	subd->rcvd_tx_abort = false;
 
 	/* Connect it to the peer */
 	tal_arr_expand(&peer->subds, subd);
@@ -1073,6 +1098,8 @@ static struct io_plan *read_body_from_peer_done(struct io_conn *peer_conn,
        u8 *decrypted;
        struct channel_id channel_id;
        struct subd *subd;
+       enum peer_wire type;
+
 
        decrypted = cryptomsg_decrypt_body(tmpctx, &peer->cs,
 					  peer->peer_in);
@@ -1083,8 +1110,10 @@ static struct io_plan *read_body_from_peer_done(struct io_conn *peer_conn,
        }
        tal_free(peer->peer_in);
 
+       type = fromwire_peektype(decrypted);
+
        /* dev_disconnect can disable read */
-       if (!IFDEV(peer->dev_read_enabled, true))
+       if (!peer->dev_read_enabled)
 	       return read_hdr_from_peer(peer_conn, peer);
 
        /* We got something! */
@@ -1100,18 +1129,18 @@ static struct io_plan *read_body_from_peer_done(struct io_conn *peer_conn,
 
        /* After this we should be able to match to subd by channel_id */
        if (!extract_channel_id(decrypted, &channel_id)) {
-	       enum peer_wire type = fromwire_peektype(decrypted);
-
 	       /* We won't log this anywhere else, so do it here. */
 	       status_peer_io(LOG_IO_IN, &peer->id, decrypted);
 
 	       /* Could be a all-channel error or warning?  Log it
-		* more verbose, and hang up. */
+		* more verbose: hang up on error. */
 	       if (type == WIRE_ERROR || type == WIRE_WARNING) {
 		       char *desc = sanitize_error(tmpctx, decrypted, NULL);
 		       status_peer_info(&peer->id,
 					"Received %s: %s",
 					peer_wire_name(type), desc);
+		       if (type == WIRE_WARNING)
+			       return read_hdr_from_peer(peer_conn, peer);
 		       return io_close(peer_conn);
 	       }
 
@@ -1142,7 +1171,8 @@ static struct io_plan *read_body_from_peer_done(struct io_conn *peer_conn,
 				take(towire_connectd_peer_spoke(NULL, &peer->id,
 								peer->counter,
 								t,
-								&channel_id)));
+								&channel_id,
+								is_peer_error(tmpctx, decrypted))));
        }
 
        /* Even if we just created it, call this to catch open_channel2 */
@@ -1150,6 +1180,15 @@ static struct io_plan *read_body_from_peer_done(struct io_conn *peer_conn,
 
        /* Tell them to write. */
        msg_enqueue(subd->outq, take(decrypted));
+
+       /* Is this a tx_abort?  Ignore from now on, and close after sending! */
+       if (type == WIRE_TX_ABORT) {
+	       subd->rcvd_tx_abort = true;
+	       /* In case it doesn't close by itself */
+	       notleak(new_reltimer(&peer->daemon->timers, subd,
+				    time_from_sec(5),
+				    close_subd_timeout, subd));
+       }
 
        /* Wait for them to wake us */
        return io_wait(peer_conn, &peer->peer_in, read_hdr_from_peer, peer);

@@ -44,6 +44,7 @@ On success, an object is returned, containing:
 [comment]: # (GENERATE-FROM-SCHEMA-END)
 
 The following error codes may occur:
+
 - 1202: The key already exists (and mode said it must not)
 - 1203: The key does not exist (and mode said it must)
 - 1204: The generation was wrong (and generation was specified)
@@ -59,7 +60,7 @@ Rusty Russell <<rusty@rustcorp.com.au>> is mainly responsible.
 SEE ALSO
 --------
 
-lightning-listdatastore(7), lightning-deldatastore(7)
+lightning-listdatastore(7), lightning-deldatastore(7), lightning-datastoreusage(7)
 
 RESOURCES
 ---------

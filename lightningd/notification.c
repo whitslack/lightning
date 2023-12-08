@@ -1,4 +1,5 @@
 #include "config.h"
+#include <bitcoin/preimage.h>
 #include <common/configdir.h>
 #include <common/type_to_string.h>
 #include <lightningd/channel.h>
@@ -136,8 +137,8 @@ static void warning_notification_serialize(struct json_stream *stream,
 			: "warn");
 	/* unsuaul/broken event is rare, plugin pay more attentions on
 	 * the absolute time, like when channels failed. */
-	json_add_time(stream, "time", l->time.ts);
-	json_add_timeiso(stream, "timestamp", &l->time);
+	json_add_timestr(stream, "time", l->time.ts);
+	json_add_timeiso(stream, "timestamp", l->time);
 	json_add_string(stream, "source", l->prefix->prefix);
 	json_add_string(stream, "log", l->log);
 	json_object_end(stream); /* .warning */
@@ -164,8 +165,7 @@ static void invoice_payment_notification_serialize(struct json_stream *stream,
 						   const struct json_escape *label)
 {
 	json_object_start(stream, "invoice_payment");
-	json_add_string(stream, "msat",
-			type_to_string(tmpctx, struct amount_msat, &amount));
+	json_add_amount_msat(stream, "msat", amount);
 	json_add_hex(stream, "preimage", &preimage, sizeof(preimage));
 	json_add_escaped_string(stream, "label", label);
 	json_object_end(stream);
@@ -196,9 +196,7 @@ static void invoice_creation_notification_serialize(struct json_stream *stream,
 {
 	json_object_start(stream, "invoice_creation");
 	if (amount != NULL)
-		json_add_string(
-		    stream, "msat",
-		    type_to_string(tmpctx, struct amount_msat, amount));
+		json_add_amount_msat(stream, "msat", *amount);
 
 	json_add_hex(stream, "preimage", &preimage, sizeof(preimage));
 	json_add_escaped_string(stream, "label", label);
@@ -264,14 +262,14 @@ void notify_channel_opened(struct lightningd *ld, struct node_id *node_id,
 }
 
 static void channel_state_changed_notification_serialize(struct json_stream *stream,
-							 struct node_id *peer_id,
-							 struct channel_id *cid,
-							 struct short_channel_id *scid,
-							 struct timeabs *timestamp,
+							 const struct node_id *peer_id,
+							 const struct channel_id *cid,
+							 const struct short_channel_id *scid,
+							 struct timeabs timestamp,
 							 enum channel_state old_state,
 							 enum channel_state new_state,
 							 enum state_change cause,
-							 char *message)
+							 const char *message)
 {
 	json_object_start(stream, "channel_state_changed");
 	json_add_node_id(stream, "peer_id", peer_id);
@@ -296,24 +294,24 @@ REGISTER_NOTIFICATION(channel_state_changed,
 		      channel_state_changed_notification_serialize)
 
 void notify_channel_state_changed(struct lightningd *ld,
-				  struct node_id *peer_id,
-				  struct channel_id *cid,
-				  struct short_channel_id *scid,
-				  struct timeabs *timestamp,
+				  const struct node_id *peer_id,
+				  const struct channel_id *cid,
+				  const struct short_channel_id *scid,
+				  struct timeabs timestamp,
 				  enum channel_state old_state,
 				  enum channel_state new_state,
 				  enum state_change cause,
-				  char *message)
+				  const char *message)
 {
 	void (*serialize)(struct json_stream *,
-			  struct node_id *,
-			  struct channel_id *,
-			  struct short_channel_id *,
-			  struct timeabs *timestamp,
+			  const struct node_id *,
+			  const struct channel_id *,
+			  const struct short_channel_id *,
+			  struct timeabs timestamp,
 			  enum channel_state,
 			  enum channel_state,
 			  enum state_change,
-			  char *message) = channel_state_changed_notification_gen.serialize;
+			  const char *message) = channel_state_changed_notification_gen.serialize;
 
 	struct jsonrpc_notification *n
 		= jsonrpc_notification_start(NULL, channel_state_changed_notification_gen.topic);

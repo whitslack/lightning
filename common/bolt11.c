@@ -12,24 +12,8 @@
 #include <inttypes.h>
 #include <lightningd/lightningd.h>
 
-#if DEVELOPER
-bool dev_bolt11_no_c_generation;
-
-/* For test vectors, older ones put p before s. */
-static bool modern_order(const struct bolt11 *b11)
-{
-	if (!b11->description)
-		return true;
-	if (streq(b11->description,
-		  "Blockstream Store: 88.85 USD for Blockstream Ledger Nano S x 1, \"Back In My Day\" Sticker x 2, \"I Got Lightning Working\" Sticker x 2 and 1 more items"))
-		return false;
-	if (streq(b11->description, "coffee beans"))
-		return false;
-	if (streq(b11->description, "payment metadata inside"))
-		return false;
-	return true;
-}
-#endif
+bool dev_bolt11_old_order;
+bool dev_bolt11_omit_c_value;
 
 struct multiplier {
 	const char letter;
@@ -92,7 +76,11 @@ static const char *pull_uint(struct hash_u5 *hu5,
 	err = pull_bits(hu5, data, data_len, &be_val, databits, true);
 	if (err)
 		return err;
-	*val = be64_to_cpu(be_val) >> (sizeof(be_val) * CHAR_BIT - databits);
+	if (databits == 0)
+		*val = 0;
+	else
+		*val = be64_to_cpu(be_val) >>
+		       (sizeof(be_val) * CHAR_BIT - databits);
 	return NULL;
 }
 
@@ -318,14 +306,27 @@ static const char *decode_n(struct bolt11 *b11,
 			    const u5 **data, size_t *field_len,
 			    bool *have_n)
 {
+	const char *err;
+
 	assert(!*have_n);
 	/* BOLT #11:
 	 *
 	 * A reader... MUST skip over unknown fields, OR an `f` field
 	 * with unknown `version`, OR `p`, `h`, `s` or `n` fields that do
 	 * NOT have `data_length`s of 52, 52, 52 or 53, respectively. */
-	return pull_expected_length(b11, hu5, data, field_len, 53, 'n',
-				    have_n, &b11->receiver_id.k);
+	err = pull_expected_length(b11, hu5, data, field_len, 53, 'n', have_n,
+				   &b11->receiver_id.k);
+
+	/* If that gave us a node ID, check it. */
+	if (*have_n) {
+		struct pubkey k;
+		if (!pubkey_from_node_id(&k, &b11->receiver_id))
+			return tal_fmt(
+			    b11, "invalid public key %s",
+			    node_id_to_hexstr(tmpctx, &b11->receiver_id));
+	}
+
+	return err;
 }
 
 /* BOLT #11:
@@ -406,6 +407,8 @@ static const char *decode_f(struct bolt11 *b11,
 		fallback = scriptpubkey_p2sh_hash(b11, shash);
 	} else if (version < 17) {
 		u8 *f = pull_all(tmpctx, hu5, data, field_len, false, &err);
+		if (!f)
+			return err;
 		if (version == 0) {
 			if (tal_count(f) != 20 && tal_count(f) != 32)
 				return tal_fmt(b11,
@@ -731,7 +734,6 @@ struct bolt11 *bolt11_decode_nosig(const tal_t *ctx, const char *str,
 	memset(have_field, 0, sizeof(have_field));
 	b11->routes = tal_arr(b11, struct route_info *, 0);
 
-	assert(!has_lightning_prefix(str));
 	if (strlen(str) < 8)
 		return decode_fail(b11, fail, "Bad bech32 string");
 
@@ -934,6 +936,8 @@ struct bolt11 *bolt11_decode_nosig(const tal_t *ctx, const char *str,
 	return b11;
 }
 
+static bool valid_recovery_id(u8 recid) { return recid <= 3; }
+
 /* Decodes and checks signature; returns NULL on error. */
 struct bolt11 *bolt11_decode(const tal_t *ctx, const char *str,
 			     const struct feature_set *our_features,
@@ -973,6 +977,10 @@ struct bolt11 *bolt11_decode(const tal_t *ctx, const char *str,
 				   err);
 
 	assert(data_len == 0);
+
+	if (!valid_recovery_id(sig_and_recid[64]))
+		return decode_fail(b11, fail, "invalid recovery ID: %u",
+				   sig_and_recid[64]);
 
 	if (!secp256k1_ecdsa_recoverable_signature_parse_compact
 	    (secp256k1_ctx, &sig, sig_and_recid, sig_and_recid[64]))
@@ -1043,7 +1051,7 @@ static void push_field(u5 **data, char type, const void *src, size_t nbits)
  *
  * - if `x` is included:
  *   - SHOULD use the minimum `data_length` possible.
- * - MUST include one `c` field (`min_final_cltv_expiry_delta`).
+ * - SHOULD include one `c` field (`min_final_cltv_expiry_delta`).
  *...
  *   - SHOULD use the minimum `data_length` possible.
  */
@@ -1110,7 +1118,7 @@ static void encode_x(u5 **data, u64 expiry)
 
 static void encode_c(u5 **data, u16 min_final_cltv_expiry)
 {
-	if (IFDEV(dev_bolt11_no_c_generation, false))
+	if (dev_bolt11_omit_c_value)
 		return;
 	push_varlen_field(data, 'c', min_final_cltv_expiry);
 }
@@ -1272,7 +1280,7 @@ char *bolt11_encode_(const tal_t *ctx,
 
 	/* This is a hack to match the test vectors, *some* of which
 	 * order differently! */
-	if (IFDEV(modern_order(b11), true)) {
+	if (!dev_bolt11_old_order) {
 		if (b11->payment_secret)
 			encode_s(&data, b11->payment_secret);
 	}
@@ -1303,7 +1311,7 @@ char *bolt11_encode_(const tal_t *ctx,
 	if (n_field)
 		encode_n(&data, &b11->receiver_id);
 
-	if (IFDEV(!modern_order(b11), false)) {
+	if (dev_bolt11_old_order) {
 		if (b11->payment_secret)
 			encode_s(&data, b11->payment_secret);
 	}
@@ -1312,9 +1320,15 @@ char *bolt11_encode_(const tal_t *ctx,
 		encode_x(&data, b11->expiry);
 
 	/* BOLT #11:
-	 *   - MUST include one `c` field (`min_final_cltv_expiry_delta`).
+	 *   - SHOULD include one `c` field (`min_final_cltv_expiry_delta`).
+	 *...
+	 * A reader:
+	 *...
+	 *   - if the `c` field (`min_final_cltv_expiry_delta`) is not provided:
+	 *     - MUST use an expiry delta of at least 18 when making the payment
 	 */
-	encode_c(&data, b11->min_final_cltv_expiry);
+	if (b11->min_final_cltv_expiry != 18)
+		encode_c(&data, b11->min_final_cltv_expiry);
 
 	for (size_t i = 0; i < tal_count(b11->fallbacks); i++)
 		encode_f(&data, b11->fallbacks[i]);

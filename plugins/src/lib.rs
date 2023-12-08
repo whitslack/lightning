@@ -5,7 +5,7 @@ use futures::sink::SinkExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 extern crate log;
 use log::trace;
-use messages::Configuration;
+use messages::{Configuration, NotificationTopic};
 use options::ConfigOption;
 use std::collections::HashMap;
 use std::future::Future;
@@ -46,7 +46,10 @@ where
     options: Vec<ConfigOption>,
     rpcmethods: HashMap<String, RpcMethod<S>>,
     subscriptions: HashMap<String, Subscription<S>>,
+    notifications: Vec<NotificationTopic>,
     dynamic: bool,
+    // Do we want the plugin framework to automatically register a logging handler?
+    logging: bool,
 }
 
 /// A plugin that has registered with the lightning daemon, and gotten
@@ -65,6 +68,8 @@ where
     rpcmethods: HashMap<String, AsyncCallback<S>>,
     hooks: HashMap<String, AsyncCallback<S>>,
     subscriptions: HashMap<String, AsyncNotificationCallback<S>>,
+    #[allow(dead_code)] // unsure why rust thinks this field isn't used
+    notifications: Vec<NotificationTopic>,
 }
 
 /// The [PluginDriver] is used to run the IO loop, reading messages
@@ -115,12 +120,19 @@ where
             subscriptions: HashMap::new(),
             options: vec![],
             rpcmethods: HashMap::new(),
+            notifications: vec![],
             dynamic: false,
+            logging: true,
         }
     }
 
     pub fn option(mut self, opt: options::ConfigOption) -> Builder<S, I, O> {
         self.options.push(opt);
+        self
+    }
+
+    pub fn notification(mut self, notif: messages::NotificationTopic) -> Builder<S, I, O> {
+        self.notifications.push(notif);
         self
     }
 
@@ -198,6 +210,17 @@ where
         self
     }
 
+    /// Should the plugin automatically register a logging handler? If
+    /// not you may need to register a logging handler yourself. Be
+    /// careful not to print raw lines to `stdout` if you do, since
+    /// that'll interfere with the plugin communication. See the CLN
+    /// documentation on logging to see what logging events should
+    /// look like.
+    pub fn with_logging(mut self, log: bool) -> Builder<S, I, O> {
+        self.logging = log;
+        self
+    }
+
     /// Communicate with `lightningd` to tell it about our options,
     /// RPC methods and subscribe to hooks, and then process the
     /// initialization, configuring the plugin.
@@ -220,8 +243,10 @@ where
 
         // Now configure the logging, so any `log` call is wrapped
         // in a JSON-RPC notification and sent to Core Lightning
-        crate::logging::init(output.clone()).await?;
-        trace!("Plugin logging initialized");
+        if self.logging {
+            crate::logging::init(output.clone()).await?;
+            trace!("Plugin logging initialized");
+        }
 
         // Read the `getmanifest` message:
         match input.next().await {
@@ -274,6 +299,7 @@ where
             input,
             output,
             rpcmethods,
+            notifications: self.notifications,
             subscriptions,
             options: self.options,
             configuration,
@@ -318,6 +344,7 @@ where
             subscriptions: self.subscriptions.keys().map(|s| s.clone()).collect(),
             hooks: self.hooks.keys().map(|s| s.clone()).collect(),
             rpcmethods,
+            notifications: self.notifications.clone(),
             dynamic: self.dynamic,
             nonnumericids: true,
         }
@@ -647,6 +674,22 @@ impl<S> Plugin<S>
 where
     S: Send + Clone,
 {
+    pub async fn send_custom_notification(
+        &self,
+        method: String,
+        v: serde_json::Value,
+    ) -> Result<(), Error> {
+        self.sender
+            .send(json!({
+                "jsonrpc": "2.0",
+                "method": method,
+                "params": v,
+            }))
+            .await
+            .context("sending custom notification")?;
+        Ok(())
+    }
+
     /// Wait for plugin shutdown
     pub async fn join(&self) -> Result<(), Error> {
         self.wait_handle

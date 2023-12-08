@@ -333,8 +333,8 @@ static void *towire_struct_accept_channel(const tal_t *ctx,
 				     &s->funding_pubkey,
 				     &s->revocation_basepoint,
 				     &s->payment_basepoint,
-				     &s->htlc_basepoint,
 				     &s->delayed_payment_basepoint,
+				     &s->htlc_basepoint,
 				     &s->first_per_commitment_point,
 				     s->tlvs);
 }
@@ -355,8 +355,8 @@ static struct msg_accept_channel *fromwire_struct_accept_channel(const tal_t *ct
 				    &s->funding_pubkey,
 				    &s->revocation_basepoint,
 				    &s->payment_basepoint,
-				    &s->htlc_basepoint,
 				    &s->delayed_payment_basepoint,
+				    &s->htlc_basepoint,
 				    &s->first_per_commitment_point,
 				    &s->tlvs))
 		return s;

@@ -54,6 +54,9 @@ On success, an object is returned, containing:
   - **conf** (object, optional):
     - **value\_str** (string): field from cmdline
     - **source** (string): source of configuration setting (always "cmdline")
+  - **developer** (object, optional) *(added v23.08)*:
+    - **set** (boolean): `true` if set in config or cmdline
+    - **source** (string): source of configuration setting
   - **clear-plugins** (object, optional):
     - **set** (boolean): `true` if set in config or cmdline
     - **source** (string): source of configuration setting
@@ -275,6 +278,9 @@ On success, an object is returned, containing:
   - **commit-fee** (object, optional):
     - **value\_int** (u64): field from config or cmdline, or default
     - **source** (string): source of configuration setting
+  - **commit-feerate-offset** (object, optional):
+    - **value\_int** (u32): field from config or cmdline, or default
+    - **source** (string): source of configuration setting
 - **# version** (string, optional): Special field indicating the current version **deprecated, removal in v24.05**
 - **plugins** (array of objects, optional) **deprecated, removal in v24.05**:
   - **path** (string): Full path of the plugin
@@ -347,8 +353,10 @@ On success, an object is returned, containing:
 - **tor-service-password** (string, optional): `tor-service-password` field from config or cmdline, if any **deprecated, removal in v24.05**
 - **dev-allowdustreserve** (boolean, optional): Whether we allow setting dust reserves **deprecated, removal in v24.05**
 - **announce-addr-dns** (boolean, optional): Whether we put DNS entries into node\_announcement **deprecated, removal in v24.05** *(added v22.11.1)*
+- **developer** (boolean, optional): Whether developer mode is enabled *(added v23.08)*
 - **commit-fee** (u64, optional): The percentage of the 6-block fee estimate to use for commitment transactions **deprecated, removal in v24.05** *(added v23.05)*
 - **min-emergency-msat** (msat, optional): field from config or cmdline, or default *(added v23.08)*
+- **commit-feerate-offset** (u32, optional): additional commitment feerate applied by channel owner *(added v23.11)*
 
 [comment]: # (GENERATE-FROM-SCHEMA-END)
 
@@ -418,7 +426,7 @@ EXAMPLE JSON RESPONSE
    "always-use-proxy": false,
    "daemon": "false",
    "wallet": "sqlite3:///media/vincent/Maxtor/sanboxTestWrapperRPC/lightning_dir_dev/testnet/lightningd.sqlite3",
-   "wumbo": false,
+   "wumbo": true,
    "rgb": "03ad98",
    "alias": "BRUCEWAYN-TES-DEV",
    "pid-file": "/media/vincent/Maxtor/sanboxTestWrapperRPC/lightning_dir_dev/lightningd-testne...",
@@ -466,4 +474,4 @@ RESOURCES
 
 Main web site: <https://github.com/ElementsProject/lightning>
 
-[comment]: # ( SHA256STAMP:60bc9f59460242f03de4a152457f6f1f1a4a31b6ddb52292ad7c9a4c2c60dd42)
+[comment]: # ( SHA256STAMP:d49232ffcda5b42dd3f511174ba3aa1f3664341354a55e2b69c474d03b25e6a0)

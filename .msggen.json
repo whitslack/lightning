@@ -33,11 +33,13 @@
             "bolt12 invoice": 1,
             "bolt12 invoice_request": 2,
             "bolt12 offer": 0,
+            "emergency recover": 5,
             "rune": 4
         },
         "DecodepayFallbacksType": {
             "P2PKH": 0,
             "P2SH": 1,
+            "P2TR": 4,
             "P2WPKH": 2,
             "P2WSH": 3
         },
@@ -183,6 +185,8 @@
             "CLOSINGD_COMPLETE": 5,
             "CLOSINGD_SIGEXCHANGE": 4,
             "DUALOPEND_AWAITING_LOCKIN": 10,
+            "DUALOPEND_OPEN_COMMITTED": 12,
+            "DUALOPEND_OPEN_COMMIT_READY": 13,
             "DUALOPEND_OPEN_INIT": 9,
             "FUNDING_SPEND_SEEN": 7,
             "ONCHAIN": 8,
@@ -246,6 +250,8 @@
             "CLOSINGD_COMPLETE": 5,
             "CLOSINGD_SIGEXCHANGE": 4,
             "DUALOPEND_AWAITING_LOCKIN": 10,
+            "DUALOPEND_OPEN_COMMITTED": 11,
+            "DUALOPEND_OPEN_COMMIT_READY": 12,
             "DUALOPEND_OPEN_INIT": 9,
             "FUNDING_SPEND_SEEN": 7,
             "ONCHAIN": 8,
@@ -430,6 +436,13 @@
             "Datastore.key[]": 1,
             "Datastore.string": 4
         },
+        "DatastoreusageDatastoreusage": {
+            "DatastoreUsage.datastoreusage.key": 1,
+            "DatastoreUsage.datastoreusage.total_bytes": 2
+        },
+        "DatastoreusageResponse": {
+            "DatastoreUsage.datastoreusage": 1
+        },
         "DecodeExtra": {
             "Decode.extra[].data": 2,
             "Decode.extra[].tag": 1
@@ -462,6 +475,7 @@
         "DecodeResponse": {
             "Decode.created_at": 60,
             "Decode.currency_minor_unit": 8,
+            "Decode.decrypted": 76,
             "Decode.description_hash": 64,
             "Decode.expiry": 61,
             "Decode.extra[]": 69,
@@ -660,6 +674,35 @@
             "Feerates.perkb": 2,
             "Feerates.perkw": 3,
             "Feerates.warning_missing_feerates": 1
+        },
+        "FetchinvoiceChanges": {
+            "FetchInvoice.changes.amount_msat": 5,
+            "FetchInvoice.changes.description": 2,
+            "FetchInvoice.changes.description_appended": 1,
+            "FetchInvoice.changes.vendor": 4,
+            "FetchInvoice.changes.vendor_removed": 3
+        },
+        "FetchinvoiceNext_period": {
+            "FetchInvoice.next_period.counter": 1,
+            "FetchInvoice.next_period.endtime": 3,
+            "FetchInvoice.next_period.paywindow_end": 5,
+            "FetchInvoice.next_period.paywindow_start": 4,
+            "FetchInvoice.next_period.starttime": 2
+        },
+        "FetchinvoiceRequest": {
+            "FetchInvoice.amount_msat": 2,
+            "FetchInvoice.offer": 1,
+            "FetchInvoice.payer_note": 8,
+            "FetchInvoice.quantity": 3,
+            "FetchInvoice.recurrence_counter": 4,
+            "FetchInvoice.recurrence_label": 6,
+            "FetchInvoice.recurrence_start": 5,
+            "FetchInvoice.timeout": 7
+        },
+        "FetchinvoiceResponse": {
+            "FetchInvoice.changes": 2,
+            "FetchInvoice.invoice": 1,
+            "FetchInvoice.next_period": 3
         },
         "FundchannelRequest": {
             "FundChannel.amount": 1,
@@ -1557,6 +1600,13 @@
             "WaitAnyInvoice.payment_preimage": 12,
             "WaitAnyInvoice.status": 4
         },
+        "WaitblockheightRequest": {
+            "WaitBlockHeight.blockheight": 1,
+            "WaitBlockHeight.timeout": 2
+        },
+        "WaitblockheightResponse": {
+            "WaitBlockHeight.blockheight": 1
+        },
         "WaitinvoiceRequest": {
             "WaitInvoice.label": 1
         },
@@ -1870,6 +1920,22 @@
             "added": "pre-v0.10.1",
             "deprecated": false
         },
+        "DatastoreUsage": {
+            "added": "v23.11",
+            "deprecated": false
+        },
+        "DatastoreUsage.datastoreusage": {
+            "added": "v23.11",
+            "deprecated": false
+        },
+        "DatastoreUsage.datastoreusage.key": {
+            "added": "v23.11",
+            "deprecated": false
+        },
+        "DatastoreUsage.datastoreusage.total_bytes": {
+            "added": "v23.11",
+            "deprecated": false
+        },
         "Decode": {
             "added": "v23.05",
             "deprecated": null
@@ -1880,6 +1946,10 @@
         },
         "Decode.currency_minor_unit": {
             "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "Decode.decrypted": {
+            "added": "v23.11",
             "deprecated": false
         },
         "Decode.description_hash": {
@@ -2719,6 +2789,94 @@
             "deprecated": false
         },
         "Feerates.warning_missing_feerates": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FetchInvoice": {
+            "added": "pre-v0.10.1",
+            "deprecated": null
+        },
+        "FetchInvoice.amount_msat": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FetchInvoice.changes": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FetchInvoice.changes.amount_msat": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FetchInvoice.changes.description": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FetchInvoice.changes.description_appended": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FetchInvoice.changes.vendor": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FetchInvoice.changes.vendor_removed": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FetchInvoice.invoice": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FetchInvoice.next_period": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FetchInvoice.next_period.counter": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FetchInvoice.next_period.endtime": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FetchInvoice.next_period.paywindow_end": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FetchInvoice.next_period.paywindow_start": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FetchInvoice.next_period.starttime": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FetchInvoice.offer": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FetchInvoice.payer_note": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FetchInvoice.quantity": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FetchInvoice.recurrence_counter": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FetchInvoice.recurrence_label": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FetchInvoice.recurrence_start": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "FetchInvoice.timeout": {
             "added": "pre-v0.10.1",
             "deprecated": false
         },
@@ -5435,6 +5593,18 @@
             "deprecated": false
         },
         "WaitAnyInvoice.timeout": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "WaitBlockHeight": {
+            "added": "pre-v0.10.1",
+            "deprecated": null
+        },
+        "WaitBlockHeight.blockheight": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "WaitBlockHeight.timeout": {
             "added": "pre-v0.10.1",
             "deprecated": false
         },

@@ -26,7 +26,7 @@ On success, an object containing **channels** is returned.  It is an array of ob
 
 - **peer\_id** (pubkey): Node Public key
 - **peer\_connected** (boolean): A boolean flag that is set to true if the peer is online
-- **state** (string): the channel state, in particular "CHANNELD\_NORMAL" means the channel can be used normally (one of "OPENINGD", "CHANNELD\_AWAITING\_LOCKIN", "CHANNELD\_NORMAL", "CHANNELD\_SHUTTING\_DOWN", "CLOSINGD\_SIGEXCHANGE", "CLOSINGD\_COMPLETE", "AWAITING\_UNILATERAL", "FUNDING\_SPEND\_SEEN", "ONCHAIN", "DUALOPEND\_OPEN\_INIT", "DUALOPEND\_AWAITING\_LOCKIN")
+- **state** (string): the channel state, in particular "CHANNELD\_NORMAL" means the channel can be used normally (one of "OPENINGD", "CHANNELD\_AWAITING\_LOCKIN", "CHANNELD\_NORMAL", "CHANNELD\_SHUTTING\_DOWN", "CLOSINGD\_SIGEXCHANGE", "CLOSINGD\_COMPLETE", "AWAITING\_UNILATERAL", "FUNDING\_SPEND\_SEEN", "ONCHAIN", "DUALOPEND\_OPEN\_INIT", "DUALOPEND\_AWAITING\_LOCKIN", "DUALOPEND\_OPEN\_COMMITTED", "DUALOPEND\_OPEN\_COMMIT\_READY")
 - **opener** (string): Who initiated the channel (one of "local", "remote")
 - **features** (array of strings):
   - BOLT #9 features which apply to this channel (one of "option\_static\_remotekey", "option\_anchor\_outputs", "option\_anchors\_zero\_fee\_htlc\_tx", "option\_scid\_alias", "option\_zeroconf")
@@ -55,7 +55,7 @@ On success, an object containing **channels** is returned.  It is an array of ob
   - **feerate** (string): The feerate for this funding transaction in per-1000-weight, with "kpw" appended
   - **total\_funding\_msat** (msat): total amount in the channel
   - **our\_funding\_msat** (msat): amount we have in the channel
-  - **scratch\_txid** (txid): The commitment transaction txid we would use if we went onchain now
+  - **scratch\_txid** (txid, optional): The commitment transaction txid we would use if we went onchain now
 - **close\_to** (hex, optional): scriptPubkey which we have to close to if we mutual close
 - **private** (boolean, optional): if True, we will not announce this channel
 - **closer** (string, optional): Who initiated the channel close (only present if closing) (one of "local", "remote")
@@ -88,8 +88,8 @@ On success, an object containing **channels** is returned.  It is an array of ob
   - **remote** (short\_channel\_id, optional): An alias assigned by the remote node to this channel, usable in routehints and invoices
 - **state\_changes** (array of objects, optional): Prior state changes:
   - **timestamp** (string): UTC timestamp of form YYYY-mm-ddTHH:MM:SS.%03dZ
-  - **old\_state** (string): Previous state (one of "OPENINGD", "CHANNELD\_AWAITING\_LOCKIN", "CHANNELD\_NORMAL", "CHANNELD\_SHUTTING\_DOWN", "CLOSINGD\_SIGEXCHANGE", "CLOSINGD\_COMPLETE", "AWAITING\_UNILATERAL", "FUNDING\_SPEND\_SEEN", "ONCHAIN", "DUALOPEND\_OPEN\_INIT", "DUALOPEND\_AWAITING\_LOCKIN")
-  - **new\_state** (string): New state (one of "OPENINGD", "CHANNELD\_AWAITING\_LOCKIN", "CHANNELD\_NORMAL", "CHANNELD\_SHUTTING\_DOWN", "CLOSINGD\_SIGEXCHANGE", "CLOSINGD\_COMPLETE", "AWAITING\_UNILATERAL", "FUNDING\_SPEND\_SEEN", "ONCHAIN", "DUALOPEND\_OPEN\_INIT", "DUALOPEND\_AWAITING\_LOCKIN")
+  - **old\_state** (string): Previous state (one of "OPENINGD", "CHANNELD\_AWAITING\_LOCKIN", "CHANNELD\_NORMAL", "CHANNELD\_SHUTTING\_DOWN", "CLOSINGD\_SIGEXCHANGE", "CLOSINGD\_COMPLETE", "AWAITING\_UNILATERAL", "FUNDING\_SPEND\_SEEN", "ONCHAIN", "DUALOPEND\_OPEN\_INIT", "DUALOPEND\_AWAITING\_LOCKIN", "DUALOPEND\_OPEN\_COMMITTED", "DUALOPEND\_OPEN\_COMMIT\_READY", "CHANNELD\_AWAITING\_SPLICE")
+  - **new\_state** (string): New state (one of "OPENINGD", "CHANNELD\_AWAITING\_LOCKIN", "CHANNELD\_NORMAL", "CHANNELD\_SHUTTING\_DOWN", "CLOSINGD\_SIGEXCHANGE", "CLOSINGD\_COMPLETE", "AWAITING\_UNILATERAL", "FUNDING\_SPEND\_SEEN", "ONCHAIN", "DUALOPEND\_OPEN\_INIT", "DUALOPEND\_AWAITING\_LOCKIN", "DUALOPEND\_OPEN\_COMMITTED", "DUALOPEND\_OPEN\_COMMIT\_READY", "CHANNELD\_AWAITING\_SPLICE")
   - **cause** (string): What caused the change (one of "unknown", "local", "user", "remote", "protocol", "onchain")
   - **message** (string): Human-readable explanation
 - **status** (array of strings, optional):
@@ -145,6 +145,12 @@ The *state* field values (and *old\_state* / *new\_state*) are worth describing 
     and both sides are negotiating parameters.
   * `"DUALOPEND_OPEN_INIT"`: Like `OPENINGD`, but for v2 connections which
     are using collaborative opens.
+  * `"DUALOPEND_OPEN_COMMIT_READY"`: Like `OPENINGD`, but for v2 connections which
+    are using collaborative opens. You're ready to send your commitment signed
+    to your peer.
+  * `"DUALOPEND_OPEN_COMMITED"`: Like `OPENINGD`, but for v2 connections which
+    are using collaborative opens. You've gotten an inital signed commitment
+    from your peer.
   * `"CHANNELD_AWAITING_LOCKIN"` / `"DUALOPEND\_AWAITING\_LOCKIN"`: The peer and you have agreed on channel
     parameters and are just waiting for the channel funding transaction to
     be confirmed deeply (original and collaborative open protocols, respectively).
@@ -195,4 +201,4 @@ Main web site: <https://github.com/ElementsProject/lightning> Lightning
 RFC site (BOLT \#9):
 <https://github.com/lightningnetwork/lightning-rfc/blob/master/09-features.md>
 
-[comment]: # ( SHA256STAMP:1f434471983a8224f18c5f5c27f534ea1f01b7e585bee76afb10c039570e4e4b)
+[comment]: # ( SHA256STAMP:9ba1d32cb6be67e2a2daa8fe34034ea2aa571460dde7c85006c0e7ec3be7050d)

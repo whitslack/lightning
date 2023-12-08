@@ -112,7 +112,7 @@ wallet_commit_channel(struct lightningd *ld,
 	u32 lease_start_blockheight = 0; /* No leases on v1 */
 	struct short_channel_id *alias_local;
 	struct timeabs timestamp;
-	bool any_active = peer_any_active_channel(uc->peer, NULL);
+	bool any_active = peer_any_channel(uc->peer, channel_state_wants_peercomms, NULL);
 
 	/* We cannot both be the fundee *and* have a `fundchannel_start`
 	 * command running!
@@ -241,7 +241,7 @@ wallet_commit_channel(struct lightningd *ld,
 	notify_channel_state_changed(ld, &channel->peer->id,
 				     &channel->cid,
 				     channel->scid, /* NULL */
-				     &timestamp,
+				     timestamp,
 				     0, /* No prior state */
 				     channel->state,
 				     channel->state_change_cause,
@@ -977,7 +977,7 @@ bool peer_start_openingd(struct peer *peer, struct peer_fd *peer_fd)
 				   &uc->local_funding_pubkey,
 				   uc->minimum_depth,
 				   minrate, maxrate,
-				   IFDEV(peer->ld->dev_force_tmp_channel_id, NULL),
+				   peer->ld->dev_force_tmp_channel_id,
 				   peer->ld->config.allowdustreserve);
 	subd_send_msg(uc->open_daemon, take(msg));
 	return true;
@@ -996,10 +996,10 @@ static struct command_result *json_fundchannel_complete(struct command *cmd,
 	u32 *funding_txout_num = NULL;
 	struct funding_channel *fc;
 
-	if (!param(cmd, buffer, params,
-		   p_req("id", param_node_id, &id),
-		   p_req("psbt", param_psbt, &funding_psbt),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("id", param_node_id, &id),
+			 p_req("psbt", param_psbt, &funding_psbt),
+			 NULL))
 		return command_param_failed();
 
 	peer = peer_by_id(cmd->ld, id);
@@ -1063,6 +1063,9 @@ static struct command_result *json_fundchannel_complete(struct command *cmd,
 				    "Invalid parameter: funding tx vout too large %u",
 				    *funding_txout_num);
 
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
+
 	/* Set the cmd to this new cmd */
 	peer->uncommitted_channel->fc->cmd = cmd;
 	msg = towire_openingd_funder_complete(NULL,
@@ -1086,9 +1089,9 @@ static struct command_result *json_fundchannel_cancel(struct command *cmd,
 	struct peer *peer;
 	u8 *msg;
 
-	if (!param(cmd, buffer, params,
-		   p_req("id", param_node_id, &id),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("id", param_node_id, &id),
+			 NULL))
 		return command_param_failed();
 
 	peer = peer_by_id(cmd->ld, id);
@@ -1101,12 +1104,18 @@ static struct command_result *json_fundchannel_cancel(struct command *cmd,
 			return command_fail(cmd, FUNDING_NOTHING_TO_CANCEL,
 					    "No channel funding in progress.");
 
+		if (command_check_only(cmd))
+			return command_check_done(cmd);
+
 		/* Make sure this gets notified if we succeed or cancel */
 		tal_arr_expand(&peer->uncommitted_channel->fc->cancels, cmd);
 		msg = towire_openingd_funder_cancel(NULL);
 		subd_send_msg(peer->uncommitted_channel->open_daemon, take(msg));
 		return command_still_pending(cmd);
 	}
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
 
 	log_debug(cmd->ld->log, "fundchannel_cancel no uncommitted_channel!");
 
@@ -1139,16 +1148,16 @@ static struct command_result *json_fundchannel_start(struct command *cmd,
 	fc->inflight = false;
 	fc->funding_scriptpubkey = NULL;
 
-	if (!param(fc->cmd, buffer, params,
-		   p_req("id", param_node_id, &id),
-		   p_req("amount", param_sat, &amount),
-		   p_opt("feerate", param_feerate, &feerate_per_kw),
-		   p_opt_def("announce", param_bool, &announce_channel, true),
-		   p_opt("close_to", param_bitcoin_address, &fc->our_upfront_shutdown_script),
-		   p_opt("push_msat", param_msat, &push_msat),
-		   p_opt_def("mindepth", param_u32, &mindepth, cmd->ld->config.anchor_confirms),
-		   p_opt("reserve", param_sat, &reserve),
-		   NULL))
+	if (!param_check(fc->cmd, buffer, params,
+			 p_req("id", param_node_id, &id),
+			 p_req("amount", param_sat, &amount),
+			 p_opt("feerate", param_feerate, &feerate_per_kw),
+			 p_opt_def("announce", param_bool, &announce_channel, true),
+			 p_opt("close_to", param_bitcoin_address, &fc->our_upfront_shutdown_script),
+			 p_opt("push_msat", param_msat, &push_msat),
+			 p_opt_def("mindepth", param_u32, &mindepth, cmd->ld->config.anchor_confirms),
+			 p_opt("reserve", param_sat, &reserve),
+			 NULL))
 		return command_param_failed();
 
 	if (push_msat && amount_msat_greater_sat(*push_msat, *amount))
@@ -1233,6 +1242,9 @@ static struct command_result *json_fundchannel_start(struct command *cmd,
 				    "Amount exceeded %s",
 				    type_to_string(tmpctx, struct amount_sat,
 						   &chainparams->max_funding));
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
 
 	fc->push = push_msat ? *push_msat : AMOUNT_MSAT(0);
 	fc->channel_flags = OUR_CHANNEL_FLAGS;

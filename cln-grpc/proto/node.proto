@@ -20,6 +20,7 @@ service Node {
 	rpc ConnectPeer(ConnectRequest) returns (ConnectResponse) {}
 	rpc CreateInvoice(CreateinvoiceRequest) returns (CreateinvoiceResponse) {}
 	rpc Datastore(DatastoreRequest) returns (DatastoreResponse) {}
+	rpc DatastoreUsage(DatastoreusageRequest) returns (DatastoreusageResponse) {}
 	rpc CreateOnion(CreateonionRequest) returns (CreateonionResponse) {}
 	rpc DelDatastore(DeldatastoreRequest) returns (DeldatastoreResponse) {}
 	rpc DelExpiredInvoice(DelexpiredinvoiceRequest) returns (DelexpiredinvoiceResponse) {}
@@ -51,6 +52,7 @@ service Node {
 	rpc Decode(DecodeRequest) returns (DecodeResponse) {}
 	rpc Disconnect(DisconnectRequest) returns (DisconnectResponse) {}
 	rpc Feerates(FeeratesRequest) returns (FeeratesResponse) {}
+	rpc FetchInvoice(FetchinvoiceRequest) returns (FetchinvoiceResponse) {}
 	rpc FundChannel(FundchannelRequest) returns (FundchannelResponse) {}
 	rpc GetRoute(GetrouteRequest) returns (GetrouteResponse) {}
 	rpc ListForwards(ListforwardsRequest) returns (ListforwardsResponse) {}
@@ -61,6 +63,7 @@ service Node {
 	rpc SetChannel(SetchannelRequest) returns (SetchannelResponse) {}
 	rpc SignInvoice(SigninvoiceRequest) returns (SigninvoiceResponse) {}
 	rpc SignMessage(SignmessageRequest) returns (SignmessageResponse) {}
+	rpc WaitBlockHeight(WaitblockheightRequest) returns (WaitblockheightResponse) {}
 	rpc Stop(StopRequest) returns (StopResponse) {}
 	rpc PreApproveKeysend(PreapprovekeysendRequest) returns (PreapprovekeysendResponse) {}
 	rpc PreApproveInvoice(PreapproveinvoiceRequest) returns (PreapproveinvoiceResponse) {}
@@ -181,6 +184,8 @@ message ListpeersPeersChannels {
 		ONCHAIN = 8;
 		DUALOPEND_OPEN_INIT = 9;
 		DUALOPEND_AWAITING_LOCKIN = 10;
+		DUALOPEND_OPEN_COMMITTED = 11;
+		DUALOPEND_OPEN_COMMIT_READY = 12;
 	}
 	ListpeersPeersChannelsState state = 1;
 	optional bytes scratch_txid = 2;
@@ -521,6 +526,18 @@ message DatastoreResponse {
 	optional uint64 generation = 2;
 	optional bytes hex = 3;
 	optional string string = 4;
+}
+
+message DatastoreusageRequest {
+}
+
+message DatastoreusageResponse {
+	optional DatastoreusageDatastoreusage datastoreusage = 1;
+}
+
+message DatastoreusageDatastoreusage {
+	optional string key = 1;
+	optional uint64 total_bytes = 2;
 }
 
 message CreateonionRequest {
@@ -1103,6 +1120,8 @@ message ListpeerchannelsChannels {
 		ONCHAIN = 8;
 		DUALOPEND_OPEN_INIT = 9;
 		DUALOPEND_AWAITING_LOCKIN = 10;
+		DUALOPEND_OPEN_COMMITTED = 12;
+		DUALOPEND_OPEN_COMMIT_READY = 13;
 	}
 	optional bytes peer_id = 1;
 	optional bool peer_connected = 2;
@@ -1278,6 +1297,7 @@ message DecodepayFallbacks {
 		P2SH = 1;
 		P2WPKH = 2;
 		P2WSH = 3;
+		P2TR = 4;
 	}
 	DecodepayFallbacksType item_type = 1;
 	optional string addr = 2;
@@ -1301,6 +1321,7 @@ message DecodeResponse {
 		BOLT12_INVOICE_REQUEST = 2;
 		BOLT11_INVOICE = 3;
 		RUNE = 4;
+		EMERGENCY_RECOVER = 5;
 	}
 	DecodeType item_type = 1;
 	bool valid = 2;
@@ -1371,6 +1392,7 @@ message DecodeResponse {
 	repeated DecodeRestrictions restrictions = 73;
 	optional string warning_rune_invalid_utf8 = 74;
 	optional bytes hex = 75;
+	optional bytes decrypted = 76;
 }
 
 message DecodeOffer_paths {
@@ -1480,6 +1502,39 @@ message FeeratesOnchain_fee_estimates {
 	optional uint64 unilateral_close_nonanchor_satoshis = 6;
 	uint64 htlc_timeout_satoshis = 4;
 	uint64 htlc_success_satoshis = 5;
+}
+
+message FetchinvoiceRequest {
+	string offer = 1;
+	optional Amount amount_msat = 2;
+	optional uint64 quantity = 3;
+	optional uint64 recurrence_counter = 4;
+	optional double recurrence_start = 5;
+	optional string recurrence_label = 6;
+	optional double timeout = 7;
+	optional string payer_note = 8;
+}
+
+message FetchinvoiceResponse {
+	string invoice = 1;
+	FetchinvoiceChanges changes = 2;
+	optional FetchinvoiceNext_period next_period = 3;
+}
+
+message FetchinvoiceChanges {
+	optional string description_appended = 1;
+	optional string description = 2;
+	optional string vendor_removed = 3;
+	optional string vendor = 4;
+	optional Amount amount_msat = 5;
+}
+
+message FetchinvoiceNext_period {
+	uint64 counter = 1;
+	uint64 starttime = 2;
+	uint64 endtime = 3;
+	uint64 paywindow_start = 4;
+	uint64 paywindow_end = 5;
 }
 
 message FundchannelRequest {
@@ -1700,6 +1755,15 @@ message SignmessageResponse {
 	bytes signature = 1;
 	bytes recid = 2;
 	string zbase = 3;
+}
+
+message WaitblockheightRequest {
+	uint32 blockheight = 1;
+	optional uint32 timeout = 2;
+}
+
+message WaitblockheightResponse {
+	uint32 blockheight = 1;
 }
 
 message StopRequest {

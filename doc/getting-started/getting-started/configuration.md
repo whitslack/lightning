@@ -292,10 +292,6 @@ The [`lightning-listconfigs`](ref:lightning-listconfigs) command will output a v
 
 ### Lightning channel and HTLC options
 
-- **large-channels**
-
-  Removes capacity limits for channel creation.  Version 1.0 of the specification limited channel sizes to 16777215 satoshi.  With this option (which your node will advertize to peers), your node will accept larger incoming channels and if the peer supports it, will open larger channels.  Note: this option is spelled **large-channels** but it's pronounced **wumbo**.
-
 - **watchtime-blocks**=_BLOCKS_
 
   How long we need to spot an outdated close attempt: on opening a channel we tell our peer that this is how long they'll have to wait if they perform a unilateral close.
@@ -312,6 +308,11 @@ The [`lightning-listconfigs`](ref:lightning-listconfigs) command will output a v
 
   The percentage of _estimatesmartfee 2/CONSERVATIVE_ to use for the commitment  
   transactions: default is 100.
+
+- **commit-feerate-offset**=_INTEGER_
+
+  The additional feerate a channel opener adds to their preferred feerate to
+  lessen the odds of a disconnect due to feerate disagreement (default 5).
 
 - **max-concurrent-htlcs**=_INTEGER_
 

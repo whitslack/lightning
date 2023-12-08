@@ -23,6 +23,7 @@
 #include <lightningd/hsm_control.h>
 #include <lightningd/invoice.h>
 #include <lightningd/notification.h>
+#include <lightningd/peer_htlcs.h>
 #include <lightningd/plugin_hook.h>
 #include <lightningd/routehint.h>
 #include <sodium/randombytes.h>
@@ -172,7 +173,6 @@ struct invoice_payment_hook_payload {
 	/* FIXME: Include raw payload! */
 };
 
-#ifdef DEVELOPER
 static void invoice_payment_add_tlvs(struct json_stream *stream,
 				     struct htlc_set *hset)
 {
@@ -200,7 +200,6 @@ static void invoice_payment_add_tlvs(struct json_stream *stream,
 	}
 	json_array_end(stream);
 }
-#endif
 
 static void
 invoice_payment_serialize(struct invoice_payment_hook_payload *payload,
@@ -210,12 +209,10 @@ invoice_payment_serialize(struct invoice_payment_hook_payload *payload,
 	json_object_start(stream, "payment");
 	json_add_escaped_string(stream, "label", payload->label);
 	json_add_preimage(stream, "preimage", &payload->preimage);
-	json_add_string(stream, "msat",
-			type_to_string(tmpctx, struct amount_msat,
-				       &payload->msat));
-#ifdef DEVELOPER
-	invoice_payment_add_tlvs(stream, payload->set);
-#endif
+	json_add_amount_msat(stream, "msat", payload->msat);
+
+	if (payload->ld->developer)
+		invoice_payment_add_tlvs(stream, payload->set);
 	json_object_end(stream); /* .payment */
 }
 
@@ -918,7 +915,6 @@ static void listincoming_done(const char *buffer,
 			      const jsmntok_t *idtok UNUSED,
 			      struct invoice_info *info)
 {
-	struct lightningd *ld = info->cmd->ld;
 	struct command_result *ret;
 	bool warning_mpp, warning_capacity, warning_deadends, warning_offline, warning_private_unused;
 
@@ -931,8 +927,6 @@ static void listincoming_done(const char *buffer,
 	if (ret)
 		return;
 
-	/* We're actually outside a db transaction here: spooky! */
-	db_begin_transaction(ld->wallet->db);
 	invoice_complete(info,
 			 false,
 			 warning_mpp,
@@ -940,10 +934,8 @@ static void listincoming_done(const char *buffer,
 			 warning_deadends,
 			 warning_offline,
 			 warning_private_unused);
-	db_commit_transaction(ld->wallet->db);
 }
 
-#if DEVELOPER
 /* Since this is a dev-only option, we will crash if dev-routes is not
  * an array-of-arrays-of-correct-items. */
 static struct route_info *unpack_route(const tal_t *ctx,
@@ -997,7 +989,6 @@ static struct route_info **unpack_routes(const tal_t *ctx,
 
 	return routes;
 }
-#endif /* DEVELOPER */
 
 static struct command_result *param_positive_msat_or_any(struct command *cmd,
 							 const char *name,
@@ -1093,30 +1084,30 @@ static struct command_result *json_invoice(struct command *cmd,
 	struct plugin *plugin;
 	bool *hashonly;
 	const size_t inv_max_label_len = 128;
-#if DEVELOPER
-	const jsmntok_t *routes;
-#endif
+	const jsmntok_t *dev_routes;
 
 	info = tal(cmd, struct invoice_info);
 	info->cmd = cmd;
 
-	if (!param(cmd, buffer, params,
-		   p_req("amount_msat|msatoshi", param_positive_msat_or_any, &msatoshi_val),
-		   p_req("label", param_label, &info->label),
-		   p_req("description", param_escaped_string, &desc_val),
-		   p_opt_def("expiry", param_u64, &expiry, 3600*24*7),
-		   p_opt("fallbacks", param_array, &fallbacks),
-		   p_opt("preimage", param_preimage, &preimage),
-		   p_opt("exposeprivatechannels", param_chanhints,
-			 &info->chanhints),
-		   p_opt_def("cltv", param_number, &cltv,
-			     cmd->ld->config.cltv_final),
-		   p_opt_def("deschashonly", param_bool, &hashonly, false),
-#if DEVELOPER
-		   p_opt("dev-routes", param_array, &routes),
-#endif
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("amount_msat|msatoshi", param_positive_msat_or_any, &msatoshi_val),
+			 p_req("label", param_label, &info->label),
+			 p_req("description", param_escaped_string, &desc_val),
+			 p_opt_def("expiry", param_u64, &expiry, 3600*24*7),
+			 p_opt("fallbacks", param_array, &fallbacks),
+			 p_opt("preimage", param_preimage, &preimage),
+			 p_opt("exposeprivatechannels", param_chanhints,
+			       &info->chanhints),
+			 p_opt_def("cltv", param_number, &cltv,
+				   cmd->ld->config.cltv_final),
+			 p_opt_def("deschashonly", param_bool, &hashonly, false),
+			 p_opt("dev-routes", param_array, &dev_routes),
+			 NULL))
 		return command_param_failed();
+
+	if (dev_routes && !cmd->ld->developer)
+		return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
+				    "dev-routes requires --developer");
 
 	if (strlen(info->label->s) > inv_max_label_len) {
 		return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
@@ -1131,6 +1122,9 @@ static struct command_result *json_invoice(struct command *cmd,
 				    BOLT11_FIELD_BYTE_LIMIT,
 				    strlen(desc_val));
 	}
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
 
 	if (fallbacks) {
 		size_t i;
@@ -1183,11 +1177,8 @@ static struct command_result *json_invoice(struct command *cmd,
 					     cmd->ld->our_features
 					     ->bits[BOLT11_FEATURE]);
 
-#if DEVELOPER
-	info->b11->routes = unpack_routes(info->b11, buffer, routes);
-#else
-	info->b11->routes = NULL;
-#endif
+	info->b11->routes = unpack_routes(info->b11, buffer, dev_routes);
+
 	if (fallback_scripts)
 		info->b11->fallbacks = tal_steal(info->b11, fallback_scripts);
 
@@ -1274,12 +1265,12 @@ static struct command_result *json_listinvoices(struct command *cmd,
 	struct sha256 *payment_hash, *offer_id;
 	char *fail;
 
-	if (!param(cmd, buffer, params,
-		   p_opt("label", param_label, &label),
-		   p_opt("invstring", param_invstring, &invstring),
-		   p_opt("payment_hash", param_sha256, &payment_hash),
-		   p_opt("offer_id", param_sha256, &offer_id),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_opt("label", param_label, &label),
+			 p_opt("invstring", param_invstring, &invstring),
+			 p_opt("payment_hash", param_sha256, &payment_hash),
+			 p_opt("offer_id", param_sha256, &offer_id),
+			 NULL))
 		return command_param_failed();
 
 	/* Yeah, I wasn't sure about this style either.  It's curt though! */
@@ -1311,6 +1302,9 @@ static struct command_result *json_listinvoices(struct command *cmd,
 		}
 	}
 
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
+
 	response = json_stream_success(cmd);
 	json_array_start(response, "invoices");
 	json_add_invoices(response, wallet, label, payment_hash, offer_id);
@@ -1340,11 +1334,11 @@ static struct command_result *json_delinvoice(struct command *cmd,
 	struct wallet *wallet = cmd->ld->wallet;
 	bool *deldesc;
 
-	if (!param(cmd, buffer, params,
-		   p_req("label", param_label, &label),
-		   p_req("status", param_string, &status),
-		   p_opt_def("desconly", param_bool, &deldesc, false),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("label", param_label, &label),
+			 p_req("status", param_string, &status),
+			 p_opt_def("desconly", param_bool, &deldesc, false),
+			 NULL))
 		return command_param_failed();
 
 	if (!invoices_find_by_label(wallet->invoices, &inv_dbid, label)) {
@@ -1373,6 +1367,9 @@ static struct command_result *json_delinvoice(struct command *cmd,
 			return command_fail(cmd, INVOICE_NO_DESCRIPTION,
 					    "Invoice description already removed");
 
+		if (command_check_only(cmd))
+			return command_check_done(cmd);
+
 		if (!invoices_delete_description(wallet->invoices, inv_dbid)) {
 			log_broken(cmd->ld->log,
 				   "Error attempting to delete description of invoice %"PRIu64,
@@ -1382,6 +1379,9 @@ static struct command_result *json_delinvoice(struct command *cmd,
 		}
 		details->description = tal_free(details->description);
 	} else {
+		if (command_check_only(cmd))
+			return command_check_done(cmd);
+
 		if (!invoices_delete(wallet->invoices, inv_dbid)) {
 			log_broken(cmd->ld->log,
 				   "Error attempting to remove invoice %"PRIu64,
@@ -1426,7 +1426,7 @@ static const struct json_command delexpiredinvoice_command = {
 	"payment",
 	json_delexpiredinvoice,
 	"Delete all expired invoices that expired as of given {maxexpirytime} (a UNIX epoch time), or all expired invoices if not specified",
-	true /*deprecated*/
+	.deprecated = true,
 };
 AUTODATA(json_command, &delexpiredinvoice_command);
 
@@ -1495,14 +1495,17 @@ static struct command_result *json_waitinvoice(struct command *cmd,
 	struct wallet *wallet = cmd->ld->wallet;
 	struct json_escape *label;
 
-	if (!param(cmd, buffer, params,
-		   p_req("label", param_label, &label),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("label", param_label, &label),
+			 NULL))
 		return command_param_failed();
 
 	if (!invoices_find_by_label(wallet->invoices, &inv_dbid, label)) {
 		return command_fail(cmd, LIGHTNINGD, "Label not found");
 	}
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
+
 	details = invoices_get_details(cmd, cmd->ld->wallet->invoices, inv_dbid);
 
 	/* If paid or expired return immediately */
@@ -1536,10 +1539,10 @@ static struct command_result *json_decodepay(struct command *cmd,
 	const char *str, *desc;
 	char *fail;
 
-	if (!param(cmd, buffer, params,
-		   p_req("bolt11", param_invstring, &str),
-		   p_opt("description", param_escaped_string, &desc),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("bolt11", param_invstring, &str),
+			 p_opt("description", param_escaped_string, &desc),
+			 NULL))
 		return command_param_failed();
 
 	b11 = bolt11_decode(cmd, str, cmd->ld->our_features, desc, NULL,
@@ -1548,6 +1551,9 @@ static struct command_result *json_decodepay(struct command *cmd,
 	if (!b11) {
 		return command_fail(cmd, LIGHTNINGD, "Invalid bolt11: %s", fail);
 	}
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
 
 	response = json_stream_success(cmd);
 	json_add_bolt11(response, b11);
@@ -1657,11 +1663,11 @@ static struct command_result *json_createinvoice(struct command *cmd,
 	bool have_n;
 	char *fail;
 
-	if (!param(cmd, buffer, params,
-		   p_req("invstring", param_invstring, &invstring),
-		   p_req("label", param_label, &label),
-		   p_req("preimage", param_preimage, &preimage),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("invstring", param_invstring, &invstring),
+			 p_req("label", param_label, &label),
+			 p_req("preimage", param_preimage, &preimage),
+			 NULL))
 		return command_param_failed();
 
 	sha256(&payment_hash, preimage, sizeof(*preimage));
@@ -1684,6 +1690,9 @@ static struct command_result *json_createinvoice(struct command *cmd,
 		if (!sha256_eq(&payment_hash, &b11->payment_hash))
 			return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
 					    "Incorrect preimage");
+
+		if (command_check_only(cmd))
+			return command_check_done(cmd);
 
 		if (!invoices_create(cmd->ld->wallet->invoices,
 				     &inv_dbid,
@@ -1775,6 +1784,10 @@ static struct command_result *json_createinvoice(struct command *cmd,
 		if (!inv->offer_description)
 			return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
 					    "Missing description in invoice");
+
+		if (command_check_only(cmd))
+			return command_check_done(cmd);
+
 		desc = tal_strndup(cmd,
 				   inv->offer_description,
 				   tal_bytelen(inv->offer_description));
@@ -1826,11 +1839,6 @@ static struct command_result *json_preapproveinvoice(struct command *cmd,
 		   p_req("bolt11", param_invstring, &invstring),
 		   NULL))
 		return command_param_failed();
-
-	/* Strip optional URI preamble. */
-	if (strncmp(invstring, "lightning:", 10) == 0 ||
-	    strncmp(invstring, "LIGHTNING:", 10) == 0)
-		invstring += 10;
 
 	msg = hsm_sync_req(tmpctx, cmd->ld,
 			   take(towire_hsmd_preapprove_invoice(NULL, invstring)));
@@ -1907,9 +1915,9 @@ static struct command_result *json_signinvoice(struct command *cmd,
 	bool have_n;
 	char *fail;
 
-	if (!param(cmd, buffer, params,
-		   p_req("invstring", param_invstring, &invstring),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("invstring", param_invstring, &invstring),
+			 NULL))
 		return command_param_failed();
 
 	b11 = bolt11_decode_nosig(cmd, invstring, cmd->ld->our_features,
@@ -1933,6 +1941,9 @@ static struct command_result *json_signinvoice(struct command *cmd,
 	if (!b11->description && !b11->description_hash)
 		return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
 				    "Missing description in invoice");
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
 
 	response = json_stream_success(cmd);
 	json_add_invstring(response, b11enc);
