@@ -71,6 +71,11 @@ struct htlc_in *htlc_in_check(const struct htlc_in *hin UNNEEDED, const char *ab
 /* Generated stub for htlc_out_connect_htlc_in */
 void htlc_out_connect_htlc_in(struct htlc_out *hout UNNEEDED, struct htlc_in *hin UNNEEDED)
 { fprintf(stderr, "htlc_out_connect_htlc_in called!\n"); abort(); }
+/* Generated stub for inflight_set_last_tx */
+void inflight_set_last_tx(struct channel_inflight *inflight UNNEEDED,
+		          struct bitcoin_tx *last_tx STEALS UNNEEDED,
+		          const struct bitcoin_signature last_sig UNNEEDED)
+{ fprintf(stderr, "inflight_set_last_tx called!\n"); abort(); }
 /* Generated stub for invoices_new */
 struct invoices *invoices_new(const tal_t *ctx UNNEEDED,
 			      struct wallet *wallet UNNEEDED,
@@ -164,8 +169,6 @@ struct channel_inflight *new_inflight(struct channel *channel UNNEEDED,
 	     struct amount_sat funding_sat UNNEEDED,
 	     struct amount_sat our_funds UNNEEDED,
 	     struct wally_psbt *funding_psbt STEALS UNNEEDED,
-	     struct bitcoin_tx *last_tx STEALS UNNEEDED,
-	     const struct bitcoin_signature last_sig UNNEEDED,
 	     const u32 lease_expiry UNNEEDED,
 	     const secp256k1_ecdsa_signature *lease_commit_sig UNNEEDED,
 	     const u32 lease_chan_max_msat UNNEEDED,

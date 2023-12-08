@@ -56,6 +56,13 @@ void channel_update_feerates(struct lightningd *ld, const struct channel *channe
 	else
 		min_feerate = feerate_min(ld, NULL);
 	max_feerate = feerate_max(ld, NULL);
+	/* The channel opener should use a slightly higher than minimal feerate
+	 * in order to avoid excessive feerate disagreements */
+	if (channel->opener == LOCAL) {
+		feerate += ld->config.feerate_offset;
+		if (feerate > max_feerate)
+			feerate = max_feerate;
+	}
 
 	if (channel->ignore_fee_limits || ld->config.ignore_fee_limits) {
 		min_feerate = 1;
@@ -643,7 +650,6 @@ static void handle_add_inflight(struct lightningd *ld,
 	s64 splice_amnt;
 	struct wally_psbt *psbt;
 	struct channel_inflight *inflight;
-	struct bitcoin_signature last_sig;
 	bool i_am_initiator;
 
 	if (!fromwire_channeld_add_inflight(tmpctx,
@@ -661,17 +667,12 @@ static void handle_add_inflight(struct lightningd *ld,
 		return;
 	}
 
-	/* FIXME: DTODO: Use a pointer to a sig instead of zero'ing one out. */
-	memset(&last_sig, 0, sizeof(last_sig));
-
 	inflight = new_inflight(channel,
 				&outpoint,
 				feerate,
 				satoshis,
 				channel->our_funds,
 				psbt,
-				NULL,
-				last_sig,
 				channel->lease_expiry,
 				channel->lease_commit_sig,
 				channel->lease_chan_max_msat,

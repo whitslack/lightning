@@ -97,6 +97,23 @@ void delete_channel(struct channel *channel STEALS)
 	maybe_delete_peer(peer);
 }
 
+bool maybe_cleanup_last_inflight(struct channel *channel)
+{
+	struct channel_inflight *inflight;
+	inflight = channel_current_inflight(channel);
+	if (!inflight)
+		return false;
+
+	if (inflight->last_tx)
+		return false;
+
+	/* Remove from database */
+	wallet_channel_inflight_cleanup_incomplete(
+			channel->peer->ld->wallet, channel->dbid);
+	tal_free(inflight);
+	return true;
+}
+
 void get_channel_basepoints(struct lightningd *ld,
 			    const struct node_id *peer_id,
 			    const u64 dbid,
@@ -126,8 +143,6 @@ new_inflight(struct channel *channel,
 	     struct amount_sat total_funds,
 	     struct amount_sat our_funds,
 	     struct wally_psbt *psbt STEALS,
-	     struct bitcoin_tx *last_tx,
-	     const struct bitcoin_signature last_sig,
 	     const u32 lease_expiry,
 	     const secp256k1_ecdsa_signature *lease_commit_sig,
 	     const u32 lease_chan_max_msat, const u16 lease_chan_max_ppt,
@@ -137,7 +152,6 @@ new_inflight(struct channel *channel,
 	     s64 splice_amnt,
 	     bool i_am_initiator)
 {
-	struct wally_psbt *last_tx_psbt_clone;
 	struct channel_inflight *inflight
 		= tal(channel, struct channel_inflight);
 	struct funding_info *funding
@@ -153,14 +167,7 @@ new_inflight(struct channel *channel,
 	inflight->channel = channel;
 	inflight->remote_tx_sigs = false;
 	inflight->funding_psbt = tal_steal(inflight, psbt);
-
-	/* Make a 'clone' of this tx */
 	inflight->last_tx = NULL;
-	if (last_tx) {
-		last_tx_psbt_clone = clone_psbt(inflight, last_tx->psbt);
-		inflight->last_tx = bitcoin_tx_with_psbt(inflight, last_tx_psbt_clone);
-	}
-	inflight->last_sig = last_sig;
 	inflight->tx_broadcast = false;
 
 	/* Channel lease infos */
@@ -182,6 +189,19 @@ new_inflight(struct channel *channel,
 	tal_add_destructor(inflight, destroy_inflight);
 
 	return inflight;
+}
+
+void inflight_set_last_tx(struct channel_inflight *inflight,
+		          struct bitcoin_tx *last_tx,
+		          const struct bitcoin_signature last_sig)
+{
+	struct wally_psbt *last_tx_psbt_clone;
+	assert(inflight->last_tx == NULL);
+	assert(last_tx);
+
+	last_tx_psbt_clone = clone_psbt(inflight, last_tx->psbt);
+	inflight->last_tx = bitcoin_tx_with_psbt(inflight, last_tx_psbt_clone);
+	inflight->last_sig = last_sig;
 }
 
 struct open_attempt *new_channel_open_attempt(struct channel *channel)
@@ -481,7 +501,8 @@ struct channel *new_channel(struct peer *peer, u64 dbid,
 	if (channel->last_tx) {
 		channel->last_tx->chainparams = chainparams;
 	}
-	channel->last_sig = *last_sig;
+	if (last_sig)
+		channel->last_sig = *last_sig;
 	channel->last_htlc_sigs = tal_steal(channel, last_htlc_sigs);
 	channel->channel_info = *channel_info;
 	channel->fee_states = dup_fee_states(channel, fee_states);
@@ -881,6 +902,9 @@ void channel_fail_permanent(struct channel *channel,
 				  AWAITING_UNILATERAL,
 				  reason,
 				  why);
+
+	if (channel_state_open_uncommitted(channel->state))
+		delete_channel(channel);
 
 	tal_free(why);
 }

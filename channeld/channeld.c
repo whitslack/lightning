@@ -3599,7 +3599,7 @@ static void update_hsmd_with_splice(struct peer *peer, struct inflight *inflight
 	wire_sync_write(HSM_FD, take(msg));
 	msg = wire_sync_read(tmpctx, HSM_FD);
 	if (!fromwire_hsmd_setup_channel_reply(msg))
-		status_failed(STATUS_FAIL_HSM_IO, "Bad ready_channel_reply %s",
+		status_failed(STATUS_FAIL_HSM_IO, "Bad setup_channel_reply %s",
 			      tal_hex(tmpctx, msg));
 }
 
@@ -5378,7 +5378,8 @@ static void handle_funding_depth(struct peer *peer, const u8 *msg)
 			peer_write(peer->pps, take(msg));
 
 			peer->channel_ready[LOCAL] = true;
-		} else if (splicing && !peer->splice_state->locked_ready[LOCAL]) {
+			check_mutual_channel_ready(peer);
+		} else if(splicing && !peer->splice_state->locked_ready[LOCAL]) {
 			assert(scid);
 
 			msg = towire_splice_locked(NULL, &peer->channel_id);

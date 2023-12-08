@@ -389,8 +389,6 @@ struct channel_inflight *new_inflight(struct channel *channel,
 	     struct amount_sat funding_sat,
 	     struct amount_sat our_funds,
 	     struct wally_psbt *funding_psbt STEALS,
-	     struct bitcoin_tx *last_tx STEALS,
-	     const struct bitcoin_signature last_sig,
 	     const u32 lease_expiry,
 	     const secp256k1_ecdsa_signature *lease_commit_sig,
 	     const u32 lease_chan_max_msat,
@@ -400,6 +398,14 @@ struct channel_inflight *new_inflight(struct channel *channel,
 	     const struct amount_sat lease_amt,
 	     s64 splice_amnt,
 	     bool i_am_initiator);
+
+/* Add a last_tx and sig to an inflight */
+void inflight_set_last_tx(struct channel_inflight *inflight,
+		          struct bitcoin_tx *last_tx STEALS,
+		          const struct bitcoin_signature last_sig);
+
+/* If the last inflight has no commitment tx, remove it */
+bool maybe_cleanup_last_inflight(struct channel *channel);
 
 /* Given a txid, find an inflight channel stub. Returns NULL if none found */
 struct channel_inflight *channel_inflight_find(struct channel *channel,
@@ -430,6 +436,7 @@ static inline bool channel_state_can_add_htlc(enum channel_state state)
 	case ONCHAIN:
 	case CLOSED:
 	case DUALOPEND_OPEN_INIT:
+	case DUALOPEND_OPEN_COMMIT_READY:
 	case DUALOPEND_OPEN_COMMITTED:
 	case DUALOPEND_AWAITING_LOCKIN:
 		return false;
@@ -452,6 +459,7 @@ static inline bool channel_state_can_remove_htlc(enum channel_state state)
 	case ONCHAIN:
 	case CLOSED:
 	case DUALOPEND_OPEN_INIT:
+	case DUALOPEND_OPEN_COMMIT_READY:
 	case DUALOPEND_OPEN_COMMITTED:
 	case DUALOPEND_AWAITING_LOCKIN:
 		return false;
@@ -469,6 +477,7 @@ static inline bool channel_state_closing(enum channel_state state)
 	case CHANNELD_AWAITING_LOCKIN:
 	case CHANNELD_NORMAL:
 	case DUALOPEND_OPEN_INIT:
+	case DUALOPEND_OPEN_COMMIT_READY:
 	case DUALOPEND_OPEN_COMMITTED:
 	case DUALOPEND_AWAITING_LOCKIN:
 	case CHANNELD_AWAITING_SPLICE:
@@ -496,6 +505,7 @@ static inline bool channel_state_fees_can_change(enum channel_state state)
 	case ONCHAIN:
 	case CLOSED:
 	case DUALOPEND_OPEN_INIT:
+	case DUALOPEND_OPEN_COMMIT_READY:
 	case DUALOPEND_OPEN_COMMITTED:
 	case DUALOPEND_AWAITING_LOCKIN:
 		return false;
@@ -518,6 +528,7 @@ static inline bool channel_state_failing_onchain(enum channel_state state)
 	case CLOSINGD_COMPLETE:
 	case CLOSED:
 	case DUALOPEND_OPEN_INIT:
+	case DUALOPEND_OPEN_COMMIT_READY:
 	case DUALOPEND_OPEN_COMMITTED:
 	case DUALOPEND_AWAITING_LOCKIN:
 		return false;
@@ -534,6 +545,7 @@ static inline bool channel_state_pre_open(enum channel_state state)
 	switch (state) {
 	case CHANNELD_AWAITING_LOCKIN:
 	case DUALOPEND_OPEN_INIT:
+	case DUALOPEND_OPEN_COMMIT_READY:
 	case DUALOPEND_OPEN_COMMITTED:
 	case DUALOPEND_AWAITING_LOCKIN:
 		return true;
@@ -556,6 +568,7 @@ static inline bool channel_state_closed(enum channel_state state)
 	switch (state) {
 	case CHANNELD_AWAITING_LOCKIN:
 	case DUALOPEND_OPEN_INIT:
+	case DUALOPEND_OPEN_COMMIT_READY:
 	case DUALOPEND_OPEN_COMMITTED:
 	case DUALOPEND_AWAITING_LOCKIN:
 	case CHANNELD_NORMAL:
@@ -573,12 +586,13 @@ static inline bool channel_state_closed(enum channel_state state)
 	abort();
 }
 
-/* Not even int the database yet? */
+/* Not even in the database yet? */
 static inline bool channel_state_uncommitted(enum channel_state state)
 {
 	switch (state) {
  	case DUALOPEND_OPEN_INIT:
 		return true;
+	case DUALOPEND_OPEN_COMMIT_READY:
 	case DUALOPEND_OPEN_COMMITTED:
 	case CHANNELD_AWAITING_LOCKIN:
  	case DUALOPEND_AWAITING_LOCKIN:
@@ -602,6 +616,7 @@ static inline bool channel_state_wants_peercomms(enum channel_state state)
 	switch (state) {
 	case CHANNELD_AWAITING_LOCKIN:
 	case DUALOPEND_AWAITING_LOCKIN:
+	case DUALOPEND_OPEN_COMMIT_READY:
 	case DUALOPEND_OPEN_COMMITTED:
 	case CHANNELD_NORMAL:
 	case CHANNELD_AWAITING_SPLICE:
@@ -632,6 +647,7 @@ static inline bool channel_state_wants_onchain_fail(enum channel_state state)
 	case CHANNELD_SHUTTING_DOWN:
 		return true;
 	case DUALOPEND_OPEN_INIT:
+	case DUALOPEND_OPEN_COMMIT_READY:
 	case CLOSINGD_COMPLETE:
 	case AWAITING_UNILATERAL:
 	case FUNDING_SPEND_SEEN:
@@ -641,6 +657,31 @@ static inline bool channel_state_wants_onchain_fail(enum channel_state state)
 	}
 	abort();
 }
+
+static inline bool channel_state_open_uncommitted(enum channel_state state)
+{
+	switch (state) {
+	case DUALOPEND_OPEN_INIT:
+	case DUALOPEND_OPEN_COMMIT_READY:
+		return true;
+	case CLOSINGD_COMPLETE:
+	case AWAITING_UNILATERAL:
+	case FUNDING_SPEND_SEEN:
+	case ONCHAIN:
+	case CLOSED:
+	case CHANNELD_AWAITING_LOCKIN:
+	case DUALOPEND_OPEN_COMMITTED:
+	case DUALOPEND_AWAITING_LOCKIN:
+	case CHANNELD_NORMAL:
+	case CHANNELD_AWAITING_SPLICE:
+	case CLOSINGD_SIGEXCHANGE:
+	case CHANNELD_SHUTTING_DOWN:
+		return false;
+	}
+
+	abort();
+}
+
 
 void channel_set_owner(struct channel *channel, struct subd *owner);
 

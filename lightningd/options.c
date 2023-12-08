@@ -948,6 +948,7 @@ static const struct config testnet_config = {
 
 	.max_fee_multiplier = 10,
 	.commit_fee_percent = 100,
+	.feerate_offset = 5,
 };
 
 /* aka. "Dude, where's my coins?" */
@@ -1022,6 +1023,7 @@ static const struct config mainnet_config = {
 
 	.max_fee_multiplier = 10,
 	.commit_fee_percent = 100,
+	.feerate_offset = 5,
 };
 
 static void check_config(struct lightningd *ld)
@@ -1150,9 +1152,7 @@ static bool opt_show_sat(char *buf, size_t len, const struct amount_sat *sat)
 
 static char *opt_set_wumbo(struct lightningd *ld)
 {
-	feature_set_or(ld->our_features,
-		       take(feature_set_for_feature(NULL,
-						    OPTIONAL_FEATURE(OPT_LARGE_CHANNELS))));
+	/* Wumbo is now the default, FIXME: depreacted_apis! */
 	return NULL;
 }
 
@@ -1412,7 +1412,7 @@ static void register_opts(struct lightningd *ld)
 	/* This affects our features, so set early. */
 	opt_register_early_noarg("--large-channels|--wumbo",
 				 opt_set_wumbo, ld,
-				 "Allow channels larger than 0.16777215 BTC");
+				 opt_hidden);
 
 	opt_register_early_noarg("--experimental-dual-fund",
 				 opt_set_dual_fund, ld,
@@ -1576,6 +1576,10 @@ static void register_opts(struct lightningd *ld)
 	clnopt_witharg("--commit-fee", OPT_SHOWINT,
 		       opt_set_u64, opt_show_u64, &ld->config.commit_fee_percent,
 		       "Percentage of fee to request for their commitment");
+	clnopt_witharg("--commit-feerate-offset", OPT_SHOWINT,
+		       opt_set_u32, opt_show_u32, &ld->config.feerate_offset,
+		       "Additional feerate per kw to apply to feerate updates "
+		       "as the channel opener");
 	clnopt_witharg("--min-emergency-msat", OPT_SHOWMSATS,
 		       opt_set_sat_nondust, opt_show_sat, &ld->emergency_sat,
 		       "Amount to leave in wallet for spending anchor closes");
@@ -1804,8 +1808,43 @@ void handle_early_opts(struct lightningd *ld, int argc, char *argv[])
 	logging_options_parsed(ld->log_book);
 }
 
+/* Free *str, set *str to copy with `cln` prepended */
+static void prefix_cln(const char **str STEALS)
+{
+	const char *newstr = tal_fmt(tal_parent(*str), "cln%s", *str);
+	tal_free(*str);
+	*str = newstr;
+}
+
+/* Due to a conflict between the widely-deployed clightning-rest plugin and
+ * our own clnrest plugin, and people wanting to run both, in v23.11 we
+ * renamed some options.  This breaks perfectly working v23.08 deployments who
+ * don't care about clightning-rest, so we work around it here. */
+static void fixup_clnrest_options(struct lightningd *ld)
+{
+	for (size_t i = 0; i < tal_count(ld->configvars); i++) {
+		struct configvar *cv = ld->configvars[i];
+
+		/* These worked for v23.08 */
+		if (!strstarts(cv->configline, "rest-port=")
+		    && !strstarts(cv->configline, "rest-protocol=")
+		    && !strstarts(cv->configline, "rest-host=")
+		    && !strstarts(cv->configline, "rest-certs="))
+			continue;
+		/* Did some (plugin) claim it? */
+		if (opt_find_long(cv->configline, &cv->optarg))
+			continue;
+		log_unusual(ld->log, "Option %s deprecated in v23.11, renaming to cln%s",
+			    cv->configline, cv->configline);
+		prefix_cln(&cv->configline);
+	}
+}
+
 void handle_opts(struct lightningd *ld)
 {
+	if (ld->deprecated_apis)
+		fixup_clnrest_options(ld);
+
 	/* Now we know all the options, finish parsing and finish
 	 * populating ld->configvars with cmdline. */
 	parse_configvars_final(ld->configvars, true, ld->developer);

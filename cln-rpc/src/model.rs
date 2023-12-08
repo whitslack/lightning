@@ -58,6 +58,7 @@ pub enum Request {
 	Decode(requests::DecodeRequest),
 	Disconnect(requests::DisconnectRequest),
 	Feerates(requests::FeeratesRequest),
+	FetchInvoice(requests::FetchinvoiceRequest),
 	FundChannel(requests::FundchannelRequest),
 	GetRoute(requests::GetrouteRequest),
 	ListForwards(requests::ListforwardsRequest),
@@ -69,6 +70,7 @@ pub enum Request {
 	SignInvoice(requests::SigninvoiceRequest),
 	SignMessage(requests::SignmessageRequest),
 	WaitBlockHeight(requests::WaitblockheightRequest),
+	Wait(requests::WaitRequest),
 	Stop(requests::StopRequest),
 	PreApproveKeysend(requests::PreapprovekeysendRequest),
 	PreApproveInvoice(requests::PreapproveinvoiceRequest),
@@ -123,6 +125,7 @@ pub enum Response {
 	Decode(responses::DecodeResponse),
 	Disconnect(responses::DisconnectResponse),
 	Feerates(responses::FeeratesResponse),
+	FetchInvoice(responses::FetchinvoiceResponse),
 	FundChannel(responses::FundchannelResponse),
 	GetRoute(responses::GetrouteResponse),
 	ListForwards(responses::ListforwardsResponse),
@@ -134,6 +137,7 @@ pub enum Response {
 	SignInvoice(responses::SigninvoiceResponse),
 	SignMessage(responses::SignmessageResponse),
 	WaitBlockHeight(responses::WaitblockheightResponse),
+	Wait(responses::WaitResponse),
 	Stop(responses::StopResponse),
 	PreApproveKeysend(responses::PreapprovekeysendResponse),
 	PreApproveInvoice(responses::PreapproveinvoiceResponse),
@@ -1247,6 +1251,35 @@ pub mod requests {
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct FetchinvoiceRequest {
+	    pub offer: String,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub amount_msat: Option<Amount>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub quantity: Option<u64>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub recurrence_counter: Option<u64>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub recurrence_start: Option<f64>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub recurrence_label: Option<String>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub timeout: Option<f64>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub payer_note: Option<String>,
+	}
+
+	impl From<FetchinvoiceRequest> for Request {
+	    fn from(r: FetchinvoiceRequest) -> Self {
+	        Request::FetchInvoice(r)
+	    }
+	}
+
+	impl IntoRequest for FetchinvoiceRequest {
+	    type Response = super::responses::FetchinvoiceResponse;
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct FundchannelRequest {
 	    pub id: PublicKey,
 	    pub amount: AmountOrAll,
@@ -1540,6 +1573,89 @@ pub mod requests {
 
 	impl IntoRequest for WaitblockheightRequest {
 	    type Response = super::responses::WaitblockheightResponse;
+	}
+
+	#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+	pub enum WaitSubsystem {
+	    #[serde(rename = "invoices")]
+	    INVOICES,
+	    #[serde(rename = "forwards")]
+	    FORWARDS,
+	    #[serde(rename = "sendpays")]
+	    SENDPAYS,
+	}
+
+	impl TryFrom<i32> for WaitSubsystem {
+	    type Error = anyhow::Error;
+	    fn try_from(c: i32) -> Result<WaitSubsystem, anyhow::Error> {
+	        match c {
+	    0 => Ok(WaitSubsystem::INVOICES),
+	    1 => Ok(WaitSubsystem::FORWARDS),
+	    2 => Ok(WaitSubsystem::SENDPAYS),
+	            o => Err(anyhow::anyhow!("Unknown variant {} for enum WaitSubsystem", o)),
+	        }
+	    }
+	}
+
+	impl ToString for WaitSubsystem {
+	    fn to_string(&self) -> String {
+	        match self {
+	            WaitSubsystem::INVOICES => "INVOICES",
+	            WaitSubsystem::FORWARDS => "FORWARDS",
+	            WaitSubsystem::SENDPAYS => "SENDPAYS",
+	        }.to_string()
+	    }
+	}
+
+	#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+	pub enum WaitIndexname {
+	    #[serde(rename = "created")]
+	    CREATED,
+	    #[serde(rename = "updated")]
+	    UPDATED,
+	    #[serde(rename = "deleted")]
+	    DELETED,
+	}
+
+	impl TryFrom<i32> for WaitIndexname {
+	    type Error = anyhow::Error;
+	    fn try_from(c: i32) -> Result<WaitIndexname, anyhow::Error> {
+	        match c {
+	    0 => Ok(WaitIndexname::CREATED),
+	    1 => Ok(WaitIndexname::UPDATED),
+	    2 => Ok(WaitIndexname::DELETED),
+	            o => Err(anyhow::anyhow!("Unknown variant {} for enum WaitIndexname", o)),
+	        }
+	    }
+	}
+
+	impl ToString for WaitIndexname {
+	    fn to_string(&self) -> String {
+	        match self {
+	            WaitIndexname::CREATED => "CREATED",
+	            WaitIndexname::UPDATED => "UPDATED",
+	            WaitIndexname::DELETED => "DELETED",
+	        }.to_string()
+	    }
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct WaitRequest {
+	    // Path `Wait.subsystem`
+	    pub subsystem: WaitSubsystem,
+	    // Path `Wait.indexname`
+	    pub indexname: WaitIndexname,
+	    pub nextvalue: u64,
+	}
+
+	impl From<WaitRequest> for Request {
+	    fn from(r: WaitRequest) -> Self {
+	        Request::Wait(r)
+	    }
+	}
+
+	impl IntoRequest for WaitRequest {
+	    type Response = super::responses::WaitResponse;
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1866,6 +1982,8 @@ pub mod responses {
 	    DUALOPEND_AWAITING_LOCKIN,
 	    #[serde(rename = "DUALOPEND_OPEN_COMMITTED")]
 	    DUALOPEND_OPEN_COMMITTED,
+	    #[serde(rename = "DUALOPEND_OPEN_COMMIT_READY")]
+	    DUALOPEND_OPEN_COMMIT_READY,
 	}
 
 	impl TryFrom<i32> for ListpeersPeersChannelsState {
@@ -1884,6 +2002,7 @@ pub mod responses {
 	    9 => Ok(ListpeersPeersChannelsState::DUALOPEND_OPEN_INIT),
 	    10 => Ok(ListpeersPeersChannelsState::DUALOPEND_AWAITING_LOCKIN),
 	    11 => Ok(ListpeersPeersChannelsState::DUALOPEND_OPEN_COMMITTED),
+	    12 => Ok(ListpeersPeersChannelsState::DUALOPEND_OPEN_COMMIT_READY),
 	            o => Err(anyhow::anyhow!("Unknown variant {} for enum ListpeersPeersChannelsState", o)),
 	        }
 	    }
@@ -1904,6 +2023,7 @@ pub mod responses {
 	            ListpeersPeersChannelsState::DUALOPEND_OPEN_INIT => "DUALOPEND_OPEN_INIT",
 	            ListpeersPeersChannelsState::DUALOPEND_AWAITING_LOCKIN => "DUALOPEND_AWAITING_LOCKIN",
 	            ListpeersPeersChannelsState::DUALOPEND_OPEN_COMMITTED => "DUALOPEND_OPEN_COMMITTED",
+	            ListpeersPeersChannelsState::DUALOPEND_OPEN_COMMIT_READY => "DUALOPEND_OPEN_COMMIT_READY",
 	        }.to_string()
 	    }
 	}
@@ -3715,6 +3835,8 @@ pub mod responses {
 	    CHANNELD_AWAITING_SPLICE,
 	    #[serde(rename = "DUALOPEND_OPEN_COMMITTED")]
 	    DUALOPEND_OPEN_COMMITTED,
+	    #[serde(rename = "DUALOPEND_OPEN_COMMIT_READY")]
+	    DUALOPEND_OPEN_COMMIT_READY,
 	}
 
 	impl TryFrom<i32> for ListpeerchannelsChannelsState {
@@ -3734,6 +3856,7 @@ pub mod responses {
 	    10 => Ok(ListpeerchannelsChannelsState::DUALOPEND_AWAITING_LOCKIN),
 	    11 => Ok(ListpeerchannelsChannelsState::CHANNELD_AWAITING_SPLICE),
 	    12 => Ok(ListpeerchannelsChannelsState::DUALOPEND_OPEN_COMMITTED),
+	    13 => Ok(ListpeerchannelsChannelsState::DUALOPEND_OPEN_COMMIT_READY),
 	            o => Err(anyhow::anyhow!("Unknown variant {} for enum ListpeerchannelsChannelsState", o)),
 	        }
 	    }
@@ -3755,6 +3878,7 @@ pub mod responses {
 	            ListpeerchannelsChannelsState::DUALOPEND_AWAITING_LOCKIN => "DUALOPEND_AWAITING_LOCKIN",
 	            ListpeerchannelsChannelsState::CHANNELD_AWAITING_SPLICE => "CHANNELD_AWAITING_SPLICE",
 	            ListpeerchannelsChannelsState::DUALOPEND_OPEN_COMMITTED => "DUALOPEND_OPEN_COMMITTED",
+	            ListpeerchannelsChannelsState::DUALOPEND_OPEN_COMMIT_READY => "DUALOPEND_OPEN_COMMIT_READY",
 	        }.to_string()
 	    }
 	}
@@ -4535,6 +4659,48 @@ pub mod responses {
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct FetchinvoiceChanges {
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub description_appended: Option<String>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub description: Option<String>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub vendor_removed: Option<String>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub vendor: Option<String>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub amount_msat: Option<Amount>,
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct FetchinvoiceNext_period {
+	    pub counter: u64,
+	    pub starttime: u64,
+	    pub endtime: u64,
+	    pub paywindow_start: u64,
+	    pub paywindow_end: u64,
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct FetchinvoiceResponse {
+	    pub invoice: String,
+	    pub changes: FetchinvoiceChanges,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub next_period: Option<FetchinvoiceNext_period>,
+	}
+
+	impl TryFrom<Response> for FetchinvoiceResponse {
+	    type Error = super::TryFromResponseError;
+
+	    fn try_from(response: Response) -> Result<Self, Self::Error> {
+	        match response {
+	            Response::FetchInvoice(response) => Ok(response),
+	            _ => Err(TryFromResponseError)
+	        }
+	    }
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct FundchannelResponse {
 	    pub tx: String,
 	    pub txid: String,
@@ -4960,6 +5126,61 @@ pub mod responses {
 	    fn try_from(response: Response) -> Result<Self, Self::Error> {
 	        match response {
 	            Response::WaitBlockHeight(response) => Ok(response),
+	            _ => Err(TryFromResponseError)
+	        }
+	    }
+	}
+
+	#[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+	pub enum WaitSubsystem {
+	    #[serde(rename = "invoices")]
+	    INVOICES,
+	    #[serde(rename = "forwards")]
+	    FORWARDS,
+	    #[serde(rename = "sendpays")]
+	    SENDPAYS,
+	}
+
+	impl TryFrom<i32> for WaitSubsystem {
+	    type Error = anyhow::Error;
+	    fn try_from(c: i32) -> Result<WaitSubsystem, anyhow::Error> {
+	        match c {
+	    0 => Ok(WaitSubsystem::INVOICES),
+	    1 => Ok(WaitSubsystem::FORWARDS),
+	    2 => Ok(WaitSubsystem::SENDPAYS),
+	            o => Err(anyhow::anyhow!("Unknown variant {} for enum WaitSubsystem", o)),
+	        }
+	    }
+	}
+
+	impl ToString for WaitSubsystem {
+	    fn to_string(&self) -> String {
+	        match self {
+	            WaitSubsystem::INVOICES => "INVOICES",
+	            WaitSubsystem::FORWARDS => "FORWARDS",
+	            WaitSubsystem::SENDPAYS => "SENDPAYS",
+	        }.to_string()
+	    }
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct WaitResponse {
+	    // Path `Wait.subsystem`
+	    pub subsystem: WaitSubsystem,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub created: Option<u64>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub updated: Option<u64>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub deleted: Option<u64>,
+	}
+
+	impl TryFrom<Response> for WaitResponse {
+	    type Error = super::TryFromResponseError;
+
+	    fn try_from(response: Response) -> Result<Self, Self::Error> {
+	        match response {
+	            Response::Wait(response) => Ok(response),
 	            _ => Err(TryFromResponseError)
 	        }
 	    }

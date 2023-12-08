@@ -1431,6 +1431,43 @@ impl From<responses::FeeratesResponse> for pb::FeeratesResponse {
 }
 
 #[allow(unused_variables)]
+impl From<responses::FetchinvoiceChanges> for pb::FetchinvoiceChanges {
+    fn from(c: responses::FetchinvoiceChanges) -> Self {
+        Self {
+            description_appended: c.description_appended, // Rule #2 for type string?
+            description: c.description, // Rule #2 for type string?
+            vendor_removed: c.vendor_removed, // Rule #2 for type string?
+            vendor: c.vendor, // Rule #2 for type string?
+            amount_msat: c.amount_msat.map(|f| f.into()), // Rule #2 for type msat?
+        }
+    }
+}
+
+#[allow(unused_variables)]
+impl From<responses::FetchinvoiceNext_period> for pb::FetchinvoiceNextPeriod {
+    fn from(c: responses::FetchinvoiceNext_period) -> Self {
+        Self {
+            counter: c.counter, // Rule #2 for type u64
+            starttime: c.starttime, // Rule #2 for type u64
+            endtime: c.endtime, // Rule #2 for type u64
+            paywindow_start: c.paywindow_start, // Rule #2 for type u64
+            paywindow_end: c.paywindow_end, // Rule #2 for type u64
+        }
+    }
+}
+
+#[allow(unused_variables)]
+impl From<responses::FetchinvoiceResponse> for pb::FetchinvoiceResponse {
+    fn from(c: responses::FetchinvoiceResponse) -> Self {
+        Self {
+            invoice: c.invoice, // Rule #2 for type string
+            changes: Some(c.changes.into()),
+            next_period: c.next_period.map(|v| v.into()),
+        }
+    }
+}
+
+#[allow(unused_variables)]
 impl From<responses::FundchannelResponse> for pb::FundchannelResponse {
     fn from(c: responses::FundchannelResponse) -> Self {
         Self {
@@ -1624,6 +1661,18 @@ impl From<responses::WaitblockheightResponse> for pb::WaitblockheightResponse {
     fn from(c: responses::WaitblockheightResponse) -> Self {
         Self {
             blockheight: c.blockheight, // Rule #2 for type u32
+        }
+    }
+}
+
+#[allow(unused_variables)]
+impl From<responses::WaitResponse> for pb::WaitResponse {
+    fn from(c: responses::WaitResponse) -> Self {
+        Self {
+            subsystem: c.subsystem as i32,
+            created: c.created, // Rule #2 for type u64?
+            updated: c.updated, // Rule #2 for type u64?
+            deleted: c.deleted, // Rule #2 for type u64?
         }
     }
 }
@@ -2214,6 +2263,22 @@ impl From<requests::FeeratesRequest> for pb::FeeratesRequest {
 }
 
 #[allow(unused_variables)]
+impl From<requests::FetchinvoiceRequest> for pb::FetchinvoiceRequest {
+    fn from(c: requests::FetchinvoiceRequest) -> Self {
+        Self {
+            offer: c.offer, // Rule #2 for type string
+            amount_msat: c.amount_msat.map(|f| f.into()), // Rule #2 for type msat?
+            quantity: c.quantity, // Rule #2 for type u64?
+            recurrence_counter: c.recurrence_counter, // Rule #2 for type u64?
+            recurrence_start: c.recurrence_start, // Rule #2 for type number?
+            recurrence_label: c.recurrence_label, // Rule #2 for type string?
+            timeout: c.timeout, // Rule #2 for type number?
+            payer_note: c.payer_note, // Rule #2 for type string?
+        }
+    }
+}
+
+#[allow(unused_variables)]
 impl From<requests::FundchannelRequest> for pb::FundchannelRequest {
     fn from(c: requests::FundchannelRequest) -> Self {
         Self {
@@ -2342,6 +2407,17 @@ impl From<requests::WaitblockheightRequest> for pb::WaitblockheightRequest {
         Self {
             blockheight: c.blockheight, // Rule #2 for type u32
             timeout: c.timeout, // Rule #2 for type u32?
+        }
+    }
+}
+
+#[allow(unused_variables)]
+impl From<requests::WaitRequest> for pb::WaitRequest {
+    fn from(c: requests::WaitRequest) -> Self {
+        Self {
+            subsystem: c.subsystem as i32,
+            indexname: c.indexname as i32,
+            nextvalue: c.nextvalue, // Rule #2 for type u64
         }
     }
 }
@@ -2921,6 +2997,22 @@ impl From<pb::FeeratesRequest> for requests::FeeratesRequest {
 }
 
 #[allow(unused_variables)]
+impl From<pb::FetchinvoiceRequest> for requests::FetchinvoiceRequest {
+    fn from(c: pb::FetchinvoiceRequest) -> Self {
+        Self {
+            offer: c.offer, // Rule #1 for type string
+            amount_msat: c.amount_msat.map(|a| a.into()), // Rule #1 for type msat?
+            quantity: c.quantity, // Rule #1 for type u64?
+            recurrence_counter: c.recurrence_counter, // Rule #1 for type u64?
+            recurrence_start: c.recurrence_start, // Rule #1 for type number?
+            recurrence_label: c.recurrence_label, // Rule #1 for type string?
+            timeout: c.timeout, // Rule #1 for type number?
+            payer_note: c.payer_note, // Rule #1 for type string?
+        }
+    }
+}
+
+#[allow(unused_variables)]
 impl From<pb::FundchannelRequest> for requests::FundchannelRequest {
     fn from(c: pb::FundchannelRequest) -> Self {
         Self {
@@ -3047,6 +3139,17 @@ impl From<pb::WaitblockheightRequest> for requests::WaitblockheightRequest {
         Self {
             blockheight: c.blockheight, // Rule #1 for type u32
             timeout: c.timeout, // Rule #1 for type u32?
+        }
+    }
+}
+
+#[allow(unused_variables)]
+impl From<pb::WaitRequest> for requests::WaitRequest {
+    fn from(c: pb::WaitRequest) -> Self {
+        Self {
+            subsystem: c.subsystem.try_into().unwrap(),
+            indexname: c.indexname.try_into().unwrap(),
+            nextvalue: c.nextvalue, // Rule #1 for type u64
         }
     }
 }
