@@ -204,15 +204,13 @@ struct db_stmt *invoices_next(struct invoices *invoices,
  * @inv_dbid - the invoice to mark as paid.
  * @received - the actual amount received.
  * @label    - the label of the invoice.
- * @outpoint - the outpoint (if onchain).
  *
  * If the invoice is not UNPAID, returns false.
  */
 bool invoices_resolve(struct invoices *invoices,
 		      u64 inv_dbid,
 		      struct amount_msat received,
-		      const struct json_escape *label,
-		      const struct bitcoin_outpoint *outpoint);
+		      const struct json_escape *label);
 
 /**
  * invoices_waitany - Wait for any invoice to be paid.
