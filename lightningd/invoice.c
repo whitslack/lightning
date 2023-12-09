@@ -171,8 +171,6 @@ struct invoice_payment_hook_payload {
 	struct htlc_set *set;
 	/* What invoice it's trying to pay. */
 	const struct json_escape *label;
-	/* Outpoint that pays the invoice, if paid on chain. */
-	struct bitcoin_outpoint *outpoint;
 	/* Amount it's offering. */
 	struct amount_msat msat;
 	/* Preimage we'll give it if succeeds. */
@@ -220,7 +218,7 @@ invoice_payment_serialize(struct invoice_payment_hook_payload *payload,
 			type_to_string(tmpctx, struct amount_msat,
 				       &payload->msat));
 
-	if (payload->ld->developer && payload->set)
+	if (payload->ld->developer)
 		invoice_payment_add_tlvs(stream, payload->set);
 	json_object_end(stream); /* .payment */
 }
@@ -323,21 +321,19 @@ invoice_payment_hooks_done(struct invoice_payment_hook_payload *payload STEALS)
 	/* Paid or expired in the meantime. */
 	if (!invoices_resolve(ld->wallet->invoices, inv_dbid, payload->msat,
 			      payload->label)) {
-		if (payload->set)
-			htlc_set_fail(payload->set, take(failmsg_incorrect_or_unknown(
-								NULL, ld, payload->set->htlcs[0])));
+		htlc_set_fail(payload->set, take(failmsg_incorrect_or_unknown(
+							 NULL, ld, payload->set->htlcs[0])));
 		return;
 	}
 
 	log_info(ld->log, "Resolved invoice '%s' with amount %s in %zu htlcs",
 		 payload->label->s,
 		 type_to_string(tmpctx, struct amount_msat, &payload->msat),
-		 payload->set ? tal_count(payload->set->htlcs) : 0);
-	if (payload->set)
-		htlc_set_fulfill(payload->set, &payload->preimage);
+		 tal_count(payload->set->htlcs));
+	htlc_set_fulfill(payload->set, &payload->preimage);
 
 	notify_invoice_payment(ld, payload->msat, payload->preimage,
-			       payload->label, payload->outpoint);
+			       payload->label);
 }
 
 static bool
@@ -349,20 +345,18 @@ invoice_payment_deserialize(struct invoice_payment_hook_payload *payload,
 	const u8 *failmsg;
 
 	/* If peer dies or something, this can happen. */
-	if (!payload->set && !payload->outpoint) {
+	if (!payload->set) {
 		log_debug(ld->log, "invoice '%s' paying htlc_in has gone!",
 			  payload->label->s);
 		return false;
 	}
 
-	if (payload->set) {
-		/* Did we have a hook result? */
-		failmsg = hook_gives_failmsg(NULL, ld,
-						payload->set->htlcs[0], buffer, toks);
-		if (failmsg) {
-			htlc_set_fail(payload->set, take(failmsg));
-			return false;
-		}
+	/* Did we have a hook result? */
+	failmsg = hook_gives_failmsg(NULL, ld,
+				     payload->set->htlcs[0], buffer, toks);
+	if (failmsg) {
+		htlc_set_fail(payload->set, take(failmsg));
+		return false;
 	}
 	return true;
 }
@@ -474,23 +468,18 @@ invoice_check_payment(const tal_t *ctx,
 
 void invoice_try_pay(struct lightningd *ld,
 		     struct htlc_set *set,
-		     const struct invoice_details *details,
-		     struct amount_msat msat,
-		     const struct bitcoin_outpoint *outpoint)
+		     const struct invoice_details *details)
 {
 	struct invoice_payment_hook_payload *payload;
 
 	payload = tal(NULL, struct invoice_payment_hook_payload);
 	payload->ld = ld;
 	payload->label = tal_steal(payload, details->label);
+	payload->msat = set->so_far;
 	payload->preimage = details->r;
-	payload->msat = msat;
 	payload->set = set;
-	payload->outpoint = tal_dup_or_null(payload, struct bitcoin_outpoint, outpoint);
+	tal_add_destructor2(set, invoice_payload_remove_set, payload);
 
-	// set is NULL if invoice is being paid on-chain
-	if (payload->set)
-		tal_add_destructor2(set, invoice_payload_remove_set, payload);
 	plugin_hook_call_invoice_payment(ld, NULL, payload);
 }
 

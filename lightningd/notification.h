@@ -41,8 +41,7 @@ void notify_disconnect(struct lightningd *ld, struct node_id *nodeid);
 void notify_warning(struct lightningd *ld, struct log_entry *l);
 
 void notify_invoice_payment(struct lightningd *ld, struct amount_msat amount,
-			    struct preimage preimage, const struct json_escape *label,
-			    const struct bitcoin_outpoint *outpoint);
+			    struct preimage preimage, const struct json_escape *label);
 
 void notify_invoice_creation(struct lightningd *ld, struct amount_msat *amount,
 			    struct preimage preimage, const struct json_escape *label);
