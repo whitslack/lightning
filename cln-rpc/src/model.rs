@@ -2564,14 +2564,6 @@ pub mod responses {
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
-	pub struct CreateinvoicePaid_outpoint {
-	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub txid: Option<String>,
-	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub outnum: Option<u32>,
-	}
-
-	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct CreateinvoiceResponse {
 	    pub label: String,
 	    #[serde(skip_serializing_if = "Option::is_none")]
@@ -2593,8 +2585,6 @@ pub mod responses {
 	    pub amount_received_msat: Option<Amount>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub paid_at: Option<u64>,
-	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub paid_outpoint: Option<CreateinvoicePaid_outpoint>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub payment_preimage: Option<Secret>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
@@ -2876,14 +2866,6 @@ pub mod responses {
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
-	pub struct ListinvoicesInvoicesPaid_outpoint {
-	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub txid: Option<String>,
-	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub outnum: Option<u32>,
-	}
-
-	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct ListinvoicesInvoices {
 	    pub label: String,
 	    #[serde(skip_serializing_if = "Option::is_none")]
@@ -2912,8 +2894,6 @@ pub mod responses {
 	    pub amount_received_msat: Option<Amount>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub paid_at: Option<u64>,
-	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub paid_outpoint: Option<ListinvoicesInvoicesPaid_outpoint>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub payment_preimage: Option<Secret>,
 	}
@@ -3293,14 +3273,6 @@ pub mod responses {
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
-	pub struct WaitanyinvoicePaid_outpoint {
-	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub txid: Option<String>,
-	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub outnum: Option<u32>,
-	}
-
-	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct WaitanyinvoiceResponse {
 	    pub label: String,
 	    pub description: String,
@@ -3324,8 +3296,6 @@ pub mod responses {
 	    pub amount_received_msat: Option<Amount>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub paid_at: Option<u64>,
-	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub paid_outpoint: Option<WaitanyinvoicePaid_outpoint>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub payment_preimage: Option<Secret>,
 	}
@@ -3371,14 +3341,6 @@ pub mod responses {
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
-	pub struct WaitinvoicePaid_outpoint {
-	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub txid: Option<String>,
-	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub outnum: Option<u32>,
-	}
-
-	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct WaitinvoiceResponse {
 	    pub label: String,
 	    pub description: String,
@@ -3402,8 +3364,6 @@ pub mod responses {
 	    pub amount_received_msat: Option<Amount>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub paid_at: Option<u64>,
-	    #[serde(skip_serializing_if = "Option::is_none")]
-	    pub paid_outpoint: Option<WaitinvoicePaid_outpoint>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub payment_preimage: Option<Secret>,
 	}
