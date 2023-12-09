@@ -581,6 +581,48 @@ static void channel_announcement_negotiate(struct peer *peer)
 	}
 }
 
+static void lock_signer_outpoint(const struct bitcoin_outpoint *outpoint)
+{
+	const u8 *msg;
+	bool is_buried = false;
+
+	/* FIXME(vincenzopalazzo): Sleeping in a deamon of cln should be never fine
+	 * howerver the core deamon of cln will never trigger the sleep.
+	 *
+	 * I think that the correct solution for this is a timer base solution, but this
+	 * required a little bit of refactoring */
+	do {
+		/* Make sure the hsmd agrees that this outpoint is
+		 * sufficiently buried. */
+		msg = towire_hsmd_check_outpoint(NULL, &outpoint->txid, outpoint->n);
+		msg = hsm_req(tmpctx, take(msg));
+		if (!fromwire_hsmd_check_outpoint_reply(msg, &is_buried))
+			status_failed(STATUS_FAIL_HSM_IO,
+				      "Bad hsmd_check_outpoint_reply: %s",
+				      tal_hex(tmpctx, msg));
+
+		/* the signer should have a shorter buried height requirement so
+		 * it almost always will be ready ahead of us.*/
+		if (!is_buried)
+			sleep(10);
+	} while (!is_buried);
+
+	/* tell the signer that we are now locked */
+	msg = towire_hsmd_lock_outpoint(NULL, &outpoint->txid, outpoint->n);
+	msg = hsm_req(tmpctx, take(msg));
+	if (!fromwire_hsmd_lock_outpoint_reply(msg))
+		status_failed(STATUS_FAIL_HSM_IO,
+			      "Bad hsmd_lock_outpoint_reply: %s",
+			      tal_hex(tmpctx, msg));
+}
+
+/* Call this method when channel_ready status are changed. */
+static void check_mutual_channel_ready(const struct peer *peer)
+{
+	if (peer->channel_ready[LOCAL] && peer->channel_ready[REMOTE])
+		lock_signer_outpoint(&peer->channel->funding);
+}
+
 static void handle_peer_channel_ready(struct peer *peer, const u8 *msg)
 {
 	struct channel_id chanid;
@@ -614,6 +656,7 @@ static void handle_peer_channel_ready(struct peer *peer, const u8 *msg)
 
 	peer->tx_sigs_allowed = false;
 	peer->channel_ready[REMOTE] = true;
+	check_mutual_channel_ready(peer);
 	if (tlvs->short_channel_id != NULL) {
 		status_debug(
 		    "Peer told us that they'll use alias=%s for this channel",

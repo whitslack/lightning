@@ -4035,6 +4035,8 @@ pub mod responses {
 	    P2WPKH,
 	    #[serde(rename = "P2WSH")]
 	    P2WSH,
+	    #[serde(rename = "P2TR")]
+	    P2TR,
 	}
 
 	impl TryFrom<i32> for DecodepayFallbacksType {
@@ -4045,6 +4047,7 @@ pub mod responses {
 	    1 => Ok(DecodepayFallbacksType::P2SH),
 	    2 => Ok(DecodepayFallbacksType::P2WPKH),
 	    3 => Ok(DecodepayFallbacksType::P2WSH),
+	    4 => Ok(DecodepayFallbacksType::P2TR),
 	            o => Err(anyhow::anyhow!("Unknown variant {} for enum DecodepayFallbacksType", o)),
 	        }
 	    }
@@ -4057,6 +4060,7 @@ pub mod responses {
 	            DecodepayFallbacksType::P2SH => "P2SH",
 	            DecodepayFallbacksType::P2WPKH => "P2WPKH",
 	            DecodepayFallbacksType::P2WSH => "P2WSH",
+	            DecodepayFallbacksType::P2TR => "P2TR",
 	        }.to_string()
 	    }
 	}
