@@ -110,7 +110,6 @@ start_nodes() {
 			funder-fuzz-percent=0
 			lease-fee-base-sat=2sat
 			lease-fee-basis=50
-			invoices-onchain-fallback
 			EOF
 		fi
 

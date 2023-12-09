@@ -384,9 +384,6 @@ struct lightningd {
 	/* --experimental-upgrade-protocol */
 	bool experimental_upgrade_protocol;
 
-	/* --invoices-onchain-fallback */
-	bool unified_invoices;
-
 	/* For anchors: how much do we keep for spending close txs? */
 	struct amount_sat emergency_sat;
 
