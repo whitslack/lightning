@@ -21,9 +21,6 @@
  *   - HTLC timed out
  *   - HTLC spent
  *
- * - Payments to invoice fallback addresses:
- *   - Reached a given depth.
- *
  * We do this by adding the P2SH address to the wallet, and then querying
  * that using listtransactions.
  *
