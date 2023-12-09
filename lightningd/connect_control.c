@@ -188,11 +188,11 @@ static struct command_result *json_connect(struct command *cmd,
 
 	id_addr.host = NULL;
 	id_addr.port = NULL;
-	if (!param(cmd, buffer, params,
-		   p_req("id", param_id_maybe_addr, &id_addr),
-		   p_opt("host", param_id_addr_string, &id_addr.host),
-		   p_opt("port", param_id_addr_u16, &id_addr.port),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("id", param_id_maybe_addr, &id_addr),
+			 p_opt("host", param_id_addr_string, &id_addr.host),
+			 p_opt("port", param_id_addr_u16, &id_addr.port),
+			 NULL))
 		return command_param_failed();
 
 	/* If we have a host, convert */
@@ -228,6 +228,9 @@ static struct command_result *json_connect(struct command *cmd,
 			return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
 					    "Can't specify port without host");
 	}
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
 
 	/* If we know about peer, see if it's already connected. */
 	peer = peer_by_id(cmd->ld, &id_addr.id);
@@ -579,6 +582,7 @@ static unsigned connectd_msg(struct subd *connectd, const u8 *msg, const int *fd
 	case WIRE_CONNECTD_SEND_ONIONMSG:
 	case WIRE_CONNECTD_CUSTOMMSG_OUT:
 	case WIRE_CONNECTD_START_SHUTDOWN:
+	case WIRE_CONNECTD_SET_CUSTOMMSGS:
 	/* This is a reply, so never gets through to here. */
 	case WIRE_CONNECTD_INIT_REPLY:
 	case WIRE_CONNECTD_ACTIVATE_REPLY:
@@ -790,10 +794,10 @@ static struct command_result *json_sendcustommsg(struct command *cmd,
 	u8 *msg;
 	int type;
 
-	if (!param(cmd, buffer, params,
-		   p_req("node_id", param_node_id, &dest),
-		   p_req("msg", param_bin_from_hex, &msg),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("node_id", param_node_id, &dest),
+			 p_req("msg", param_bin_from_hex, &msg),
+			 NULL))
 		return command_param_failed();
 
 	type = fromwire_peektype(msg);
@@ -810,13 +814,12 @@ static struct command_result *json_sendcustommsg(struct command *cmd,
 	}
 
 	if (type % 2 == 0) {
-		return command_fail(
-		    cmd, JSONRPC2_INVALID_REQUEST,
-		    "Cannot send even-typed %d custom message. Currently "
-		    "custom messages are limited to odd-numbered message "
-		    "types, as even-numbered types might result in "
-		    "disconnections.",
-		    type);
+		/* INFO the first time, then DEBUG */
+		static enum log_level level = LOG_INFORM;
+		log_(cmd->ld->log, level, dest, false,
+		     "sendcustommsg id=%s sending a custom even message (%u)",
+		     cmd->id, type);
+		level = LOG_DBG;
 	}
 
 	peer = peer_by_id(cmd->ld, dest);
@@ -831,6 +834,9 @@ static struct command_result *json_sendcustommsg(struct command *cmd,
 	if (peer->connected == PEER_DISCONNECTED)
 		return command_fail(cmd, JSONRPC2_INVALID_REQUEST,
 				    "Peer is not connected");
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
 
 	subd_send_msg(cmd->ld->connectd,
 		      take(towire_connectd_custommsg_out(cmd, dest, msg)));

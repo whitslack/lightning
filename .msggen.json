@@ -38,6 +38,7 @@
         "DecodepayFallbacksType": {
             "P2PKH": 0,
             "P2SH": 1,
+            "P2TR": 4,
             "P2WPKH": 2,
             "P2WSH": 3
         },
@@ -438,6 +439,13 @@
             "Datastore.key": 5,
             "Datastore.key[]": 1,
             "Datastore.string": 4
+        },
+        "DatastoreusageDatastoreusage": {
+            "DatastoreUsage.datastoreusage.key": 1,
+            "DatastoreUsage.datastoreusage.total_bytes": 2
+        },
+        "DatastoreusageResponse": {
+            "DatastoreUsage.datastoreusage": 1
         },
         "DecodeExtra": {
             "Decode.extra[].data": 2,
@@ -1579,6 +1587,13 @@
             "WaitAnyInvoice.status": 4,
             "WaitAnyInvoice.updated_index": 14
         },
+        "WaitblockheightRequest": {
+            "WaitBlockHeight.blockheight": 1,
+            "WaitBlockHeight.timeout": 2
+        },
+        "WaitblockheightResponse": {
+            "WaitBlockHeight.blockheight": 1
+        },
         "WaitinvoiceRequest": {
             "WaitInvoice.label": 1
         },
@@ -1896,6 +1911,22 @@
         },
         "Datastore.string": {
             "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "DatastoreUsage": {
+            "added": "v23.11",
+            "deprecated": false
+        },
+        "DatastoreUsage.datastoreusage": {
+            "added": "v23.11",
+            "deprecated": false
+        },
+        "DatastoreUsage.datastoreusage.key": {
+            "added": "v23.11",
+            "deprecated": false
+        },
+        "DatastoreUsage.datastoreusage.total_bytes": {
+            "added": "v23.11",
             "deprecated": false
         },
         "Decode": {
@@ -5516,6 +5547,18 @@
         },
         "WaitAnyInvoice.updated_index": {
             "added": "v23.08",
+            "deprecated": false
+        },
+        "WaitBlockHeight": {
+            "added": "pre-v0.10.1",
+            "deprecated": null
+        },
+        "WaitBlockHeight.blockheight": {
+            "added": "pre-v0.10.1",
+            "deprecated": false
+        },
+        "WaitBlockHeight.timeout": {
+            "added": "pre-v0.10.1",
             "deprecated": false
         },
         "WaitInvoice": {

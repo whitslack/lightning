@@ -16,6 +16,8 @@
 #include <common/memleak.h>
 #include <common/timeout.h>
 #include <common/version.h>
+#include <connectd/connectd_wiregen.h>
+#include <db/exec.h>
 #include <dirent.h>
 #include <errno.h>
 #include <lightningd/io_loop_with_timers.h>
@@ -23,6 +25,7 @@
 #include <lightningd/plugin.h>
 #include <lightningd/plugin_control.h>
 #include <lightningd/plugin_hook.h>
+#include <lightningd/subd.h>
 #include <sys/stat.h>
 
 /* Only this file can include this generated header! */
@@ -36,19 +39,10 @@
  * `getmanifest` call anyway, that's what `init` is for. */
 #define PLUGIN_MANIFEST_TIMEOUT 60
 
-/* A simple struct associating an incoming RPC method call with the plugin
- * that is handling it and the downstream jsonrpc_request. */
-struct plugin_rpccall {
-	struct list_node list;
-	struct command *cmd;
-	struct plugin *plugin;
-	struct jsonrpc_request *request;
-};
-
 static void memleak_help_pending_requests(struct htable *memtable,
-					  struct plugins *plugins)
+					  struct plugin *plugin)
 {
-	memleak_scan_strmap(memtable, &plugins->pending_requests);
+	memleak_scan_strmap(memtable, &plugin->pending_requests);
 }
 
 static const char *state_desc(const struct plugin *plugin)
@@ -82,8 +76,7 @@ struct plugins *plugins_new(const tal_t *ctx, struct log_book *log_book,
 	p->blacklist = tal_arr(p, const char *, 0);
 	p->plugin_idx = 0;
 	p->dev_builtin_plugins_unimportant = false;
-	strmap_init(&p->pending_requests);
-	memleak_add_helper(p, memleak_help_pending_requests);
+	p->want_db_transaction = true;
 
 	return p;
 }
@@ -192,20 +185,95 @@ struct command_result *plugin_register_all_complete(struct lightningd *ld,
 	return NULL;
 }
 
+static void tell_connectd_custommsgs(struct plugins *plugins)
+{
+	struct plugin *p;
+	size_t n = 0;
+	u16 *all_msgs = tal_arr(tmpctx, u16, n);
+
+	/* Not when shutting down */
+	if (!plugins->ld->connectd)
+		return;
+
+	/* Gather from all plugins. */
+	list_for_each(&plugins->plugins, p, list) {
+		size_t num = tal_count(p->custom_msgs);
+		/* Blah blah blah memcpy NULL blah blah */
+		if (num == 0)
+			continue;
+		tal_resize(&all_msgs, n + num);
+		memcpy(all_msgs + n, p->custom_msgs, num * sizeof(*p->custom_msgs));
+		n += num;
+	}
+
+	/* Don't bother sorting or uniquifying.  If plugins are dumb, they deserve it. */
+	subd_send_msg(plugins->ld->connectd,
+		      take(towire_connectd_set_custommsgs(NULL, all_msgs)));
+}
+
+/* Steal req onto reqs. */
+static bool request_add(const char *reqid, struct jsonrpc_request *req,
+			struct jsonrpc_request ***reqs)
+{
+	tal_arr_expand(reqs, tal_steal(*reqs, req));
+	/* Keep iterating */
+	return true;
+}
+
+/* FIXME: reorder */
+static const char *plugin_read_json_one(struct plugin *plugin,
+					bool want_transaction,
+					bool *complete,
+					bool *destroyed);
+
+/* We act as if the plugin itself said "I'm dead!" */
+static void plugin_terminated_fail_req(struct plugin *plugin,
+				       struct jsonrpc_request *req)
+{
+	bool complete, destroyed;
+	const char *err;
+
+	jsmn_init(&plugin->parser);
+	toks_reset(plugin->toks);
+	tal_free(plugin->buffer);
+	plugin->buffer = tal_fmt(plugin,
+				 "{\"jsonrpc\": \"2.0\","
+				 "\"id\": %s,"
+				 "\"error\":"
+				 " {\"code\":%i, \"message\":\"%s\"}"
+				 "}\n\n",
+				 req->id,
+				 PLUGIN_TERMINATED,
+				 "Plugin terminated before replying to RPC call.");
+	plugin->used = strlen(plugin->buffer);
+
+	/* We're already in a transaction, don't do it again! */
+	err = plugin_read_json_one(plugin, false, &complete, &destroyed);
+	assert(!err);
+	assert(complete);
+}
+
 static void destroy_plugin(struct plugin *p)
 {
-	struct plugin_rpccall *call;
+	struct jsonrpc_request **reqs;
 
 	list_del(&p->list);
 
-	/* Terminate all pending RPC calls with an error. */
-	list_for_each(&p->pending_rpccalls, call, list) {
-		was_pending(command_fail(
-		    call->cmd, PLUGIN_TERMINATED,
-		    "Plugin terminated before replying to RPC call."));
+	/* Don't have p->conn destructor run. */
+	if (p->stdout_conn)
+		io_set_finish(p->stdout_conn, NULL, NULL);
+
+	/* Gather all pending RPC calls (we can't iterate as we delete!) */
+	reqs = tal_arr(NULL, struct jsonrpc_request *, 0);
+	strmap_iterate(&p->pending_requests, request_add, &reqs);
+
+	/* Don't fail requests if we're exiting anyway! */
+	if (p->plugins->ld->state != LD_STATE_SHUTDOWN) {
+		for (size_t i = 0; i < tal_count(reqs); i++)
+			plugin_terminated_fail_req(p, reqs[i]);
 	}
-	/* Reset, so calls below don't try to fail it again! */
-	list_head_init(&p->pending_rpccalls);
+	/* Now free all the requests */
+	tal_free(reqs);
 
 	/* If this was last one manifests were waiting for, handle deps */
 	if (p->plugin_state == AWAITING_GETMANIFEST_RESPONSE)
@@ -232,6 +300,9 @@ static void destroy_plugin(struct plugin *p)
 			   "shutting down lightningd!");
 		lightningd_exit(p->plugins->ld, 1);
 	}
+
+	if (tal_count(p->custom_msgs))
+		tell_connectd_custommsgs(p->plugins);
 }
 
 static u32 file_checksum(struct lightningd *ld, const char *path)
@@ -293,6 +364,7 @@ struct plugin *plugin_register(struct plugins *plugins, const char* path TAKES,
 	p->dynamic = false;
 	p->non_numeric_ids = false;
 	p->index = plugins->plugin_idx++;
+	p->stdout_conn = NULL;
 
 	p->log = new_logger(p, plugins->ld->log_book, NULL, "plugin-%s", p->shortname);
 	p->methods = tal_arr(p, const char *, 0);
@@ -300,11 +372,14 @@ struct plugin *plugin_register(struct plugins *plugins, const char* path TAKES,
 
 	list_add_tail(&plugins->plugins, &p->list);
 	tal_add_destructor(p, destroy_plugin);
-	list_head_init(&p->pending_rpccalls);
+	strmap_init(&p->pending_requests);
+	memleak_add_helper(p, memleak_help_pending_requests);
 
 	p->important = important;
 	p->parambuf = tal_steal(p, parambuf);
 	p->params = tal_steal(p, params);
+	p->custom_msgs = NULL;
+
 	return p;
 }
 
@@ -378,8 +453,6 @@ void plugin_kill(struct plugin *plugin, enum log_level loglevel,
 		plugin->start_cmd = NULL;
 	}
 
-	/* Don't come back when we free stdout_conn! */
-	io_set_finish(plugin->stdout_conn, NULL, NULL);
 	tal_free(plugin);
 }
 
@@ -448,15 +521,11 @@ static const char *plugin_notify_handle(struct plugin *plugin,
 	}
 
 	/* Include any "" in id */
-	request = strmap_getn(&plugin->plugins->pending_requests,
+	request = strmap_getn(&plugin->pending_requests,
 			      json_tok_full(plugin->buffer, idtok),
 			      json_tok_full_len(idtok));
 	if (!request) {
-		return tal_fmt(
-			plugin,
-			"Received a JSON-RPC notify for non-existent request '%.*s'",
-			json_tok_full_len(idtok),
-			json_tok_full(plugin->buffer, idtok));
+		return NULL;
 	}
 
 	/* Ignore if they don't have a callback */
@@ -560,40 +629,36 @@ static bool was_plugin_destroyed(struct plugin_destroyed *pd)
 	return true;
 }
 
-/* Returns the error string, or NULL */
-static const char *plugin_response_handle(struct plugin *plugin,
-					  const jsmntok_t *toks,
-					  const jsmntok_t *idtok)
-	WARN_UNUSED_RESULT;
-
-static const char *plugin_response_handle(struct plugin *plugin,
-					  const jsmntok_t *toks,
-					  const jsmntok_t *idtok)
+static void destroy_request(struct jsonrpc_request *req,
+                            struct plugin *plugin)
 {
-	struct plugin_destroyed *pd;
-	struct jsonrpc_request *request;
+	strmap_del(&plugin->pending_requests, req->id, NULL);
+}
 
-	request = strmap_getn(&plugin->plugins->pending_requests,
+static void plugin_response_handle(struct plugin *plugin,
+				   const jsmntok_t *toks,
+				   const jsmntok_t *idtok)
+{
+	struct jsonrpc_request *request;
+	const tal_t *ctx;
+
+	request = strmap_getn(&plugin->pending_requests,
 			      json_tok_full(plugin->buffer, idtok),
 			      json_tok_full_len(idtok));
+	/* Can happen if request was freed before plugin responded */
 	if (!request) {
-		return tal_fmt(
-			plugin,
-			"Received a JSON-RPC response for non-existent request '%.*s'",
-			json_tok_full_len(idtok),
-			json_tok_full(plugin->buffer, idtok));
+		return;
 	}
 
-	/* We expect the request->cb to copy if needed */
-	pd = plugin_detect_destruction(plugin);
+
+	/* Request callback often frees request: if not, we do. */
+	ctx = tal(NULL, char);
+	tal_steal(ctx, request);
+	/* Don't keep track of this request; we will terminate it */
+	tal_del_destructor2(request, destroy_request, plugin);
+	destroy_request(request, plugin);
 	request->response_cb(plugin->buffer, toks, idtok, request->response_cb_arg);
-
-	/* Note that in the case of 'plugin stop' this can free request (since
-	 * plugin is parent), so detect that case */
-	if (!was_plugin_destroyed(pd))
-		tal_free(request);
-
-	return NULL;
+	tal_free(ctx);
 }
 
 /**
@@ -606,12 +671,14 @@ static const char *plugin_response_handle(struct plugin *plugin,
  * If @destroyed was set, it means the plugin called plugin stop on itself.
  */
 static const char *plugin_read_json_one(struct plugin *plugin,
+					bool want_transaction,
 					bool *complete,
 					bool *destroyed)
 {
 	const jsmntok_t *jrtok, *idtok;
 	struct plugin_destroyed *pd;
 	const char *err;
+	struct wallet *wallet = plugin->plugins->ld->wallet;
 
 	*destroyed = false;
 	/* Note that in the case of 'plugin stop' this can free request (since
@@ -653,6 +720,11 @@ static const char *plugin_read_json_one(struct plugin *plugin,
 		    plugin,
 		    "JSON-RPC message does not contain \"jsonrpc\" field");
 	}
+
+	/* We can be called extremely early, or as db hook, or for
+	 * fake "terminated" request. */
+	if (want_transaction)
+		db_begin_transaction(wallet->db);
 
 	pd = plugin_detect_destruction(plugin);
 	if (!idtok) {
@@ -697,8 +769,11 @@ static const char *plugin_read_json_one(struct plugin *plugin,
 		 *
 		 * https://www.jsonrpc.org/specification#response_object
 		 */
-		err = plugin_response_handle(plugin, plugin->toks, idtok);
+		plugin_response_handle(plugin, plugin->toks, idtok);
+		err = NULL;
 	}
+	if (want_transaction)
+		db_commit_transaction(wallet->db);
 
 	/* Corner case: rpc_command hook can destroy plugin for 'plugin
 	 * stop'! */
@@ -720,6 +795,9 @@ static struct io_plan *plugin_read_json(struct io_conn *conn,
 {
 	bool success;
 	bool have_full;
+	/* wallet is NULL in really early code */
+	bool want_transaction = (plugin->plugins->want_db_transaction
+				 && plugin->plugins->ld->wallet != NULL);
 
 	log_io(plugin->log, LOG_IO_IN, NULL, "",
 	       plugin->buffer + plugin->used, plugin->len_read);
@@ -741,8 +819,9 @@ static struct io_plan *plugin_read_json(struct io_conn *conn,
 		do {
 			bool destroyed;
 			const char *err;
-			err =
-			    plugin_read_json_one(plugin, &success, &destroyed);
+
+			err = plugin_read_json_one(plugin, want_transaction,
+						   &success, &destroyed);
 
 			/* If it's destroyed, conn is already freed! */
 			if (destroyed)
@@ -793,11 +872,14 @@ static struct io_plan *plugin_write_json(struct io_conn *conn,
 /* This catches the case where their stdout closes (usually they're dead). */
 static void plugin_conn_finish(struct io_conn *conn, struct plugin *plugin)
 {
+	struct db *db = plugin->plugins->ld->wallet->db;
+	db_begin_transaction(db);
 	/* This is expected at shutdown of course. */
 	plugin_kill(plugin,
 		    plugin->plugins->ld->state == LD_STATE_SHUTDOWN
 		    ? LOG_DBG : LOG_INFORM,
 		    "exited %s", state_desc(plugin));
+	db_commit_transaction(db);
 }
 
 struct io_plan *plugin_stdin_conn_init(struct io_conn *conn,
@@ -1096,27 +1178,22 @@ static void json_stream_forward_change_id(struct json_stream *stream,
 static void plugin_rpcmethod_cb(const char *buffer,
 				const jsmntok_t *toks,
 				const jsmntok_t *idtok,
-				struct plugin_rpccall *call)
+				struct command *cmd)
 {
-	struct command *cmd = call->cmd;
 	struct json_stream *response;
 
 	response = json_stream_raw_for_cmd(cmd);
 	json_stream_forward_change_id(response, buffer, toks, idtok, cmd->id);
 	json_stream_double_cr(response);
 	command_raw_complete(cmd, response);
-
-	list_del(&call->list);
-	tal_free(call);
 }
 
 static void plugin_notify_cb(const char *buffer,
 			     const jsmntok_t *methodtok,
 			     const jsmntok_t *paramtoks,
 			     const jsmntok_t *idtok,
-			     struct plugin_rpccall *call)
+			     struct command *cmd)
 {
-	struct command *cmd = call->cmd;
 	struct json_stream *response;
 
 	if (!cmd->jcon || !cmd->send_notifications)
@@ -1160,7 +1237,6 @@ static struct command_result *plugin_rpcmethod_dispatch(struct command *cmd,
 	const jsmntok_t *idtok;
 	struct plugin *plugin;
 	struct jsonrpc_request *req;
-	struct plugin_rpccall *call;
 
 	if (cmd->mode == CMD_CHECK)
 		return command_param_failed();
@@ -1173,17 +1249,11 @@ static struct command_result *plugin_rpcmethod_dispatch(struct command *cmd,
 	idtok = json_get_member(buffer, toks, "id");
 	assert(idtok != NULL);
 
-	call = tal(plugin, struct plugin_rpccall);
-	call->cmd = cmd;
-
 	req = jsonrpc_request_start_raw(plugin, cmd->json_cmd->name,
 					cmd->id, plugin->non_numeric_ids,
 					plugin->log,
 					plugin_notify_cb,
-					plugin_rpcmethod_cb, call);
-	call->request = req;
-	call->plugin = plugin;
-	list_add_tail(&plugin->pending_rpccalls, &call->list);
+					plugin_rpcmethod_cb, cmd);
 
 	json_stream_forward_change_id(req->stream, buffer, toks, idtok, req->id);
 	json_stream_double_cr(req->stream);
@@ -1545,7 +1615,7 @@ static const char *plugin_parse_getmanifest_response(const char *buffer,
 						     struct plugin *plugin,
 	const char **disabled)
 {
-	const jsmntok_t *resulttok, *dynamictok, *featurestok, *tok;
+	const jsmntok_t *resulttok, *dynamictok, *featurestok, *custommsgtok, *tok;
 	const char *err;
 
 	*disabled = NULL;
@@ -1616,6 +1686,25 @@ static const char *plugin_parse_getmanifest_response(const char *buffer,
 		if (!feature_set_or(plugin->plugins->ld->our_features, fset)) {
 			return tal_fmt(plugin,
 				    "Custom featurebits already present");
+		}
+	}
+
+	custommsgtok = json_get_member(buffer, resulttok, "custommessages");
+	if (custommsgtok) {
+		size_t i;
+		const jsmntok_t *t;
+
+		if (custommsgtok->type != JSMN_ARRAY)
+			return tal_fmt(plugin, "custommessages must be array, not '%.*s'",
+				       json_tok_full_len(custommsgtok),
+				       json_tok_full(buffer, custommsgtok));
+		plugin->custom_msgs = tal_arr(plugin, u16, custommsgtok->size);
+		json_for_each_arr(i, t, custommsgtok) {
+			if (!json_to_u16(buffer, t, &plugin->custom_msgs[i]))
+				return tal_fmt(plugin, "custommessages %zu not a u16: '%.*s'",
+					       i,
+					       json_tok_full_len(t),
+					       json_tok_full(buffer, t));
 		}
 	}
 
@@ -1929,6 +2018,8 @@ static void plugin_config_cb(const char *buffer,
 		plugin_cmd_succeeded(plugin->start_cmd, plugin);
 		plugin->start_cmd = NULL;
 	}
+	if (tal_count(plugin->custom_msgs))
+		tell_connectd_custommsgs(plugin->plugins);
 	check_plugins_initted(plugin->plugins);
 }
 
@@ -2274,20 +2365,14 @@ void plugins_notify(struct plugins *plugins,
 	}
 }
 
-static void destroy_request(struct jsonrpc_request *req,
-                            struct plugin *plugin)
-{
-	strmap_del(&plugin->plugins->pending_requests, req->id, NULL);
-}
-
 void plugin_request_send(struct plugin *plugin,
-			 struct jsonrpc_request *req TAKES)
+			 struct jsonrpc_request *req)
 {
 	/* Add to map so we can find it later when routing the response */
-	tal_steal(plugin, req);
-	strmap_add(&plugin->plugins->pending_requests, req->id, req);
-	/* Add destructor in case plugin dies. */
+	strmap_add(&plugin->pending_requests, req->id, req);
+	/* Add destructor in case request is freed. */
 	tal_add_destructor2(req, destroy_request, plugin);
+
 	plugin_send(plugin, req->stream);
 	/* plugin_send steals the stream, so remove the dangling
 	 * pointer here */
@@ -2306,8 +2391,11 @@ void *plugins_exclusive_loop(struct plugin **plugins)
 		io_conn_exclusive(plugins[i]->stdout_conn, true);
 	}
 
+	/* We don't want to try to open another transaction: we're in one! */
+	plugins[0]->plugins->want_db_transaction = false;
 	/* We don't service timers here, either! */
 	ret = io_loop(NULL, NULL);
+	plugins[0]->plugins->want_db_transaction = true;
 	log_debug(plugins[0]->plugins->ld->log, "io_loop: %s", __func__);
 
 	for (i = 0; i < tal_count(plugins); ++i) {

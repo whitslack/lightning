@@ -715,6 +715,22 @@ class PrettyPrintingLightningRpc(LightningRpc):
                     testpayload[k] = v
             schemas[0].validate(testpayload)
 
+        if method != 'check':
+            if isinstance(payload, dict):
+                checkpayload = payload.copy()
+                checkpayload['command_to_check'] = method
+            elif payload is None:
+                checkpayload = [method]
+            else:
+                checkpayload = [method] + list(payload)
+
+            # This can fail, that's fine!  But causes lightningd to check
+            # that we don't access db.
+            try:
+                LightningRpc.call(self, 'check', checkpayload)
+            except ValueError:
+                pass
+
         res = LightningRpc.call(self, method, payload, cmdprefix, filter)
         self.logger.debug(json.dumps({
             "id": id,
@@ -903,7 +919,7 @@ class LightningNode(object):
 
         if wait_for_announce:
             self.bitcoin.generate_block(5)
-            wait_for(lambda: ['alias' in e for e in self.rpc.listnodes(remote_node.info['id'])['nodes']])
+            wait_for(lambda: ['alias' in e for e in self.rpc.listnodes(remote_node.info['id'])['nodes']] == [True])
 
         return {'address': addr, 'wallettxid': wallettxid, 'fundingtx': res['tx']}
 

@@ -27,14 +27,6 @@
 #include <wally_psbt.h>
 #include <wire/wire_sync.h>
 
-enum addrtype {
-	/* Deprecated! */
-	ADDR_P2SH_SEGWIT = 1,
-	ADDR_BECH32 = 2,
-	ADDR_P2TR = 4,
-	ADDR_ALL = (ADDR_P2SH_SEGWIT + ADDR_BECH32 + ADDR_P2TR)
-};
-
 /* May return NULL if encoding error occurs. */
 static char *
 encode_pubkey_to_addr(const tal_t *ctx,
@@ -126,6 +118,33 @@ static struct command_result *param_newaddr(struct command *cmd,
 	return NULL;
 }
 
+bool WARN_UNUSED_RESULT newaddr_inner(struct command *cmd, struct pubkey *pubkey, enum addrtype addrtype)
+{
+	s64 keyidx;
+	u8 *b32script;
+	u8 *p2tr_script;
+
+	keyidx = wallet_get_newindex(cmd->ld);
+	if (keyidx < 0) {
+		// return command_fail(cmd, LIGHTNINGD, "Keys exhausted ");
+		return false;
+	}
+
+	bip32_pubkey(cmd->ld, pubkey, keyidx);
+
+	b32script = scriptpubkey_p2wpkh(tmpctx, pubkey);
+	p2tr_script = scriptpubkey_p2tr(tmpctx, pubkey);
+	if (addrtype & ADDR_BECH32)
+		txfilter_add_scriptpubkey(cmd->ld->owned_txfilter, b32script);
+	if (addrtype & ADDR_P2TR)
+		txfilter_add_scriptpubkey(cmd->ld->owned_txfilter, p2tr_script);
+	if (cmd->ld->deprecated_apis && (addrtype & ADDR_P2SH_SEGWIT))
+		txfilter_add_scriptpubkey(cmd->ld->owned_txfilter,
+					  scriptpubkey_p2sh(tmpctx, b32script));
+	return true;
+}
+
+
 static struct command_result *json_newaddr(struct command *cmd,
 					   const char *buffer,
 					   const jsmntok_t *obj UNNEEDED,
@@ -134,32 +153,16 @@ static struct command_result *json_newaddr(struct command *cmd,
 	struct json_stream *response;
 	struct pubkey pubkey;
 	enum addrtype *addrtype;
-	s64 keyidx;
 	char *p2sh, *bech32, *p2tr;
-	u8 *b32script;
-	u8 *p2tr_script;
 
 	if (!param(cmd, buffer, params,
 		   p_opt_def("addresstype", param_newaddr, &addrtype, ADDR_BECH32),
 		   NULL))
 		return command_param_failed();
 
-	keyidx = wallet_get_newindex(cmd->ld);
-	if (keyidx < 0) {
+	if (!newaddr_inner(cmd, &pubkey, *addrtype)) {
 		return command_fail(cmd, LIGHTNINGD, "Keys exhausted ");
-	}
-
-	bip32_pubkey(cmd->ld, &pubkey, keyidx);
-
-	b32script = scriptpubkey_p2wpkh(tmpctx, &pubkey);
-	p2tr_script = scriptpubkey_p2tr(tmpctx, &pubkey);
-	if (*addrtype & ADDR_BECH32)
-		txfilter_add_scriptpubkey(cmd->ld->owned_txfilter, b32script);
-	if (*addrtype & ADDR_P2TR)
-		txfilter_add_scriptpubkey(cmd->ld->owned_txfilter, p2tr_script);
-	if (cmd->ld->deprecated_apis && (*addrtype & ADDR_P2SH_SEGWIT))
-		txfilter_add_scriptpubkey(cmd->ld->owned_txfilter,
-					  scriptpubkey_p2sh(tmpctx, b32script));
+	};
 
 	p2sh = encode_pubkey_to_addr(cmd, &pubkey, ADDR_P2SH_SEGWIT, NULL);
 	bech32 = encode_pubkey_to_addr(cmd, &pubkey, ADDR_BECH32, NULL);
@@ -744,10 +747,10 @@ static struct command_result *json_signpsbt(struct command *cmd,
 	u32 *input_nums;
 	u32 psbt_version;
 
-	if (!param(cmd, buffer, params,
-		   p_req("psbt", param_psbt, &psbt),
-		   p_opt("signonly", param_input_numbers, &input_nums),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("psbt", param_psbt, &psbt),
+			 p_opt("signonly", param_input_numbers, &input_nums),
+			 NULL))
 		return command_param_failed();
 
 	/* We internally deal with v2 only but we want to return V2 if given */
@@ -779,6 +782,9 @@ static struct command_result *json_signpsbt(struct command *cmd,
 		return command_fail(cmd, LIGHTNINGD,
 				    "No wallet inputs to sign");
 
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
+
 	/* Update the keypaths on any outputs that are in our wallet (change addresses). */
 	match_psbt_outputs_to_wallet(psbt, cmd->ld->wallet);
 
@@ -799,15 +805,28 @@ static struct command_result *json_signpsbt(struct command *cmd,
 				    "HSM gave bad sign_withdrawal_reply %s",
 				    tal_hex(tmpctx, msg));
 
-	if (!psbt_set_version(signed_psbt, psbt_version)) {
+	/* Some signers (VLS) prune the input.utxo data as it's used
+	 * because it is too large to store in the signer. We can
+	 * restore this metadata by combining the signed psbt back
+	 * into a clone of the original psbt. */
+	struct wally_psbt *combined_psbt;
+	combined_psbt = combine_psbt(cmd, psbt, signed_psbt);
+	if (!combined_psbt) {
+		return command_fail(cmd, LIGHTNINGD,
+				    "Unable to combine signed psbt: %s",
+				    type_to_string(tmpctx, struct wally_psbt,
+						   signed_psbt));
+	}
+
+	if (!psbt_set_version(combined_psbt, psbt_version)) {
 		return command_fail(cmd, LIGHTNINGD,
 				    "Signed PSBT unable to have version set: %s",
 					 type_to_string(tmpctx, struct wally_psbt,
-					 	psbt));
+					 	combined_psbt));
 	}
 
 	response = json_stream_success(cmd);
-	json_add_psbt(response, "signed_psbt", signed_psbt);
+	json_add_psbt(response, "signed_psbt", combined_psbt);
 	return command_success(cmd, response);
 }
 
@@ -830,7 +849,7 @@ static struct command_result *json_setpsbtversion(struct command *cmd,
     unsigned int *version;
     struct wally_psbt *psbt;
 
-    if (!param(cmd, buffer, params,
+    if (!param_check(cmd, buffer, params,
            p_req("psbt", param_psbt, &psbt),
            p_req("version", param_number, &version),
            NULL))
@@ -840,6 +859,8 @@ static struct command_result *json_setpsbtversion(struct command *cmd,
         return command_fail(cmd, JSONRPC2_INVALID_PARAMS,
                     "Could not set PSBT version");
     }
+    if (command_check_only(cmd))
+	    return command_check_done(cmd);
 
     response = json_stream_success(cmd);
     json_add_psbt(response, "psbt", psbt);
@@ -961,10 +982,10 @@ static struct command_result *json_sendpsbt(struct command *cmd,
 	struct lightningd *ld = cmd->ld;
 	u32 *reserve_blocks;
 
-	if (!param(cmd, buffer, params,
-		   p_req("psbt", param_psbt, &psbt),
-		   p_opt_def("reserve", param_number, &reserve_blocks, 12 * 6),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("psbt", param_psbt, &psbt),
+			 p_opt_def("reserve", param_number, &reserve_blocks, 12 * 6),
+			 NULL))
 		return command_param_failed();
 
 	sending = tal(cmd, struct sending_psbt);
@@ -992,6 +1013,9 @@ static struct command_result *json_sendpsbt(struct command *cmd,
 	if (res)
 		return res;
 
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
+
 	for (size_t i = 0; i < tal_count(sending->utxos); i++) {
 		if (!wallet_reserve_utxo(ld->wallet, sending->utxos[i],
 					 get_block_height(ld->topology),
@@ -1000,7 +1024,7 @@ static struct command_result *json_sendpsbt(struct command *cmd,
 	}
 
 	/* Now broadcast the transaction */
-	bitcoind_sendrawtx(cmd->ld->topology->bitcoind,
+	bitcoind_sendrawtx(sending, cmd->ld->topology->bitcoind,
 			   cmd->id,
 			   tal_hex(tmpctx,
 				   linearize_wtx(tmpctx, sending->wtx)),

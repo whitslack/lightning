@@ -484,6 +484,7 @@ static void send_splice_tx(struct channel *channel,
 	info->err_msg = NULL;
 
 	bitcoind_sendrawtx(ld->topology->bitcoind,
+			   ld->topology->bitcoind,
 			   cc ? cc->cmd->id : NULL,
 			   tal_hex(tmpctx, tx_bytes),
 			   false,
@@ -1204,6 +1205,21 @@ static void handle_channel_upgrade(struct channel *channel,
 	wallet_channel_save(channel->peer->ld->wallet, channel);
 }
 
+static void handle_local_channel_update(struct channel *channel,
+					const u8 *msg)
+{
+	bool enable;
+
+	if (!fromwire_channeld_local_channel_update(msg, &enable)) {
+		channel_internal_error(channel,
+				       "bad channeld_local_channel_update %s",
+				       tal_hex(channel, msg));
+		return;
+	}
+
+	tell_gossipd_local_channel_update(channel->peer->ld, channel, enable);
+}
+
 static unsigned channel_msg(struct subd *sd, const u8 *msg, const int *fds)
 {
 	enum channeld_wire t = fromwire_peektype(msg);
@@ -1239,12 +1255,8 @@ static unsigned channel_msg(struct subd *sd, const u8 *msg, const int *fds)
 	case WIRE_CHANNELD_SEND_ERROR_REPLY:
 		handle_error_channel(sd->channel, msg);
 		break;
-	case WIRE_CHANNELD_USED_CHANNEL_UPDATE:
-		/* This tells gossipd we used it. */
-		get_channel_update(sd->channel);
-		break;
 	case WIRE_CHANNELD_LOCAL_CHANNEL_UPDATE:
-		tell_gossipd_local_channel_update(sd->ld, sd->channel, msg);
+		handle_local_channel_update(sd->channel, msg);
 		break;
 	case WIRE_CHANNELD_LOCAL_CHANNEL_ANNOUNCEMENT:
 		tell_gossipd_local_channel_announce(sd->ld, sd->channel, msg);
@@ -1298,8 +1310,6 @@ static unsigned channel_msg(struct subd *sd, const u8 *msg, const int *fds)
 	case WIRE_CHANNELD_DEV_REENABLE_COMMIT:
 	case WIRE_CHANNELD_FEERATES:
 	case WIRE_CHANNELD_BLOCKHEIGHT:
-	case WIRE_CHANNELD_CONFIG_CHANNEL:
-	case WIRE_CHANNELD_CHANNEL_UPDATE:
 	case WIRE_CHANNELD_DEV_MEMLEAK:
 	case WIRE_CHANNELD_DEV_QUIESCE:
 	case WIRE_CHANNELD_GOT_INFLIGHT:
@@ -1349,7 +1359,8 @@ bool peer_start_channeld(struct channel *channel,
 				  | HSM_PERM_SIGN_REMOTE_TX
 				  | HSM_PERM_SIGN_ONCHAIN_TX
 				  | HSM_PERM_SIGN_CLOSING_TX
-				  | HSM_PERM_SIGN_SPLICE_TX);
+				  | HSM_PERM_SIGN_SPLICE_TX
+				  | HSM_PERM_LOCK_OUTPOINT);
 
 	channel_set_owner(channel,
 			  new_channel_subd(channel, ld,
@@ -1515,17 +1526,12 @@ bool peer_start_channeld(struct channel *channel,
 				       &channel->channel_info.remote_per_commit,
 				       &channel->channel_info.old_remote_per_commit,
 				       channel->opener,
-				       channel->feerate_base,
-				       channel->feerate_ppm,
-				       channel->htlc_minimum_msat,
-				       channel->htlc_maximum_msat,
 				       channel->our_msat,
 				       &channel->local_basepoints,
 				       &channel->local_funding_pubkey,
 				       &ld->id,
 				       &channel->peer->id,
 				       cfg->commit_time_ms,
-				       cfg->cltv_expiry_delta,
 				       channel->last_was_revoke,
 				       channel->last_sent_commit,
 				       channel->next_index[LOCAL],
@@ -1559,7 +1565,6 @@ bool peer_start_channeld(struct channel *channel,
 					     : (u32 *)&ld->dev_disable_commit,
 				       pbases,
 				       reestablish_only,
-				       channel->channel_update,
 				       ld->experimental_upgrade_protocol,
 				       cast_const2(const struct inflight **,
 						   inflights));
@@ -1836,14 +1841,6 @@ void channel_replace_update(struct channel *channel, u8 *update TAKES)
 {
 	tal_free(channel->channel_update);
 	channel->channel_update = tal_dup_talarr(channel, u8, update);
-
-	/* Keep channeld up-to-date */
-	if (!channel->owner || !streq(channel->owner->name, "channeld"))
-		return;
-
-	subd_send_msg(channel->owner,
-		      take(towire_channeld_channel_update(NULL,
-							  channel->channel_update)));
 }
 
 static struct command_result *param_channel_for_splice(struct command *cmd,
@@ -1912,25 +1909,28 @@ static struct command_result *json_splice_init(struct command *cmd,
 	bool *force_feerate;
 	u8 *msg;
 
-	if (!param(cmd, buffer, params,
-		  p_req("channel_id", param_channel_for_splice, &channel),
-		  p_req("relative_amount", param_s64, &relative_amount),
-		  p_opt("initialpsbt", param_psbt, &initialpsbt),
-		  p_opt("feerate_per_kw", param_feerate, &feerate_per_kw),
-		  p_opt_def("force_feerate", param_bool, &force_feerate, false),
-		  NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("channel_id", param_channel_for_splice, &channel),
+			 p_req("relative_amount", param_s64, &relative_amount),
+			 p_opt("initialpsbt", param_psbt, &initialpsbt),
+			 p_opt("feerate_per_kw", param_feerate, &feerate_per_kw),
+			 p_opt_def("force_feerate", param_bool, &force_feerate, false),
+			 NULL))
 		return command_param_failed();
-
-	if (!feerate_per_kw) {
-		feerate_per_kw = tal(cmd, u32);
-		*feerate_per_kw = opening_feerate(cmd->ld->topology);
-	}
 
 	if (splice_command_for_chan(cmd->ld, channel))
 		return command_fail(cmd,
 				    SPLICE_BUSY_ERROR,
 				    "Currently waiting on previous splice"
 				    " command to finish.");
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
+
+	if (!feerate_per_kw) {
+		feerate_per_kw = tal(cmd, u32);
+		*feerate_per_kw = opening_feerate(cmd->ld->topology);
+	}
 
 	if (!initialpsbt)
 		initialpsbt = create_psbt(cmd, 0, 0, 0);
@@ -2009,11 +2009,11 @@ static struct command_result *json_splice_signed(struct command *cmd,
 	struct wally_psbt *psbt;
 	bool *sign_first;
 
-	if (!param(cmd, buffer, params,
-		  p_req("channel_id", param_channel_for_splice, &channel),
-		  p_req("psbt", param_psbt, &psbt),
-		  p_opt_def("sign_first", param_bool, &sign_first, false),
-		  NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("channel_id", param_channel_for_splice, &channel),
+			 p_req("psbt", param_psbt, &psbt),
+			 p_opt_def("sign_first", param_bool, &sign_first, false),
+			 NULL))
 		return command_param_failed();
 
 	if (splice_command_for_chan(cmd->ld, channel))
@@ -2025,6 +2025,9 @@ static struct command_result *json_splice_signed(struct command *cmd,
 		return command_fail(cmd,
 				    SPLICE_INPUT_ERROR,
 				    "PSBT failed to validate.");
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
 
 	log_debug(cmd->ld->log, "splice_signed input PSBT version %d",
 		  psbt->version);
@@ -2085,10 +2088,10 @@ static struct command_result *json_dev_feerate(struct command *cmd,
 	const u8 *msg;
 	bool more_than_one;
 
-	if (!param(cmd, buffer, params,
-		   p_req("id", param_node_id, &id),
-		   p_req("feerate", param_number, &feerate),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("id", param_node_id, &id),
+			 p_req("feerate", param_number, &feerate),
+			 NULL))
 		return command_param_failed();
 
 	peer = peer_by_id(cmd->ld, id);
@@ -2101,6 +2104,9 @@ static struct command_result *json_dev_feerate(struct command *cmd,
 	/* This is a dev command: fix the api if you need this! */
 	if (more_than_one)
 		return command_fail(cmd, LIGHTNINGD, "More than one channel");
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
 
 	msg = towire_channeld_feerates(NULL, *feerate,
 				       feerate_min(cmd->ld, NULL),
@@ -2146,9 +2152,9 @@ static struct command_result *json_dev_quiesce(struct command *cmd,
 	const u8 *msg;
 	bool more_than_one;
 
-	if (!param(cmd, buffer, params,
-		   p_req("id", param_node_id, &id),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("id", param_node_id, &id),
+			 NULL))
 		return command_param_failed();
 
 	peer = peer_by_id(cmd->ld, id);
@@ -2162,6 +2168,9 @@ static struct command_result *json_dev_quiesce(struct command *cmd,
 	/* This is a dev command: fix the api if you need this! */
 	if (more_than_one)
 		return command_fail(cmd, LIGHTNINGD, "More than one channel");
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
 
 	msg = towire_channeld_dev_quiesce(NULL);
 	subd_req(channel->owner, channel->owner, take(msg), -1, 0,
