@@ -1457,13 +1457,11 @@ static void tell_lightningd_lease_rates(struct plugin *p,
 
 }
 
-#if DEVELOPER
 static void memleak_mark(struct plugin *p, struct htable *memtable)
 {
 	memleak_scan_list_head(memtable, &pending_opens);
 	memleak_scan_obj(memtable, current_policy);
 }
-#endif
 
 static const char *init(struct plugin *p, const char *b, const jsmntok_t *t)
 {
@@ -1478,9 +1476,7 @@ static const char *init(struct plugin *p, const char *b, const jsmntok_t *t)
 	if (current_policy->rates)
 		tell_lightningd_lease_rates(p, current_policy->rates);
 
-#if DEVELOPER
 	plugin_set_memleak_handler(p, memleak_mark);
-#endif
 
 	return NULL;
 }

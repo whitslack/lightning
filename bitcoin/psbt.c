@@ -58,7 +58,7 @@ struct wally_psbt *create_psbt(const tal_t *ctx, size_t num_inputs, size_t num_o
 	return psbt;
 }
 
-struct wally_psbt *clone_psbt(const tal_t *ctx, struct wally_psbt *psbt)
+struct wally_psbt *clone_psbt(const tal_t *ctx, const struct wally_psbt *psbt)
 {
 	struct wally_psbt *clone;
 	tal_wally_start();
@@ -111,6 +111,22 @@ struct wally_psbt *new_psbt(const tal_t *ctx, const struct wally_tx *wtx)
 
 	tal_wally_end(psbt);
 	return psbt;
+}
+
+struct wally_psbt *combine_psbt(const tal_t *ctx,
+				const struct wally_psbt *psbt0,
+				const struct wally_psbt *psbt1)
+{
+	struct wally_psbt *combined_psbt;
+	tal_wally_start();
+	if (wally_psbt_clone_alloc(psbt0, 0, &combined_psbt) != WALLY_OK)
+		abort();
+	if (wally_psbt_combine(combined_psbt, psbt1) != WALLY_OK) {
+		tal_wally_end_onto(ctx, combined_psbt, struct wally_psbt);
+		return tal_free(combined_psbt);
+	}
+	tal_wally_end_onto(ctx, combined_psbt, struct wally_psbt);
+	return combined_psbt;
 }
 
 bool psbt_is_finalized(const struct wally_psbt *psbt)
@@ -738,6 +754,12 @@ const u8 *psbt_get_bytes(const tal_t *ctx, const struct wally_psbt *psbt,
 	return bytes;
 }
 
+bool validate_psbt(const struct wally_psbt *psbt)
+{
+	size_t len;
+	return wally_psbt_get_length(psbt, 0, &len) == WALLY_OK;
+}
+
 struct wally_psbt *psbt_from_bytes(const tal_t *ctx, const u8 *bytes,
 				   size_t byte_len)
 {
@@ -778,18 +800,6 @@ struct wally_psbt *fromwire_wally_psbt(const tal_t *ctx,
 	psbt = psbt_from_bytes(ctx, psbt_buf, psbt_byte_len);
 	if (!psbt)
 		return fromwire_fail(cursor, max);
-
-#if DEVELOPER
-	/* Re-marshall for sanity check! */
-	u8 *tmpbuf = tal_arr(NULL, u8, psbt_byte_len);
-	size_t written;
-	if (wally_psbt_to_bytes(psbt, 0, tmpbuf, psbt_byte_len, &written) != WALLY_OK) {
-		tal_free(tmpbuf);
-		tal_free(psbt);
-		return fromwire_fail(cursor, max);
-	}
-	tal_free(tmpbuf);
-#endif
 
 	return psbt;
 }

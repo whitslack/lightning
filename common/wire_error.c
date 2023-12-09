@@ -118,9 +118,26 @@ char *sanitize_error(const tal_t *ctx, const u8 *errmsg,
 	}
 
 	return tal_fmt(ctx, "%s%s%s: %.*s",
-		       warning ? "warning" : "error",
+		       warning ? "WARNING" : "ERROR",
 		       channel_id_is_all(channel_id) ? "": " channel ",
 		       channel_id_is_all(channel_id) ? ""
 		       : type_to_string(tmpctx, struct channel_id, channel_id),
 		       (int)tal_count(data), (char *)data);
 }
+
+const char *is_peer_warning(const tal_t *ctx, const u8 *msg)
+{
+	if (fromwire_peektype(msg) != WIRE_WARNING)
+		return NULL;
+	/* connectd demuxes, so we only see it if channel_id is ours. */
+	return sanitize_error(ctx, msg, NULL);
+}
+
+const char *is_peer_error(const tal_t *ctx, const u8 *msg)
+{
+	if (fromwire_peektype(msg) != WIRE_ERROR)
+		return NULL;
+	/* connectd demuxes, so we only see it if channel_id is ours. */
+	return sanitize_error(ctx, msg, NULL);
+}
+

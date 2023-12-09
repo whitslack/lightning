@@ -2,7 +2,7 @@ from decimal import Decimal
 from fixtures import *  # noqa: F401,F403
 from fixtures import TEST_NETWORK
 from pyln.client import RpcError
-from utils import wait_for, sync_blockheight, COMPAT, VALGRIND, DEVELOPER, TIMEOUT, only_one
+from utils import wait_for, sync_blockheight, COMPAT, TIMEOUT, only_one
 
 import base64
 import os
@@ -314,7 +314,6 @@ def test_backfill_scriptpubkeys(node_factory, bitcoind):
         assert _chan_id(row['txid'], row['funding_tx_outnum']) == row['cid'].lower()
 
 
-@unittest.skipIf(VALGRIND and not DEVELOPER, "Without developer valgrind will complain about debug symbols missing")
 def test_optimistic_locking(node_factory, bitcoind):
     """Have a node run against a DB, then change it under its feet, crashing it.
 

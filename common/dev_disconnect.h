@@ -3,7 +3,6 @@
 #include "config.h"
 #include <stdbool.h>
 
-#if DEVELOPER
 struct node_id;
 
 enum dev_disconnect {
@@ -13,6 +12,8 @@ enum dev_disconnect {
 	DEV_DISCONNECT_BEFORE = '-',
 	/* Close connection after sending packet. */
 	DEV_DISCONNECT_AFTER = '+',
+	/* Drop message (don't send to peer) */
+	DEV_DISCONNECT_DROP = '$',
 	/* Swallow all writes from now on, and do no more reads. */
 	DEV_DISCONNECT_BLACKHOLE = '0',
 	/* Don't use connection after sending packet, but don't close. */
@@ -27,7 +28,5 @@ void dev_sabotage_fd(int fd, bool close_fd);
 
 /* For debug code to set in daemon. */
 void dev_disconnect_init(int fd);
-
-#endif /* DEVELOPER */
 
 #endif /* LIGHTNING_COMMON_DEV_DISCONNECT_H */

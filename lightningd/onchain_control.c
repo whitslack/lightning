@@ -19,6 +19,7 @@
 #include <lightningd/hsm_control.h>
 #include <lightningd/onchain_control.h>
 #include <lightningd/peer_control.h>
+#include <lightningd/peer_htlcs.h>
 #include <lightningd/subd.h>
 #include <onchaind/onchaind_wiregen.h>
 #include <wallet/txfilter.h>
@@ -160,10 +161,10 @@ static void onchain_tx_depth(struct channel *channel,
  * Entrypoint for the txwatch callback, calls onchain_tx_depth.
  */
 static enum watch_result onchain_tx_watched(struct lightningd *ld,
-					    struct channel *channel,
 					    const struct bitcoin_txid *txid,
 					    const struct bitcoin_tx *tx,
-					    unsigned int depth)
+					    unsigned int depth,
+					    struct channel *channel)
 {
 	u32 blockheight = get_block_height(ld->topology);
 
@@ -255,8 +256,9 @@ static void watch_tx_and_outputs(struct channel *channel,
 	bitcoin_txid(tx, &outpoint.txid);
 
 	/* Make txwatch a parent of txo watches, so we can unwatch together. */
-	txw = watch_tx(channel->owner, ld->topology, channel, tx,
-		       onchain_tx_watched);
+	txw = watch_txid(channel->owner, ld->topology,
+			 &outpoint.txid,
+			 onchain_tx_watched, channel);
 
 	for (outpoint.n = 0; outpoint.n < tx->wtx->num_outputs; outpoint.n++)
 		watch_txo(txw, ld->topology, channel, &outpoint,
@@ -294,7 +296,8 @@ static void handle_onchain_unwatch_tx(struct channel *channel, const u8 *msg)
 	}
 
 	/* Frees the txo watches, too: see watch_tx_and_outputs() */
-	txw = find_txwatch(channel->peer->ld->topology, &txid, channel);
+	txw = find_txwatch(channel->peer->ld->topology, &txid,
+			   onchain_tx_watched, channel);
 	if (!txw)
 		log_unusual(channel->log, "Can't unwatch txid %s",
 			    type_to_string(tmpctx, struct bitcoin_txid, &txid));
@@ -879,33 +882,32 @@ static bool consider_onchain_htlc_tx_rebroadcast(struct channel *channel,
 	/* Make a copy to play with */
 	newtx = clone_bitcoin_tx(tmpctx, info->raw_htlc_tx);
 	weight = bitcoin_tx_weight(newtx);
-	utxos = tal_arr(tmpctx, struct utxo *, 0);
 
-	/* Keep attaching input inputs until we get sufficient fees */
-	while (tx_feerate(newtx) < feerate) {
-		struct utxo *utxo;
+	utxos = wallet_utxo_boost(tmpctx,
+				  ld->wallet,
+				  get_block_height(ld->topology),
+				  bitcoin_tx_compute_fee(newtx),
+				  feerate,
+				  &weight);
 
-		/* Get fresh utxo */
-		utxo = wallet_find_utxo(tmpctx, ld->wallet,
-					get_block_height(ld->topology),
-					NULL,
-					0, /* FIXME: unused! */
-					0, false,
-					cast_const2(const struct utxo **, utxos));
-		if (!utxo) {
-			/* Did we get nothing at all? */
-			if (tal_count(utxos) == 0) {
-				log_unusual(channel->log,
-					    "We want to bump HTLC fee, but no funds!");
-				return true;
-			}
-			/* At least we got something, right? */
-			break;
+	/* Add those to create a new PSBT */
+	psbt = psbt_using_utxos(tmpctx, ld->wallet, utxos, newtx->wtx->locktime,
+				BITCOIN_TX_RBF_SEQUENCE, newtx->psbt);
+
+	/* Subtract how much we pay in fees for this tx, to calc excess. */
+	if (!amount_sat_sub(&excess,
+			    psbt_compute_fee(psbt),
+			    amount_tx_fee(feerate, weight))) {
+		/* We didn't make the feerate.  Did we get nothing at all? */
+		if (tal_count(utxos) == 0) {
+			log_unusual(channel->log,
+				    "We want to bump HTLC fee, but no funds!");
+			return true;
 		}
-
-		/* Add to any UTXOs we have already */
-		tal_arr_expand(&utxos, utxo);
-		weight += bitcoin_tx_simple_input_weight(utxo->is_p2sh);
+		/* At least we got something! */
+		log_unusual(channel->log,
+			    "We want to bump HTLC fee more, but ran out of funds!");
+		excess = AMOUNT_SAT(0);
 	}
 
 	/* We were happy with feerate already (can't happen with zero-fee
@@ -913,17 +915,7 @@ static bool consider_onchain_htlc_tx_rebroadcast(struct channel *channel,
 	if (tal_count(utxos) == 0)
 		return true;
 
-	/* PSBT knows how to spend utxos; append to existing. */
-	psbt = psbt_using_utxos(tmpctx, ld->wallet, utxos, newtx->wtx->locktime,
-				BITCOIN_TX_RBF_SEQUENCE, newtx->psbt);
-
-	/* Subtract how much we pay in fees for this tx, to calc excess. */
-	if (!amount_sat_sub(&excess,
-			    psbt_compute_fee(psbt),
-			    amount_sat((u64)weight * feerate / 1000))) {
-		excess = AMOUNT_SAT(0);
-	}
-
+	/* Maybe add change */
 	change = change_amount(excess, feerate, weight);
 	if (!amount_sat_eq(change, AMOUNT_SAT(0))) {
 		/* Append change output. */
@@ -1060,7 +1052,7 @@ static void create_onchain_tx(struct channel *channel,
 
 	/* We allow "excessive" fees, as we may be fighting with censors and
 	 * we'd rather spend fees than have our adversary win. */
-	broadcast_tx(ld->topology,
+	broadcast_tx(channel, ld->topology,
 		     channel, take(tx), NULL, true, info->minblock,
 		     NULL, consider_onchain_rebroadcast, take(info));
 
@@ -1260,7 +1252,7 @@ static void handle_onchaind_spend_htlc_success(struct channel *channel,
 
 	log_debug(channel->log, "Broadcast for onchaind tx %s",
 		  type_to_string(tmpctx, struct bitcoin_tx, tx));
-	broadcast_tx(channel->peer->ld->topology,
+	broadcast_tx(channel, channel->peer->ld->topology,
 		     channel, take(tx), NULL, false,
 		     info->minblock, NULL,
 		     consider_onchain_htlc_tx_rebroadcast, take(info));
@@ -1342,7 +1334,7 @@ static void handle_onchaind_spend_htlc_timeout(struct channel *channel,
 
 	log_debug(channel->log, "Broadcast for onchaind tx %s",
 		  type_to_string(tmpctx, struct bitcoin_tx, tx));
-	broadcast_tx(channel->peer->ld->topology,
+	broadcast_tx(channel, channel->peer->ld->topology,
 		     channel, take(tx), NULL, false,
 		     info->minblock, NULL,
 		     consider_onchain_htlc_tx_rebroadcast, take(info));
@@ -1485,11 +1477,10 @@ static unsigned int onchain_msg(struct subd *sd, const u8 *msg, const int *fds U
 /* Only error onchaind can get is if it dies. */
 static void onchain_error(struct channel *channel,
 			  struct peer_fd *pps UNUSED,
-			  const struct channel_id *channel_id UNUSED,
 			  const char *desc,
-			  bool warning UNUSED,
-			  bool aborted UNUSED,
-			  const u8 *err_for_them UNUSED)
+			  const u8 *err_for_them UNUSED,
+			  bool disconnect UNUSED,
+			  bool warning UNUSED)
 {
 	channel_set_owner(channel, NULL);
 

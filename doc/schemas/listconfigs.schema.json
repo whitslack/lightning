@@ -32,6 +32,25 @@
             }
           }
         },
+        "developer": {
+          "type": "object",
+          "added": "v23.08",
+          "additionalProperties": false,
+          "required": [
+            "set",
+            "source"
+          ],
+          "properties": {
+            "set": {
+              "type": "boolean",
+              "description": "`true` if set in config or cmdline"
+            },
+            "source": {
+              "type": "string",
+              "description": "source of configuration setting"
+            }
+          }
+        },
         "clear-plugins": {
           "type": "object",
           "additionalProperties": false,
@@ -1313,6 +1332,24 @@
               "description": "source of configuration setting"
             }
           }
+        },
+        "commit-feerate-offset": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "value_int",
+            "source"
+          ],
+          "properties": {
+            "value_int": {
+              "type": "u32",
+              "description": "field from config or cmdline, or default"
+            },
+            "source": {
+              "type": "string",
+              "description": "source of configuration setting"
+            }
+          }
         }
       }
     },
@@ -1702,6 +1739,11 @@
       "added": "v22.11.1",
       "description": "Whether we put DNS entries into node_announcement"
     },
+    "developer": {
+      "added": "v23.08",
+      "type": "boolean",
+      "description": "Whether developer mode is enabled"
+    },
     "commit-fee": {
       "deprecated": "v23.08",
       "type": "u64",
@@ -1712,6 +1754,11 @@
       "type": "msat",
       "added": "v23.08",
       "description": "field from config or cmdline, or default"
+    },
+    "commit-feerate-offset": {
+      "type": "u32",
+      "added": "v23.11",
+      "description": "additional commitment feerate applied by channel owner"
     }
   }
 }

@@ -203,9 +203,9 @@ static struct command_result *json_disableoffer(struct command *cmd,
 	const struct json_escape *label;
 	enum offer_status status;
 
-	if (!param(cmd, buffer, params,
-		   p_req("offer_id", param_sha256, &offer_id),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("offer_id", param_sha256, &offer_id),
+			 NULL))
 		return command_param_failed();
 
 	b12 = wallet_offer_find(tmpctx, wallet, offer_id, &label, &status);
@@ -215,6 +215,10 @@ static struct command_result *json_disableoffer(struct command *cmd,
 	if (!offer_status_active(status))
 		return command_fail(cmd, OFFER_ALREADY_DISABLED,
 				    "offer is not active");
+
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
+
 	status = wallet_offer_disable(wallet, offer_id, status);
 
 	response = json_stream_success(cmd);
@@ -233,32 +237,30 @@ AUTODATA(json_command, &disableoffer_command);
 /* We do some sanity checks now, since we're looking up prev payment anyway,
  * but our main purpose is to fill in invreq->invreq_metadata tweak. */
 static struct command_result *prev_payment(struct command *cmd,
-					   const char *label,
+					   const struct json_escape *label,
 					   struct tlv_invoice_request *invreq,
 					   u64 **prev_basetime)
 {
-	const struct wallet_payment **payments;
 	bool prev_paid = false;
 	struct sha256 invreq_oid;
 
 	invreq_offer_id(invreq, &invreq_oid);
 	assert(!invreq->invreq_metadata);
-	payments = wallet_payment_list(cmd, cmd->ld->wallet, NULL);
 
-	for (size_t i = 0; i < tal_count(payments); i++) {
+	for (struct db_stmt *stmt = payments_by_label(cmd->ld->wallet, label);
+	     stmt;
+	     stmt = payments_next(cmd->ld->wallet, stmt)) {
+		const struct wallet_payment *payment;
 		const struct tlv_invoice *inv;
 		char *fail;
 		struct sha256 inv_oid;
 
-		/* FIXME: Restrict db queries instead */
-		if (!payments[i]->label || !streq(label, payments[i]->label))
+		payment = payment_get_details(tmpctx, stmt);
+		if (!payment->invstring)
 			continue;
 
-		if (!payments[i]->invstring)
-			continue;
-
-		inv = invoice_decode(tmpctx, payments[i]->invstring,
-				     strlen(payments[i]->invstring),
+		inv = invoice_decode(tmpctx, payment->invstring,
+				     strlen(payment->invstring),
 				     NULL, chainparams, &fail);
 		if (!inv)
 			continue;
@@ -300,7 +302,7 @@ static struct command_result *prev_payment(struct command *cmd,
 		}
 
 		if (*inv->invreq_recurrence_counter == *invreq->invreq_recurrence_counter-1) {
-			if (payments[i]->status == PAYMENT_COMPLETE)
+			if (payment->status == PAYMENT_COMPLETE)
 				prev_paid = true;
 		}
 
@@ -311,8 +313,10 @@ static struct command_result *prev_payment(struct command *cmd,
 						 inv->invoice_recurrence_basetime);
 		}
 
-		if (prev_paid && inv->invreq_metadata)
+		if (prev_paid && inv->invreq_metadata) {
+			tal_free(stmt);
 			break;
+		}
 	}
 
 	if (!invreq->invreq_metadata)
@@ -340,12 +344,12 @@ static struct command_result *param_b12_invreq(struct command *cmd,
 				    cmd->ld->our_features, chainparams, &fail);
 	if (!*invreq)
 		return command_fail_badparam(cmd, name, buffer, tok, fail);
-#if !DEVELOPER
+
 	/* We use this for testing with known payer_info */
-	if ((*invreq)->invreq_metadata)
+	if ((*invreq)->invreq_metadata && !cmd->ld->developer)
 		return command_fail_badparam(cmd, name, buffer, tok,
 					     "must not have invreq_metadata");
-#endif
+
 	if ((*invreq)->invreq_payer_id)
 		return command_fail_badparam(cmd, name, buffer, tok,
 					     "must not have invreq_payer_id");
@@ -373,15 +377,15 @@ static struct command_result *json_createinvoicerequest(struct command *cmd,
 							const jsmntok_t *params)
 {
 	struct tlv_invoice_request *invreq;
-	const char *label;
+	struct json_escape *label;
 	struct json_stream *response;
 	u64 *prev_basetime = NULL;
 	struct sha256 merkle;
 
-	if (!param(cmd, buffer, params,
-		   p_req("bolt12", param_b12_invreq, &invreq),
-		   p_opt("recurrence_label", param_escaped_string, &label),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("bolt12", param_b12_invreq, &invreq),
+			 p_opt("recurrence_label", param_label, &label),
+			 NULL))
 		return command_param_failed();
 
 	/* If it's a recurring payment, we look for previous to copy
@@ -427,6 +431,9 @@ static struct command_result *json_createinvoicerequest(struct command *cmd,
 				    "Invalid tweak");
 	}
 
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
+
 	/* BOLT-offers #12:
 	 *  - MUST set `signature` `sig` as detailed in
 	 *  [Signature Calculation](#signature-calculation) using the `payer_key`.
@@ -443,7 +450,7 @@ static struct command_result *json_createinvoicerequest(struct command *cmd,
 	json_add_string(response, "bolt12", invrequest_encode(tmpctx, invreq));
 	if (label)
 		json_add_escaped_string(response, "recurrence_label",
-					take(json_escape(NULL, label)));
+					take(json_escape(NULL, label->s)));
 	if (prev_basetime)
 		json_add_u64(response, "previous_basetime", *prev_basetime);
 	return command_success(cmd, response);

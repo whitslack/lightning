@@ -45,6 +45,7 @@
 #include <netinet/in.h>
 #include <signal.h>
 #include <sodium.h>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -251,11 +252,8 @@ static struct peer *new_peer(struct daemon *daemon,
 	peer->peer_outq = msg_queue_new(peer, false);
 	peer->last_recv_time = time_now();
 	peer->is_websocket = is_websocket;
-
-#if DEVELOPER
 	peer->dev_writes_enabled = NULL;
 	peer->dev_read_enabled = true;
-#endif
 
 	peer->to_peer = conn;
 
@@ -1407,8 +1405,7 @@ static void connect_init(struct daemon *daemon, const u8 *msg)
 	enum addr_listen_announce *proposed_listen_announce;
 	struct wireaddr *announceable;
 	char *tor_password;
-	bool dev_fast_gossip;
-	bool dev_disconnect, dev_no_ping_timer;
+	bool dev_disconnect;
 	char *errstr;
 
 	/* Fields which require allocation are allocated off daemon */
@@ -1426,20 +1423,13 @@ static void connect_init(struct daemon *daemon, const u8 *msg)
 		&daemon->websocket_helper,
 		&daemon->websocket_port,
 		&daemon->announce_websocket,
-		&dev_fast_gossip,
+		&daemon->dev_fast_gossip,
 		&dev_disconnect,
-		&dev_no_ping_timer)) {
+		&daemon->dev_no_ping_timer)) {
 		/* This is a helper which prints the type expected and the actual
 		 * message, then exits (it should never be called!). */
 		master_badmsg(WIRE_CONNECTD_INIT, msg);
 	}
-
-#if DEVELOPER
-	/*~ Clearly mark these as developer-only flags! */
-	daemon->dev_fast_gossip = dev_fast_gossip;
-	daemon->dev_no_ping_timer = dev_no_ping_timer;
-	daemon->dev_suppress_gossip = false;
-#endif
 
 	if (!pubkey_from_node_id(&daemon->mykey, &daemon->id))
 		status_failed(STATUS_FAIL_INTERNAL_ERROR,
@@ -1496,14 +1486,12 @@ static void connect_init(struct daemon *daemon, const u8 *msg)
 	 * not always a real problem), and this would (did!) trigger it. */
 	tal_free(announceable);
 
-#if DEVELOPER
 	if (dev_disconnect) {
 		daemon->dev_disconnect_fd = 5;
 		dev_disconnect_init(5);
 	} else {
 		daemon->dev_disconnect_fd = -1;
 	}
-#endif
 }
 
 /* Returning functions in C is ugly! */
@@ -1555,6 +1543,9 @@ static void connect_activate(struct daemon *daemon, const u8 *msg)
 								 ->is_websocket),
 						       daemon));
 		}
+	} else {
+		for (size_t i = 0; i < tal_count(daemon->listen_fds); i++)
+			close(daemon->listen_fds[i]->fd);
 	}
 
 	/* Free, with NULL assignment just as an extra sanity check. */
@@ -1824,8 +1815,10 @@ static void peer_discard(struct daemon *daemon, const u8 *msg)
 	/* If it's reconnected already, it will learn soon. */
 	if (peer->counter != counter)
 		return;
+
+	/* We make sure any final messages from the subds are sent! */
 	status_peer_debug(&id, "discard_peer");
-	tal_free(peer);
+	drain_peer(peer);
 }
 
 static void start_shutdown(struct daemon *daemon, const u8 *msg)
@@ -1862,7 +1855,6 @@ static void peer_final_msg(struct io_conn *conn,
 		multiplex_final_msg(peer, take(finalmsg));
 }
 
-#if DEVELOPER
 static void dev_connect_memleak(struct daemon *daemon, const u8 *msg)
 {
 	struct htable *memtable;
@@ -1875,7 +1867,7 @@ static void dev_connect_memleak(struct daemon *daemon, const u8 *msg)
 	memleak_scan_obj(memtable, daemon);
 	memleak_scan_htable(memtable, &daemon->peers->raw);
 
-	found_leak = dump_memleak(memtable, memleak_status_broken);
+	found_leak = dump_memleak(memtable, memleak_status_broken, NULL);
 	daemon_conn_send(daemon->master,
 			 take(towire_connectd_dev_memleak_reply(NULL,
 							      found_leak)));
@@ -1971,12 +1963,36 @@ static const char *try_tal_name(const tal_t *ctx, const void *p)
 	return tal_fmt(ctx, "%p", p);
 }
 
+static char *fd_mode_str(int fd)
+{
+	struct stat finfo;
+	if (0 != fstat(fd, &finfo))
+		return "invalid fd";
+	if (S_ISBLK(finfo.st_mode))
+		return "block special";
+	if (S_ISCHR(finfo.st_mode))
+		return "char special";
+	if (S_ISDIR(finfo.st_mode))
+		return "directory";
+	if (S_ISFIFO(finfo.st_mode))
+		return "fifo or socket";
+	if (S_ISREG(finfo.st_mode))
+		return "regular file";
+	if (S_ISLNK(finfo.st_mode))
+		return "symbolic link";
+	if (S_ISSOCK(finfo.st_mode))
+		return "socket";
+	return "unknown";
+}
+
 static void dev_report_fds(struct daemon *daemon, const u8 *msg)
 {
+	bool found_chr_fd = false;
 	for (int fd = 3; fd < 4096; fd++) {
 		bool listener;
 		const struct io_conn *c;
 		const struct io_listener *l;
+		struct stat finfo;
 		if (!isatty(fd) && errno == EBADF)
 			continue;
 		if (fd == HSM_FD) {
@@ -1987,19 +2003,26 @@ static void dev_report_fds(struct daemon *daemon, const u8 *msg)
 			status_info("dev_report_fds: %i -> gossipd fd", fd);
 			continue;
 		}
-#if DEVELOPER
 		if (fd == daemon->dev_disconnect_fd) {
 			status_info("dev_report_fds: %i -> dev_disconnect_fd", fd);
 			continue;
 		}
-#endif
 		if (fd == daemon->gossip_store_fd) {
 			status_info("dev_report_fds: %i -> gossip_store", fd);
 			continue;
 		}
 		c = io_have_fd(fd, &listener);
 		if (!c) {
-			status_broken("dev_report_fds: %i open but unowned?", fd);
+			/* We consider a single CHR as expected */
+			if (!found_chr_fd && !fstat(fd, &finfo)
+			    && S_ISCHR(finfo.st_mode)) {
+				found_chr_fd = true;
+				status_info("dev_report_fds: %i -> char fd", fd);
+				continue;
+			}
+
+			status_broken("dev_report_fds: %i open but unowned? fd"
+				      " mode: %s", fd, fd_mode_str(fd));
 			continue;
 		} else if (listener) {
 			l = (void *)c;
@@ -2020,7 +2043,6 @@ static void dev_report_fds(struct daemon *daemon, const u8 *msg)
 		describe_fd(fd);
 	}
 }
-#endif /* DEVELOPER */
 
 static struct io_plan *recv_peer_connect_subd(struct io_conn *conn,
 					      const u8 *msg,
@@ -2081,21 +2103,28 @@ static struct io_plan *recv_req(struct io_conn *conn,
 		start_shutdown(daemon, msg);
 		goto out;
 
+	case WIRE_CONNECTD_SET_CUSTOMMSGS:
+		set_custommsgs(daemon, msg);
+		goto out;
+
 	case WIRE_CONNECTD_DEV_MEMLEAK:
-#if DEVELOPER
-		dev_connect_memleak(daemon, msg);
-		goto out;
-#endif
+		if (daemon->developer) {
+			dev_connect_memleak(daemon, msg);
+			goto out;
+		}
+		/* Fall thru */
 	case WIRE_CONNECTD_DEV_SUPPRESS_GOSSIP:
-#if DEVELOPER
-		dev_suppress_gossip(daemon, msg);
-		goto out;
-#endif
+		if (daemon->developer) {
+			dev_suppress_gossip(daemon, msg);
+			goto out;
+		}
+		/* Fall thru */
 	case WIRE_CONNECTD_DEV_REPORT_FDS:
-#if DEVELOPER
-		dev_report_fds(daemon, msg);
-		goto out;
-#endif
+		if (daemon->developer) {
+			dev_report_fds(daemon, msg);
+			goto out;
+		}
+		/* Fall thru */
 	/* We send these, we don't receive them */
 	case WIRE_CONNECTD_INIT_REPLY:
 	case WIRE_CONNECTD_ACTIVATE_REPLY:
@@ -2152,14 +2181,12 @@ static struct io_plan *recv_gossip(struct io_conn *conn,
 	return daemon_conn_read_next(conn, daemon->gossipd);
 }
 
-/*~ This is a hook used by the memleak code (if DEVELOPER=1): it can't see
- * pointers inside hash tables, so we give it a hint here. */
-#if DEVELOPER
+/*~ This is a hook used by the memleak code: it can't see pointers
+ * inside hash tables, so we give it a hint here. */
 static void memleak_daemon_cb(struct htable *memtable, struct daemon *daemon)
 {
 	memleak_scan_htable(memtable, &daemon->peers->raw);
 }
-#endif /* DEVELOPER */
 
 static void gossipd_failed(struct daemon_conn *gossipd)
 {
@@ -2168,15 +2195,17 @@ static void gossipd_failed(struct daemon_conn *gossipd)
 
 int main(int argc, char *argv[])
 {
+	struct daemon *daemon;
+	bool developer;
+
 	setup_locale();
 
-	struct daemon *daemon;
-
 	/* Common subdaemon setup code. */
-	subdaemon_setup(argc, argv);
+	developer = subdaemon_setup(argc, argv);
 
 	/* Allocate and set up our simple top-level structure. */
 	daemon = tal(NULL, struct daemon);
+	daemon->developer = developer;
 	daemon->connection_counter = 1;
 	daemon->peers = tal(daemon, struct peer_htable);
 	daemon->listeners = tal_arr(daemon, struct io_listener *, 0);
@@ -2186,6 +2215,8 @@ int main(int argc, char *argv[])
 	timers_init(&daemon->timers, time_mono());
 	daemon->gossip_store_fd = -1;
 	daemon->shutting_down = false;
+	daemon->dev_suppress_gossip = false;
+	daemon->custom_msgs = NULL;
 
 	/* stdin == control */
 	daemon->master = daemon_conn_new(daemon, STDIN_FILENO, recv_req, NULL,

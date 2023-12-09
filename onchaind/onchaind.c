@@ -1581,7 +1581,6 @@ static void handle_preimage(struct tracked_output **outs,
 	}
 }
 
-#if DEVELOPER
 static void memleak_remove_globals(struct htable *memtable, const tal_t *topctx)
 {
 	memleak_scan_obj(memtable, keyset);
@@ -1607,17 +1606,11 @@ static void handle_dev_memleak(struct tracked_output ***outs, const u8 *msg)
 	memleak_remove_globals(memtable, tal_parent(*outs));
 	memleak_scan_obj(memtable, *outs);
 
-	found_leak = dump_memleak(memtable, memleak_status_broken);
+	found_leak = dump_memleak(memtable, memleak_status_broken, NULL);
 	wire_sync_write(REQ_FD,
 			take(towire_onchaind_dev_memleak_reply(NULL,
 							      found_leak)));
 }
-#else
-static void handle_dev_memleak(struct tracked_output ***outs, const u8 *msg)
-{
-	master_badmsg(WIRE_ONCHAIND_DEV_MEMLEAK, msg);
-}
-#endif /* !DEVELOPER */
 
 static void handle_onchaind_depth(struct tracked_output ***outs, const u8 *msg)
 {

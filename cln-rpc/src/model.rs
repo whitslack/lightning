@@ -26,6 +26,7 @@ pub enum Request {
 	Connect(requests::ConnectRequest),
 	CreateInvoice(requests::CreateinvoiceRequest),
 	Datastore(requests::DatastoreRequest),
+	DatastoreUsage(requests::DatastoreusageRequest),
 	CreateOnion(requests::CreateonionRequest),
 	DelDatastore(requests::DeldatastoreRequest),
 	DelExpiredInvoice(requests::DelexpiredinvoiceRequest),
@@ -57,6 +58,7 @@ pub enum Request {
 	Decode(requests::DecodeRequest),
 	Disconnect(requests::DisconnectRequest),
 	Feerates(requests::FeeratesRequest),
+	FetchInvoice(requests::FetchinvoiceRequest),
 	FundChannel(requests::FundchannelRequest),
 	GetRoute(requests::GetrouteRequest),
 	ListForwards(requests::ListforwardsRequest),
@@ -66,6 +68,7 @@ pub enum Request {
 	SetChannel(requests::SetchannelRequest),
 	SignInvoice(requests::SigninvoiceRequest),
 	SignMessage(requests::SignmessageRequest),
+	WaitBlockHeight(requests::WaitblockheightRequest),
 	Stop(requests::StopRequest),
 	PreApproveKeysend(requests::PreapprovekeysendRequest),
 	PreApproveInvoice(requests::PreapproveinvoiceRequest),
@@ -88,6 +91,7 @@ pub enum Response {
 	Connect(responses::ConnectResponse),
 	CreateInvoice(responses::CreateinvoiceResponse),
 	Datastore(responses::DatastoreResponse),
+	DatastoreUsage(responses::DatastoreusageResponse),
 	CreateOnion(responses::CreateonionResponse),
 	DelDatastore(responses::DeldatastoreResponse),
 	DelExpiredInvoice(responses::DelexpiredinvoiceResponse),
@@ -119,6 +123,7 @@ pub enum Response {
 	Decode(responses::DecodeResponse),
 	Disconnect(responses::DisconnectResponse),
 	Feerates(responses::FeeratesResponse),
+	FetchInvoice(responses::FetchinvoiceResponse),
 	FundChannel(responses::FundchannelResponse),
 	GetRoute(responses::GetrouteResponse),
 	ListForwards(responses::ListforwardsResponse),
@@ -128,6 +133,7 @@ pub enum Response {
 	SetChannel(responses::SetchannelResponse),
 	SignInvoice(responses::SigninvoiceResponse),
 	SignMessage(responses::SignmessageResponse),
+	WaitBlockHeight(responses::WaitblockheightResponse),
 	Stop(responses::StopResponse),
 	PreApproveKeysend(responses::PreapprovekeysendResponse),
 	PreApproveInvoice(responses::PreapproveinvoiceResponse),
@@ -430,6 +436,20 @@ pub mod requests {
 
 	impl IntoRequest for DatastoreRequest {
 	    type Response = super::responses::DatastoreResponse;
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct DatastoreusageRequest {
+	}
+
+	impl From<DatastoreusageRequest> for Request {
+	    fn from(r: DatastoreusageRequest) -> Self {
+	        Request::DatastoreUsage(r)
+	    }
+	}
+
+	impl IntoRequest for DatastoreusageRequest {
+	    type Response = super::responses::DatastoreusageResponse;
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1189,6 +1209,35 @@ pub mod requests {
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct FetchinvoiceRequest {
+	    pub offer: String,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub amount_msat: Option<Amount>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub quantity: Option<u64>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub recurrence_counter: Option<u64>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub recurrence_start: Option<f64>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub recurrence_label: Option<String>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub timeout: Option<f64>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub payer_note: Option<String>,
+	}
+
+	impl From<FetchinvoiceRequest> for Request {
+	    fn from(r: FetchinvoiceRequest) -> Self {
+	        Request::FetchInvoice(r)
+	    }
+	}
+
+	impl IntoRequest for FetchinvoiceRequest {
+	    type Response = super::responses::FetchinvoiceResponse;
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
 	pub struct FundchannelRequest {
 	    pub id: PublicKey,
 	    pub amount: AmountOrAll,
@@ -1449,6 +1498,23 @@ pub mod requests {
 
 	impl IntoRequest for SignmessageRequest {
 	    type Response = super::responses::SignmessageResponse;
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct WaitblockheightRequest {
+	    pub blockheight: u32,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub timeout: Option<u32>,
+	}
+
+	impl From<WaitblockheightRequest> for Request {
+	    fn from(r: WaitblockheightRequest) -> Self {
+	        Request::WaitBlockHeight(r)
+	    }
+	}
+
+	impl IntoRequest for WaitblockheightRequest {
+	    type Response = super::responses::WaitblockheightResponse;
 	}
 
 	#[derive(Clone, Debug, Deserialize, Serialize)]
@@ -1773,6 +1839,10 @@ pub mod responses {
 	    DUALOPEND_OPEN_INIT,
 	    #[serde(rename = "DUALOPEND_AWAITING_LOCKIN")]
 	    DUALOPEND_AWAITING_LOCKIN,
+	    #[serde(rename = "DUALOPEND_OPEN_COMMITTED")]
+	    DUALOPEND_OPEN_COMMITTED,
+	    #[serde(rename = "DUALOPEND_OPEN_COMMIT_READY")]
+	    DUALOPEND_OPEN_COMMIT_READY,
 	}
 
 	impl TryFrom<i32> for ListpeersPeersChannelsState {
@@ -1790,6 +1860,8 @@ pub mod responses {
 	    8 => Ok(ListpeersPeersChannelsState::ONCHAIN),
 	    9 => Ok(ListpeersPeersChannelsState::DUALOPEND_OPEN_INIT),
 	    10 => Ok(ListpeersPeersChannelsState::DUALOPEND_AWAITING_LOCKIN),
+	    11 => Ok(ListpeersPeersChannelsState::DUALOPEND_OPEN_COMMITTED),
+	    12 => Ok(ListpeersPeersChannelsState::DUALOPEND_OPEN_COMMIT_READY),
 	            o => Err(anyhow::anyhow!("Unknown variant {} for enum ListpeersPeersChannelsState", o)),
 	        }
 	    }
@@ -1809,6 +1881,8 @@ pub mod responses {
 	            ListpeersPeersChannelsState::ONCHAIN => "ONCHAIN",
 	            ListpeersPeersChannelsState::DUALOPEND_OPEN_INIT => "DUALOPEND_OPEN_INIT",
 	            ListpeersPeersChannelsState::DUALOPEND_AWAITING_LOCKIN => "DUALOPEND_AWAITING_LOCKIN",
+	            ListpeersPeersChannelsState::DUALOPEND_OPEN_COMMITTED => "DUALOPEND_OPEN_COMMITTED",
+	            ListpeersPeersChannelsState::DUALOPEND_OPEN_COMMIT_READY => "DUALOPEND_OPEN_COMMIT_READY",
 	        }.to_string()
 	    }
 	}
@@ -2516,6 +2590,31 @@ pub mod responses {
 	    fn try_from(response: Response) -> Result<Self, Self::Error> {
 	        match response {
 	            Response::Datastore(response) => Ok(response),
+	            _ => Err(TryFromResponseError)
+	        }
+	    }
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct DatastoreusageDatastoreusage {
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub key: Option<String>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub total_bytes: Option<u64>,
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct DatastoreusageResponse {
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub datastoreusage: Option<DatastoreusageDatastoreusage>,
+	}
+
+	impl TryFrom<Response> for DatastoreusageResponse {
+	    type Error = super::TryFromResponseError;
+
+	    fn try_from(response: Response) -> Result<Self, Self::Error> {
+	        match response {
+	            Response::DatastoreUsage(response) => Ok(response),
 	            _ => Err(TryFromResponseError)
 	        }
 	    }
@@ -3559,6 +3658,10 @@ pub mod responses {
 	    DUALOPEND_OPEN_INIT,
 	    #[serde(rename = "DUALOPEND_AWAITING_LOCKIN")]
 	    DUALOPEND_AWAITING_LOCKIN,
+	    #[serde(rename = "DUALOPEND_OPEN_COMMITTED")]
+	    DUALOPEND_OPEN_COMMITTED,
+	    #[serde(rename = "DUALOPEND_OPEN_COMMIT_READY")]
+	    DUALOPEND_OPEN_COMMIT_READY,
 	}
 
 	impl TryFrom<i32> for ListpeerchannelsChannelsState {
@@ -3576,6 +3679,8 @@ pub mod responses {
 	    8 => Ok(ListpeerchannelsChannelsState::ONCHAIN),
 	    9 => Ok(ListpeerchannelsChannelsState::DUALOPEND_OPEN_INIT),
 	    10 => Ok(ListpeerchannelsChannelsState::DUALOPEND_AWAITING_LOCKIN),
+	    11 => Ok(ListpeerchannelsChannelsState::DUALOPEND_OPEN_COMMITTED),
+	    12 => Ok(ListpeerchannelsChannelsState::DUALOPEND_OPEN_COMMIT_READY),
 	            o => Err(anyhow::anyhow!("Unknown variant {} for enum ListpeerchannelsChannelsState", o)),
 	        }
 	    }
@@ -3595,6 +3700,8 @@ pub mod responses {
 	            ListpeerchannelsChannelsState::ONCHAIN => "ONCHAIN",
 	            ListpeerchannelsChannelsState::DUALOPEND_OPEN_INIT => "DUALOPEND_OPEN_INIT",
 	            ListpeerchannelsChannelsState::DUALOPEND_AWAITING_LOCKIN => "DUALOPEND_AWAITING_LOCKIN",
+	            ListpeerchannelsChannelsState::DUALOPEND_OPEN_COMMITTED => "DUALOPEND_OPEN_COMMITTED",
+	            ListpeerchannelsChannelsState::DUALOPEND_OPEN_COMMIT_READY => "DUALOPEND_OPEN_COMMIT_READY",
 	        }.to_string()
 	    }
 	}
@@ -3935,6 +4042,8 @@ pub mod responses {
 	    P2WPKH,
 	    #[serde(rename = "P2WSH")]
 	    P2WSH,
+	    #[serde(rename = "P2TR")]
+	    P2TR,
 	}
 
 	impl TryFrom<i32> for DecodepayFallbacksType {
@@ -3945,6 +4054,7 @@ pub mod responses {
 	    1 => Ok(DecodepayFallbacksType::P2SH),
 	    2 => Ok(DecodepayFallbacksType::P2WPKH),
 	    3 => Ok(DecodepayFallbacksType::P2WSH),
+	    4 => Ok(DecodepayFallbacksType::P2TR),
 	            o => Err(anyhow::anyhow!("Unknown variant {} for enum DecodepayFallbacksType", o)),
 	        }
 	    }
@@ -3957,6 +4067,7 @@ pub mod responses {
 	            DecodepayFallbacksType::P2SH => "P2SH",
 	            DecodepayFallbacksType::P2WPKH => "P2WPKH",
 	            DecodepayFallbacksType::P2WSH => "P2WSH",
+	            DecodepayFallbacksType::P2TR => "P2TR",
 	        }.to_string()
 	    }
 	}
@@ -4028,6 +4139,8 @@ pub mod responses {
 	    BOLT11_INVOICE,
 	    #[serde(rename = "rune")]
 	    RUNE,
+	    #[serde(rename = "emergency recover")]
+	    EMERGENCY_RECOVER,
 	}
 
 	impl TryFrom<i32> for DecodeType {
@@ -4039,6 +4152,7 @@ pub mod responses {
 	    2 => Ok(DecodeType::BOLT12_INVOICE_REQUEST),
 	    3 => Ok(DecodeType::BOLT11_INVOICE),
 	    4 => Ok(DecodeType::RUNE),
+	    5 => Ok(DecodeType::EMERGENCY_RECOVER),
 	            o => Err(anyhow::anyhow!("Unknown variant {} for enum DecodeType", o)),
 	        }
 	    }
@@ -4052,6 +4166,7 @@ pub mod responses {
 	            DecodeType::BOLT12_INVOICE_REQUEST => "BOLT12_INVOICE_REQUEST",
 	            DecodeType::BOLT11_INVOICE => "BOLT11_INVOICE",
 	            DecodeType::RUNE => "RUNE",
+	            DecodeType::EMERGENCY_RECOVER => "EMERGENCY_RECOVER",
 	        }.to_string()
 	    }
 	}
@@ -4228,6 +4343,8 @@ pub mod responses {
 	    pub warning_rune_invalid_utf8: Option<String>,
 	    #[serde(skip_serializing_if = "Option::is_none")]
 	    pub hex: Option<String>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub decrypted: Option<String>,
 	}
 
 	impl TryFrom<Response> for DecodeResponse {
@@ -4357,6 +4474,48 @@ pub mod responses {
 	    fn try_from(response: Response) -> Result<Self, Self::Error> {
 	        match response {
 	            Response::Feerates(response) => Ok(response),
+	            _ => Err(TryFromResponseError)
+	        }
+	    }
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct FetchinvoiceChanges {
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub description_appended: Option<String>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub description: Option<String>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub vendor_removed: Option<String>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub vendor: Option<String>,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub amount_msat: Option<Amount>,
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct FetchinvoiceNext_period {
+	    pub counter: u64,
+	    pub starttime: u64,
+	    pub endtime: u64,
+	    pub paywindow_start: u64,
+	    pub paywindow_end: u64,
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct FetchinvoiceResponse {
+	    pub invoice: String,
+	    pub changes: FetchinvoiceChanges,
+	    #[serde(skip_serializing_if = "Option::is_none")]
+	    pub next_period: Option<FetchinvoiceNext_period>,
+	}
+
+	impl TryFrom<Response> for FetchinvoiceResponse {
+	    type Error = super::TryFromResponseError;
+
+	    fn try_from(response: Response) -> Result<Self, Self::Error> {
+	        match response {
+	            Response::FetchInvoice(response) => Ok(response),
 	            _ => Err(TryFromResponseError)
 	        }
 	    }
@@ -4713,6 +4872,22 @@ pub mod responses {
 	    fn try_from(response: Response) -> Result<Self, Self::Error> {
 	        match response {
 	            Response::SignMessage(response) => Ok(response),
+	            _ => Err(TryFromResponseError)
+	        }
+	    }
+	}
+
+	#[derive(Clone, Debug, Deserialize, Serialize)]
+	pub struct WaitblockheightResponse {
+	    pub blockheight: u32,
+	}
+
+	impl TryFrom<Response> for WaitblockheightResponse {
+	    type Error = super::TryFromResponseError;
+
+	    fn try_from(response: Response) -> Result<Self, Self::Error> {
+	        match response {
+	            Response::WaitBlockHeight(response) => Ok(response),
 	            _ => Err(TryFromResponseError)
 	        }
 	    }

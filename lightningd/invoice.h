@@ -1,6 +1,7 @@
 #ifndef LIGHTNING_LIGHTNINGD_INVOICE_H
 #define LIGHTNING_LIGHTNINGD_INVOICE_H
 #include "config.h"
+#include <bitcoin/preimage.h>
 #include <wallet/wallet.h>
 #include <wire/onion_wire.h>
 

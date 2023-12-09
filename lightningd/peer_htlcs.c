@@ -1,5 +1,6 @@
 #include "config.h"
 #include <ccan/cast/cast.h>
+#include <ccan/mem/mem.h>
 #include <ccan/tal/str/str.h>
 #include <channeld/channeld_wiregen.h>
 #include <common/blinding.h>
@@ -169,7 +170,7 @@ static void tell_channeld_htlc_failed(const struct htlc_in *hin,
 		return;
 
 	/* onchaind doesn't care, it can't do anything but wait */
-	if (!channel_active(hin->key.channel))
+	if (!channel_state_can_remove_htlc(hin->key.channel->state))
 		return;
 
 	subd_send_msg(hin->key.channel->owner,
@@ -402,7 +403,7 @@ static void handle_localpay(struct htlc_in *hin,
 		 * 2. data:
 		 *    * [`u64`:`incoming_htlc_amt`]
 		 *
-		 * The amount in the HTLC doesn't match the value in the onion.
+		 * The amount in the HTLC is less than the value in the onion.
 		 */
 		failmsg = towire_final_incorrect_htlc_amount(NULL, hin->msat);
 		goto fail;
@@ -423,7 +424,7 @@ static void handle_localpay(struct htlc_in *hin,
 		 * 2. data:
 		 *    * [`u32`:`cltv_expiry`]
 		 *
-		 * The CLTV expiry in the HTLC doesn't match the value in the onion.
+		 * The CLTV expiry in the HTLC is less than the value in the onion.
 		 */
 		failmsg = towire_final_incorrect_cltv_expiry(NULL,
 							     hin->cltv_expiry);
@@ -526,6 +527,11 @@ static void rcvd_htlc_reply(struct subd *subd, const u8 *msg, const int *fds UNU
 	}
 
 	if (tal_count(failmsg)) {
+		/* It's our job to append the channel_update */
+		if (fromwire_peektype(failmsg) & UPDATE) {
+			const u8 *update = get_channel_update(hout->key.channel);
+			towire(&failmsg, update, tal_bytelen(update));
+		}
 		hout->failmsg = tal_steal(hout, failmsg);
 		if (hout->am_origin) {
 			char *localfail = tal_fmt(msg, "%s: %s",
@@ -583,23 +589,14 @@ static void htlc_offer_timeout(struct htlc_out *out)
 	assert(out->hstate == SENT_ADD_HTLC);
 
 	/* If owner died, we should already be taken care of. */
-	if (!channel->owner || channel->state != CHANNELD_NORMAL)
+	if (!channel->owner || !channel_state_can_add_htlc(channel->state))
 		return;
 
 	log_unusual(channel->owner->log,
 		    "Adding HTLC %"PRIu64" too slow: killing connection",
 		    out->key.id);
-	tal_free(channel->owner);
-	channel_set_billboard(channel, false,
+	channel_fail_transient(channel, true,
 			      "Adding HTLC timed out: killed connection");
-
-	/* Force a disconnect in case the issue is with TCP */
-	if (channel->peer->ld->connectd) {
-		const struct peer *peer = channel->peer;
-		subd_send_msg(peer->ld->connectd,
-			      take(towire_connectd_discard_peer(NULL, &peer->id,
-								peer->connectd_counter)));
-	}
 }
 
 /* Returns failmsg, or NULL on success. */
@@ -619,7 +616,7 @@ const u8 *send_htlc_out(const tal_t *ctx,
 
 	*houtp = NULL;
 
-	if (!channel_can_add_htlc(out)) {
+	if (!channel_state_can_add_htlc(out->state)) {
 		log_info(out->log, "Attempt to send HTLC but not ready (%s)",
 			 channel_state_name(out));
 		return towire_unknown_next_peer(ctx);
@@ -647,7 +644,7 @@ const u8 *send_htlc_out(const tal_t *ctx,
 	tal_add_destructor(*houtp, destroy_hout_subd_died);
 
 	/* Give channel 30 seconds to commit this htlc. */
-	if (!IFDEV(out->peer->ld->dev_no_htlc_timeout, 0)) {
+	if (!out->peer->ld->dev_no_htlc_timeout) {
 		(*houtp)->timeout = new_reltimer(out->peer->ld->timers,
 						 *houtp, time_from_sec(30),
 						 htlc_offer_timeout,
@@ -675,7 +672,7 @@ static struct channel *best_channel(struct lightningd *ld,
 	/* Seek channel with largest spendable! */
 	list_for_each(&next_peer->channels, channel, list) {
 		struct amount_msat spendable;
-		if (!channel_can_add_htlc(channel))
+		if (!channel_state_can_add_htlc(channel->state))
 			continue;
 		spendable = channel_amount_spendable(channel);
 		if (!amount_msat_greater(spendable, best_spendable))
@@ -724,7 +721,7 @@ static void forward_htlc(struct htlc_in *hin,
 		next = NULL;
 
 	/* Unknown peer, or peer not ready. */
-	if (!next || !channel_active(next)) {
+	if (!next || !channel_state_can_add_htlc(next->state)) {
 		local_fail_in_htlc(hin, take(towire_unknown_next_peer(NULL)));
 		wallet_forwarded_payment_add(hin->key.channel->peer->ld->wallet,
 					 hin, FORWARD_STYLE_TLV,
@@ -1337,18 +1334,17 @@ static bool peer_accepted_htlc(const tal_t *ctx,
 
 	htlc_in_check(hin, __func__);
 
-#if DEVELOPER
-	if (channel->peer->ignore_htlcs) {
+	if (channel->peer->dev_ignore_htlcs) {
 		log_debug(channel->log, "their htlc %"PRIu64" dev_ignore_htlcs",
 			  id);
 		return true;
 	}
-#endif
+
 	/* BOLT #2:
 	 *
 	 *   - SHOULD fail to route any HTLC added after it has sent `shutdown`.
 	 */
-	if (channel->state == CHANNELD_SHUTTING_DOWN) {
+	if (!channel_state_can_add_htlc(channel->state)) {
 		*failmsg = towire_permanent_channel_failure(ctx);
 		log_debug(channel->log,
 			  "Rejecting their htlc %"PRIu64
@@ -1571,16 +1567,19 @@ static bool peer_failed_our_htlc(struct channel *channel,
 		/* BOLT #2:
 		 *
 		 *   - if the `sha256_of_onion` in `update_fail_malformed_htlc`
-		 *     doesn't match the onion it sent:
+		 *     doesn't match the onion it sent and is not all zero:
 		 *    - MAY retry or choose an alternate error response.
 		 */
 		sha256(&our_sha256_of_onion, hout->onion_routing_packet,
 		       sizeof(hout->onion_routing_packet));
-		if (!sha256_eq(failed->sha256_of_onion, &our_sha256_of_onion))
+		if (!sha256_eq(failed->sha256_of_onion, &our_sha256_of_onion)
+		    && !memeqzero(failed->sha256_of_onion,
+				  sizeof(failed->sha256_of_onion))) {
 			log_unusual(channel->log,
 				    "update_fail_malformed_htlc for bad onion"
 				       " for htlc with id %"PRIu64".",
 				    hout->key.id);
+		}
 
 		/* BOLT #2:
 		 *
@@ -1929,7 +1928,6 @@ static bool update_out_htlc(struct channel *channel,
 {
 	struct lightningd *ld = channel->peer->ld;
 	struct htlc_out *hout;
-	struct wallet_payment *payment;
 
 	hout = find_htlc_out(ld->htlcs_out, channel, id);
 	if (!hout) {
@@ -1949,16 +1947,6 @@ static bool update_out_htlc(struct channel *channel,
 						     FORWARD_STYLE_TLV,
 						     channel_scid_or_local_alias(channel), hout,
 						     FORWARD_OFFERED, 0);
-		}
-
-		/* For our own HTLCs, we commit payment to db lazily */
-		if (hout->am_origin) {
-			payment = wallet_payment_by_hash(tmpctx, ld->wallet,
-							 &hout->payment_hash,
-							 hout->partid,
-							 hout->groupid);
-			assert(payment);
-			payment_store(ld, take(payment));
 		}
 	}
 
@@ -2058,8 +2046,6 @@ void peer_sending_commitsig(struct channel *channel, const u8 *msg)
 	struct height_states *blockheight_states;
 	struct changed_htlc *changed_htlcs;
 	size_t i, maxid = 0, num_local_added = 0;
-	struct bitcoin_signature commit_sig;
-	struct bitcoin_signature *htlc_sigs;
 	struct lightningd *ld = channel->peer->ld;
 	struct penalty_base *pbase;
 
@@ -2068,8 +2054,7 @@ void peer_sending_commitsig(struct channel *channel, const u8 *msg)
 						&pbase,
 						&fee_states,
 						&blockheight_states,
-						&changed_htlcs,
-						&commit_sig, &htlc_sigs)
+						&changed_htlcs)
 	    || !fee_states_valid(fee_states, channel->opener)
 	    || !height_states_valid(blockheight_states, channel->opener)) {
 		channel_internal_error(channel, "bad channel_sending_commitsig %s",
@@ -2745,8 +2730,8 @@ void htlcs_notify_new_block(struct lightningd *ld, u32 height)
 			if (height < htlc_out_deadline(hout))
 				continue;
 
-			/* Peer on chain already? */
-			if (channel_on_chain(hout->key.channel)) {
+			/* Channel dying already? */
+			if (!channel_state_can_add_htlc(hout->key.channel->state)) {
 				consider_failing_incoming(ld, height, hout);
 				continue;
 			}
@@ -2798,7 +2783,7 @@ void htlcs_notify_new_block(struct lightningd *ld, u32 height)
 				continue;
 
 			/* Peer on chain already? */
-			if (channel_on_chain(channel))
+			if (channel_state_failing_onchain(channel->state))
 				continue;
 
 			/* Peer already failed, or we hit it? */
@@ -2910,7 +2895,6 @@ void htlcs_resubmit(struct lightningd *ld,
 	tal_free(unconnected_htlcs_in);
 }
 
-#if DEVELOPER
 static struct command_result *json_dev_ignore_htlcs(struct command *cmd,
 						    const char *buffer,
 						    const jsmntok_t *obj UNNEEDED,
@@ -2920,10 +2904,10 @@ static struct command_result *json_dev_ignore_htlcs(struct command *cmd,
 	struct peer *peer;
 	bool *ignore;
 
-	if (!param(cmd, buffer, params,
-		   p_req("id", param_node_id, &peerid),
-		   p_req("ignore", param_bool, &ignore),
-		   NULL))
+	if (!param_check(cmd, buffer, params,
+			 p_req("id", param_node_id, &peerid),
+			 p_req("ignore", param_bool, &ignore),
+			 NULL))
 		return command_param_failed();
 
 	peer = peer_by_id(cmd->ld, peerid);
@@ -2931,7 +2915,10 @@ static struct command_result *json_dev_ignore_htlcs(struct command *cmd,
 		return command_fail(cmd, LIGHTNINGD,
 				    "Could not find channel with that peer");
 	}
-	peer->ignore_htlcs = *ignore;
+	if (command_check_only(cmd))
+		return command_check_done(cmd);
+
+	peer->dev_ignore_htlcs = *ignore;
 
 	return command_success(cmd, json_stream_success(cmd));
 }
@@ -2940,135 +2927,8 @@ static const struct json_command dev_ignore_htlcs = {
 	"dev-ignore-htlcs",
 	"developer",
 	json_dev_ignore_htlcs,
-	"Set ignoring incoming HTLCs for peer {id} to {ignore}", false,
-	"Set/unset ignoring of all incoming HTLCs.  For testing only."
+	"Set ignoring incoming HTLCs for peer {id} to {ignore}",
+	.dev_only = true,
 };
 
 AUTODATA(json_command, &dev_ignore_htlcs);
-#endif /* DEVELOPER */
-
-/* Warp this process to ensure the consistent json object structure
- * between 'listforwards' API and 'forward_event' notification. */
-void json_add_forwarding_object(struct json_stream *response,
-				const char *fieldname,
-				const struct forwarding *cur,
-				const struct sha256 *payment_hash)
-{
-	json_object_start(response, fieldname);
-
-	/* Only for forward_event */
-	if (payment_hash)
-		json_add_sha256(response, "payment_hash", payment_hash);
-	json_add_short_channel_id(response, "in_channel", &cur->channel_in);
-	json_add_u64(response, "in_htlc_id", cur->htlc_id_in);
-
-	/* This can be unknown if we failed before channel lookup */
-	if (cur->channel_out.u64 != 0) {
-		json_add_short_channel_id(response, "out_channel",
-					  &cur->channel_out);
-		if (cur->htlc_id_out)
-			json_add_u64(response, "out_htlc_id", *cur->htlc_id_out);
-	}
-	json_add_amount_msat(response, "in_msat", cur->msat_in);
-
-	/* These can be unset (aka zero) if we failed before channel lookup */
-	if (!amount_msat_eq(cur->msat_out, AMOUNT_MSAT(0))) {
-		json_add_amount_msat(response, "out_msat", cur->msat_out);
-		json_add_amount_msat(response, "fee_msat", cur->fee);
-	}
-	json_add_string(response, "status", forward_status_name(cur->status));
-
-	if (cur->failcode != 0) {
-		json_add_num(response, "failcode", cur->failcode);
-		json_add_string(response, "failreason",
-				onion_wire_name(cur->failcode));
-	}
-
-	/* Old forwards don't have this field */
-	if (cur->forward_style != FORWARD_STYLE_UNKNOWN)
-		json_add_string(response, "style",
-				forward_style_name(cur->forward_style));
-
-#ifdef COMPAT_V070
-		/* If a forwarding doesn't have received_time it was created
-		 * before we added the tracking, do not include it here. */
-	if (cur->received_time.ts.tv_sec) {
-		json_add_timeabs(response, "received_time", cur->received_time);
-		if (cur->resolved_time)
-			json_add_timeabs(response, "resolved_time", *cur->resolved_time);
-	}
-#else
-	json_add_timeabs(response, "received_time", cur->received_time);
-	if (cur->resolved_time)
-		json_add_timeabs(response, "resolved_time", *cur->resolved_time);
-#endif
-	json_object_end(response);
-}
-
-static void listforwardings_add_forwardings(struct json_stream *response,
-					    struct wallet *wallet,
-					    enum forward_status status,
-					    const struct short_channel_id *chan_in,
-					    const struct short_channel_id *chan_out)
-{
-	const struct forwarding *forwardings;
-
-	forwardings = wallet_forwarded_payments_get(wallet, tmpctx, status, chan_in, chan_out);
-
-	json_array_start(response, "forwards");
-	for (size_t i=0; i<tal_count(forwardings); i++) {
-		const struct forwarding *cur = &forwardings[i];
-		json_add_forwarding_object(response, NULL, cur, cur->payment_hash);
-	}
-	json_array_end(response);
-
-	tal_free(forwardings);
-}
-
-static struct command_result *param_forward_status(struct command *cmd,
-						   const char *name,
-						   const char *buffer,
-						   const jsmntok_t *tok,
-						   enum forward_status **status)
-{
-	*status = tal(cmd, enum forward_status);
-	if (string_to_forward_status(buffer + tok->start,
-				     tok->end - tok->start,
-				     *status))
-		return NULL;
-
-	return command_fail_badparam(cmd, name, buffer, tok,
-				     "Unrecognized status");
-}
-
-static struct command_result *json_listforwards(struct command *cmd,
-						const char *buffer,
-						const jsmntok_t *obj UNNEEDED,
-						const jsmntok_t *params)
-{
-
-	struct json_stream *response;
-	struct short_channel_id *chan_in, *chan_out;
-	enum forward_status *status;
-
-	if (!param(cmd, buffer, params,
-		   p_opt_def("status", param_forward_status, &status,
-			     FORWARD_ANY),
-		   p_opt("in_channel", param_short_channel_id, &chan_in),
-		   p_opt("out_channel", param_short_channel_id, &chan_out),
-		   NULL))
-		return command_param_failed();
-
-	response = json_stream_success(cmd);
-	listforwardings_add_forwardings(response, cmd->ld->wallet, *status, chan_in, chan_out);
-
-	return command_success(cmd, response);
-}
-
-static const struct json_command listforwards_command = {
-	"listforwards",
-	"channels",
-	json_listforwards,
-	"List all forwarded payments and their information optionally filtering by [status], [in_channel] and [out_channel]"
-};
-AUTODATA(json_command, &listforwards_command);

@@ -15,6 +15,7 @@ env:
   # of a bit of compile time.
   RUST_PROFILE: release
   SLOW_MACHINE: 1
+  CI_SERVER_URL: "http://35.239.136.52:3170"
 
 jobs:
   prebuild:
@@ -34,7 +35,7 @@ jobs:
 
       - name: Rebase
         # We can't rebase if we're on master already.
-        if: github.ref == 'refs/heads/master'
+        if: github.ref != 'refs/heads/master'
         run: |
           git config user.name github-actions
           git config user.email github-actions@github.com
@@ -53,8 +54,6 @@ jobs:
           # Export and then use pip to install into the current env
           poetry export -o /tmp/requirements.txt --without-hashes --with dev
           pip install -r /tmp/requirements.txt
-          # Make sure we have clnrest requirements, for check-manpages
-          pip install -r plugins/clnrest/requirements.txt
           # We're going to check BOLT quotes, so get the latest version
           git clone https://github.com/lightning/bolts.git ../${BOLTDIR}
       - name: Configure
@@ -76,22 +75,18 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - CFG: gcc-dev1
-            DEVELOPER: 1
+          - CFG: compile-gcc
             VALGRIND: 1
             COMPILER: gcc
-          - CFG: gcc-dev0
-            DEVELOPER: 0
+          - CFG: compile-gcc-O3
             VALGRIND: 1
             COMPILER: gcc
             COPTFLAGS_VAR: COPTFLAGS="-O3 -Werror"
           # While we're at it let's try to compile with clang
-          - CFG: clang-dev1
-            DEVELOPER: 1
+          - CFG: compile-clang
             VALGRIND: 1
             COMPILER: clang
-          - CFG: clang-sanitizers
-            DEVELOPER: 1
+          - CFG: compile-clang-sanitizers
             COMPILER: clang
             ASAN: 1
             UBSAN: 1
@@ -111,7 +106,6 @@ jobs:
 
       - name: Build
         env:
-          DEVELOPER: ${{ matrix.DEVELOPER }}
           COMPILER: ${{ matrix.COMPILER }}
           ASAN: ${{ matrix.ASAN }}
           UBSAN: ${{ matrix.UBSAN }}
@@ -150,9 +144,9 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - CFG: gcc-dev1
+          - CFG: compile-gcc
             VALGRIND: 1
-          - CFG: clang-sanitizers
+          - CFG: compile-clang-sanitizers
             VALGRIND: 0
     steps:
       - name: Checkout
@@ -168,6 +162,7 @@ jobs:
       - name: Install dependencies
         run: |
           bash -x .github/scripts/setup.sh
+          sudo apt-get update -qq
           sudo apt-get install -y -qq lowdown
           pip install -U pip wheel poetry
           # Export and then use pip to install into the current env
@@ -212,7 +207,7 @@ jobs:
 
       - name: Build
         run: |
-          ./configure --enable-debugbuild --enable-fuzzing --enable-developer --disable-valgrind CC=clang
+          ./configure --enable-debugbuild --enable-fuzzing --enable-address-sanitizer --enable-ub-sanitizer --disable-valgrind CC=clang
           make -j $(nproc) check-fuzz
 
   integration:
@@ -220,7 +215,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     env:
-      BITCOIN_VERSION: "25.0"
+      BITCOIN_VERSION: "25.1"
       ELEMENTS_VERSION: 22.0.2
       RUST_PROFILE: release  # Has to match the one in the compile step
       PYTEST_OPTS: --timeout=1200
@@ -230,47 +225,36 @@ jobs:
       fail-fast: true
       matrix:
         include:
-          - NAME: gcc-dev1
-            CFG: gcc-dev1
-            DEVELOPER: 1
-            TEST_DB_PROVIDER: sqlite3
-            COMPILER: gcc
-            TEST_NETWORK: regtest
-          - NAME: gcc-dev0
-            CFG: gcc-dev0
-            DEVELOPER: 0
+          - NAME: gcc
+            CFG: compile-gcc
             TEST_DB_PROVIDER: sqlite3
             COMPILER: gcc
             TEST_NETWORK: regtest
           # While we're at it let's try to compile with clang
-          - NAME: clang-dev1
-            CFG: clang-dev1
-            DEVELOPER: 1
+          - NAME: clang
+            CFG: compile-clang
             TEST_DB_PROVIDER: sqlite3
             COMPILER: clang
             TEST_NETWORK: regtest
           # And of course we want to test postgres too
           - NAME: postgres
-            CFG: gcc-dev1
-            DEVELOPER: 1
+            CFG: compile-gcc
             COMPILER: gcc
             TEST_DB_PROVIDER: postgres
             TEST_NETWORK: regtest
           # And don't forget about elements (like cdecker did when
           # reworking the CI...)
           - NAME: liquid
-            CFG: gcc-dev1
-            DEVELOPER: 1
+            CFG: compile-gcc
             COMPILER: gcc
             TEST_NETWORK: liquid-regtest
             TEST_DB_PROVIDER: sqlite3
           # And dual funding!
           - NAME: dual-fund
-            CFG: gcc-dev1
+            CFG: compile-gcc
             TEST_DB_PROVIDER: sqlite3
             COMPILER: gcc
             TEST_NETWORK: regtest
-            DEVELOPER: 1
             EXPERIMENTAL_DUAL_FUND: 1
     steps:
       - name: Checkout
@@ -289,6 +273,8 @@ jobs:
           poetry install
 
       - name: Install bitcoind
+        env:
+          TEST_NETWORK: ${{ matrix.TEST_NETWORK }}
         run: .github/scripts/install-bitcoind.sh
 
       - name: Download build
@@ -296,9 +282,21 @@ jobs:
         with:
           name: cln-${{ matrix.CFG }}.tar.bz2
 
+      - name: Unpack pre-built CLN
+        env:
+          CFG: ${{ matrix.CFG }}
+        run: |
+          tar -xaf cln-${CFG}.tar.bz2
+
+      - name: Switch network
+        if: ${{ matrix.TEST_NETWORK == 'liquid-regtest' }}
+        run: |
+          # Loading the network from config.vars rather than the envvar is a terrible idea...
+          sed -i 's/TEST_NETWORK=regtest/TEST_NETWORK=liquid-regtest/g' config.vars
+          cat config.vars
+
       - name: Test
         env:
-          DEVELOPER: ${{ matrix.DEVELOPER }}
           COMPILER: ${{ matrix.COMPILER }}
           EXPERIMENTAL_DUAL_FUND: ${{ matrix.EXPERIMENTAL_DUAL_FUND }}
           COMPAT: 1
@@ -310,7 +308,8 @@ jobs:
           TEST_NETWORK: ${{ matrix.TEST_NETWORK }}
           LIGHTNINGD_POSTGRES_NO_VACUUM: 1
         run: |
-          tar -xaf cln-${CFG}.tar.bz2
+          env
+          cat config.vars
           VALGRIND=0 poetry run pytest tests/ -vvv -n ${PYTEST_PAR} ${PYTEST_OPTS}
 
   integration-valgrind:
@@ -318,10 +317,10 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     env:
-      BITCOIN_VERSION: "25.0"
+      BITCOIN_VERSION: "25.1"
       ELEMENTS_VERSION: 22.0.2
       RUST_PROFILE: release  # Has to match the one in the compile step
-      CFG: gcc-dev1
+      CFG: compile-gcc
       PYTEST_OPTS: --test-group-random-seed=42 --timeout=1800
     needs:
       - compile
@@ -362,6 +361,7 @@ jobs:
 
       - name: Install dependencies
         run: |
+          sudo apt-get update -qq
           sudo apt-get install -yyq valgrind
           pip3 install --user pip wheel poetry
           poetry install
@@ -372,10 +372,10 @@ jobs:
       - name: Download build
         uses: actions/download-artifact@v3
         with:
-          name: cln-gcc-dev1.tar.bz2
+          name: cln-compile-gcc.tar.bz2
 
       - name: Unpack build
-        run: tar -xvjf cln-gcc-dev1.tar.bz2
+        run: tar -xvjf cln-compile-gcc.tar.bz2
 
       - name: Test
         env:
@@ -389,7 +389,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     env:
-      BITCOIN_VERSION: "25.0"
+      BITCOIN_VERSION: "25.1"
       ELEMENTS_VERSION: 22.0.2
       RUST_PROFILE: release
       SLOW_MACHINE: 1
@@ -445,10 +445,10 @@ jobs:
       - name: Download build
         uses: actions/download-artifact@v3
         with:
-          name: cln-clang-sanitizers.tar.bz2
+          name: cln-compile-clang-sanitizers.tar.bz2
 
       - name: Unpack build
-        run: tar -xvjf cln-clang-sanitizers.tar.bz2
+        run: tar -xvjf cln-compile-clang-sanitizers.tar.bz2
 
       - name: Test
         run: |

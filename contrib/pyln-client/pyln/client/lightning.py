@@ -624,6 +624,18 @@ class LightningRpc(UnixDomainSocketRpc):
         }
         return self.call("datastore", payload)
 
+    def datastoreusage(self, key=None):
+        """
+        Returns the total bytes that are stored for under the given key or the
+        root of the datastore. All descendants of the given key (or root) are
+        taken into account.
+        {key} can be a single string or a sequence of strings.
+        """
+        payload = {
+            "key": key,
+        }
+        return self.call("datastoreusage", payload)
+
     def decodepay(self, bolt11, description=None):
         """
         Decode {bolt11}, using {description} if necessary.
@@ -706,7 +718,7 @@ class LightningRpc(UnixDomainSocketRpc):
 
     def dev_pay(self, bolt11, amount_msat=None, label=None, riskfactor=None,
                 maxfeepercent=None, retry_for=None,
-                maxdelay=None, exemptfee=None, use_shadow=True, exclude=None):
+                maxdelay=None, exemptfee=None, dev_use_shadow=True, exclude=None):
         """
         A developer version of `pay`, with the possibility to deactivate
         shadow routing (used for testing).
@@ -720,7 +732,7 @@ class LightningRpc(UnixDomainSocketRpc):
             "retry_for": retry_for,
             "maxdelay": maxdelay,
             "exemptfee": exemptfee,
-            "use_shadow": use_shadow,
+            "dev_use_shadow": dev_use_shadow,
             "exclude": exclude,
         }
         return self.call("pay", payload)
@@ -1484,6 +1496,18 @@ class LightningRpc(UnixDomainSocketRpc):
             "excess_as_change": excess_as_change,
         }
         return self.call("fundpsbt", payload)
+
+    def addpsbtoutput(self, satoshi, initialpsbt=None, locktime=None, destination=None):
+        """
+        Create a PSBT with an output of amount satoshi leading to the on-chain wallet
+        """
+        payload = {
+            "satoshi": satoshi,
+            "initialpsbt": initialpsbt,
+            "locktime": locktime,
+            "destination": destination,
+        }
+        return self.call("addpsbtoutput", payload)
 
     def utxopsbt(self, satoshi, feerate, startweight, utxos, reserve=None, reservedok=False, locktime=None, min_witness_weight=None, excess_as_change=False):
         """

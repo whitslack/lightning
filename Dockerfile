@@ -15,7 +15,9 @@ WORKDIR /opt
 
 
 ARG BITCOIN_VERSION=22.0
-ENV BITCOIN_TARBALL bitcoin-${BITCOIN_VERSION}-x86_64-linux-gnu.tar.gz
+ARG TARBALL_ARCH=x86_64-linux-gnu
+ENV TARBALL_ARCH_FINAL=$TARBALL_ARCH
+ENV BITCOIN_TARBALL bitcoin-${BITCOIN_VERSION}-${TARBALL_ARCH_FINAL}.tar.gz
 ENV BITCOIN_URL https://bitcoincore.org/bin/bitcoin-core-$BITCOIN_VERSION/$BITCOIN_TARBALL
 ENV BITCOIN_ASC_URL https://bitcoincore.org/bin/bitcoin-core-$BITCOIN_VERSION/SHA256SUMS
 
@@ -25,19 +27,16 @@ RUN mkdir /opt/bitcoin && cd /opt/bitcoin \
     && grep $BITCOIN_TARBALL bitcoin | tee SHA256SUMS \
     && sha256sum -c SHA256SUMS \
     && BD=bitcoin-$BITCOIN_VERSION/bin \
-    && tar -xzvf $BITCOIN_TARBALL $BD/bitcoin-cli --strip-components=1 \
+    && tar -xzvf $BITCOIN_TARBALL $BD/ --strip-components=1 \
     && rm $BITCOIN_TARBALL
 
 ENV LITECOIN_VERSION 0.16.3
-ENV LITECOIN_URL https://download.litecoin.org/litecoin-${LITECOIN_VERSION}/linux/litecoin-${LITECOIN_VERSION}-x86_64-linux-gnu.tar.gz
-ENV LITECOIN_SHA256 686d99d1746528648c2c54a1363d046436fd172beadaceea80bdc93043805994
+ENV LITECOIN_URL https://download.litecoin.org/litecoin-${LITECOIN_VERSION}/linux/litecoin-${LITECOIN_VERSION}-${TARBALL_ARCH_FINAL}.tar.gz
 
 # install litecoin binaries
 RUN mkdir /opt/litecoin && cd /opt/litecoin \
     && wget -qO litecoin.tar.gz "$LITECOIN_URL" \
-    && echo "$LITECOIN_SHA256  litecoin.tar.gz" | sha256sum -c - \
-    && BD=litecoin-$LITECOIN_VERSION/bin \
-    && tar -xzvf litecoin.tar.gz $BD/litecoin-cli --strip-components=1 --exclude=*-qt \
+    && tar -xzvf litecoin.tar.gz litecoin-$LITECOIN_VERSION/bin/litecoin-cli --strip-components=1 --exclude=*-qt \
     && rm litecoin.tar.gz
 
 FROM debian:bullseye-slim as builder
@@ -89,13 +88,6 @@ RUN apt-get install -y --no-install-recommends unzip tclsh \
     && make install && cd .. && rm sqlite-src-3290000.zip && rm -rf sqlite-src-3290000
 
 USER root
-RUN wget -q https://gmplib.org/download/gmp/gmp-6.1.2.tar.xz \
-    && tar xvf gmp-6.1.2.tar.xz \
-    && cd gmp-6.1.2 \
-    && ./configure --disable-assembly \
-    && make \
-    && make install && cd .. && rm gmp-6.1.2.tar.xz && rm -rf gmp-6.1.2
-
 ENV RUST_PROFILE=release
 ENV PATH=$PATH:/root/.cargo/bin/
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
@@ -107,7 +99,6 @@ COPY . /tmp/lightning
 RUN git clone --recursive /tmp/lightning . && \
     git checkout $(git --work-tree=/tmp/lightning --git-dir=/tmp/lightning/.git rev-parse HEAD)
 
-ARG DEVELOPER=1
 ENV PYTHON_VERSION=3
 RUN curl -sSL https://install.python-poetry.org | python3 -
 
@@ -117,14 +108,12 @@ RUN pip3 install --upgrade pip setuptools wheel
 RUN pip3 wheel cryptography
 RUN pip3 install grpcio-tools
 
-RUN /root/.local/bin/poetry install
+RUN /root/.local/bin/poetry export -o requirements.txt --without-hashes --with dev
+RUN pip3 install -r requirements.txt
 
 RUN ./configure --prefix=/tmp/lightning_install --enable-static && \
-    make DEVELOPER=${DEVELOPER} && \
+    make && \
     /root/.local/bin/poetry run make install
-
-RUN pip3 install -r plugins/clnrest/requirements.txt
-RUN pip3 install ./contrib/pyln-client
 
 FROM debian:bullseye-slim as final
 

@@ -20,6 +20,7 @@
 #include <stdarg.h>
 
 struct json_out;
+struct htable;
 struct plugin;
 struct rpc_conn;
 
@@ -70,6 +71,8 @@ struct plugin_command {
 					 const jsmntok_t *params);
 	/* If true, this command *disabled* if allow-deprecated-apis = false */
 	bool deprecated;
+	/* If true, this option requires --developer to be enabled */
+	bool dev_only;
 };
 
 /* Create an array of these, one for each --option you support. */
@@ -79,6 +82,8 @@ struct plugin_option {
 	const char *description;
 	char *(*handle)(struct plugin *plugin, const char *str, void *arg);
 	void *arg;
+	/* If true, this option requires --developer to be enabled */
+	bool dev_only;
 	/* If true, this options *disabled* if allow-deprecated-apis = false */
 	bool deprecated;
 	/* If true, allow setting after plugin has initialized */
@@ -404,8 +409,11 @@ static inline void *plugin_option_cb_check(char *(*set)(struct plugin *plugin,
 	return set;
 }
 
+/* Is --developer enabled? */
+bool plugin_developer_mode(const struct plugin *plugin);
+
 /* Macro to define arguments */
-#define plugin_option_(name, type, description, set, arg, deprecated, dynamic)	\
+#define plugin_option_(name, type, description, set, arg, dev_only, deprecated, dynamic)	\
 	(name),								\
 	(type),								\
 	(description),							\
@@ -414,17 +422,21 @@ static inline void *plugin_option_cb_check(char *(*set)(struct plugin *plugin,
 						   struct plugin *,	\
 						   const char *)),	\
 	(arg),								\
+	(dev_only),							\
 	(deprecated),							\
 	(dynamic)
 
 #define plugin_option(name, type, description, set, arg) \
-	plugin_option_((name), (type), (description), (set), (arg), false, false)
+	plugin_option_((name), (type), (description), (set), (arg), false, false, false)
+
+#define plugin_option_dev(name, type, description, set, arg) \
+	plugin_option_((name), (type), (description), (set), (arg), true, false, false)
 
 #define plugin_option_dynamic(name, type, description, set, arg) \
-	plugin_option_((name), (type), (description), (set), (arg), false, true)
+	plugin_option_((name), (type), (description), (set), (arg), false, false, true)
 
 #define plugin_option_deprecated(name, type, description, set, arg)	\
-	plugin_option_((name), (type), (description), (set), (arg), true, false)
+	plugin_option_((name), (type), (description), (set), (arg), false, true, false)
 
 /* Standard helpers */
 char *u64_option(struct plugin *plugin, const char *arg, u64 *i);
@@ -489,12 +501,9 @@ struct route_hop *json_to_route(const tal_t *ctx, const char *buffer,
 /* Create a prefix (ending in /) for this cmd_id, if any. */
 const char *json_id_prefix(const tal_t *ctx, const struct command *cmd);
 
-#if DEVELOPER
-struct htable;
 void plugin_set_memleak_handler(struct plugin *plugin,
 				void (*mark_mem)(struct plugin *plugin,
 						 struct htable *memtable));
-#endif /* DEVELOPER */
 
 /* Synchronously call a JSON-RPC method and return its contents and
  * the parser token. */

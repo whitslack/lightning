@@ -74,7 +74,6 @@ def env(name, default=None):
 
 VALGRIND = env("VALGRIND") == "1"
 TEST_NETWORK = env("TEST_NETWORK", 'regtest')
-DEVELOPER = env("DEVELOPER", "0") == "1"
 TEST_DEBUG = env("TEST_DEBUG", "0") == "1"
 SLOW_MACHINE = env("SLOW_MACHINE", "0") == "1"
 DEPRECATED_APIS = env("DEPRECATED_APIS", "0") == "1"
@@ -578,7 +577,6 @@ class LightningD(TailableProc):
         self.lightning_dir = lightning_dir
         self.port = port
         self.cmd_prefix = []
-        self.disconnect_file = None
 
         self.rpcproxy = bitcoindproxy
         self.env['CLN_PLUGIN_LOG'] = "cln_plugin=trace,cln_rpc=trace,cln_grpc=trace,debug"
@@ -612,20 +610,19 @@ class LightningD(TailableProc):
         if not random_hsm:
             with open(os.path.join(lightning_dir, TEST_NETWORK, 'hsm_secret'), 'wb') as f:
                 f.write(seed)
-        if DEVELOPER:
-            self.opts['dev-fast-gossip'] = None
-            self.opts['dev-bitcoind-poll'] = 1
+        self.opts['dev-fast-gossip'] = None
+        self.opts['dev-bitcoind-poll'] = 1
         self.prefix = 'lightningd-%d' % (node_id)
         # Log to stdout so we see it in failure cases, and log file for TailableProc.
         self.opts['log-file'] = ['-', os.path.join(lightning_dir, "log")]
         self.opts['log-prefix'] = self.prefix + ' '
         # In case you want specific ordering!
-        self.early_opts = []
+        self.early_opts = ['--developer']
 
     def cleanup(self):
         # To force blackhole to exit, disconnect file must be truncated!
-        if self.disconnect_file:
-            with open(self.disconnect_file, "w") as f:
+        if 'dev-disconnect' in self.opts:
+            with open(self.opts['dev-disconnect'], "w") as f:
                 f.truncate()
 
     @property
@@ -701,6 +698,22 @@ class PrettyPrintingLightningRpc(LightningRpc):
                     testpayload[k] = v
             schemas[0].validate(testpayload)
 
+        if method != 'check':
+            if isinstance(payload, dict):
+                checkpayload = payload.copy()
+                checkpayload['command_to_check'] = method
+            elif payload is None:
+                checkpayload = [method]
+            else:
+                checkpayload = [method] + list(payload)
+
+            # This can fail, that's fine!  But causes lightningd to check
+            # that we don't access db.
+            try:
+                LightningRpc.call(self, 'check', checkpayload)
+            except ValueError:
+                pass
+
         res = LightningRpc.call(self, method, payload, cmdprefix, filter)
         self.logger.debug(json.dumps({
             "id": id,
@@ -748,27 +761,26 @@ class LightningNode(object):
             grpc_port=self.grpc_port,
         )
 
-        # If we have a disconnect string, dump it to a file for daemon.
-        if disconnect:
-            self.daemon.disconnect_file = os.path.join(lightning_dir, TEST_NETWORK, "dev_disconnect")
-            with open(self.daemon.disconnect_file, "w") as f:
-                f.write("\n".join(disconnect))
-            self.daemon.opts["dev-disconnect"] = "dev_disconnect"
-        if DEVELOPER:
-            self.daemon.opts["dev-fail-on-subdaemon-fail"] = None
-            # Don't run --version on every subdaemon if we're valgrinding and slow.
-            if SLOW_MACHINE and VALGRIND:
-                self.daemon.opts["dev-no-version-checks"] = None
-            if os.getenv("DEBUG_SUBD"):
-                self.daemon.opts["dev-debugger"] = os.getenv("DEBUG_SUBD")
-            if valgrind:
-                self.daemon.env["LIGHTNINGD_DEV_NO_BACKTRACE"] = "1"
-                self.daemon.opts["dev-no-plugin-checksum"] = None
-            else:
-                # Under valgrind, scanning can access uninitialized mem.
-                self.daemon.env["LIGHTNINGD_DEV_MEMLEAK"] = "1"
-            if not may_reconnect:
-                self.daemon.opts["dev-no-reconnect"] = None
+        self.disconnect = disconnect
+        if self.disconnect:
+            self.daemon.opts["dev-disconnect"] = os.path.join(lightning_dir, TEST_NETWORK, "dev-disconnect")
+            # Actual population of that file occurs at start.
+
+        # Various developer options let us be more aggressive
+        self.daemon.opts["dev-fail-on-subdaemon-fail"] = None
+        # Don't run --version on every subdaemon if we're valgrinding and slow.
+        if SLOW_MACHINE and VALGRIND:
+            self.daemon.opts["dev-no-version-checks"] = None
+        if os.getenv("DEBUG_SUBD"):
+            self.daemon.opts["dev-debugger"] = os.getenv("DEBUG_SUBD")
+        if valgrind:
+            self.daemon.env["LIGHTNINGD_DEV_NO_BACKTRACE"] = "1"
+            self.daemon.opts["dev-no-plugin-checksum"] = None
+        else:
+            # Under valgrind, scanning can access uninitialized mem.
+            self.daemon.env["LIGHTNINGD_DEV_MEMLEAK"] = "1"
+        if not may_reconnect:
+            self.daemon.opts["dev-no-reconnect"] = None
         if EXPERIMENTAL_DUAL_FUND:
             self.daemon.opts["experimental-dual-fund"] = None
 
@@ -888,7 +900,7 @@ class LightningNode(object):
 
         if wait_for_announce:
             self.bitcoin.generate_block(5)
-            wait_for(lambda: ['alias' in e for e in self.rpc.listnodes(remote_node.info['id'])['nodes']])
+            wait_for(lambda: ['alias' in e for e in self.rpc.listnodes(remote_node.info['id'])['nodes']] == [True])
 
         return {'address': addr, 'wallettxid': wallettxid, 'fundingtx': res['tx']}
 
@@ -938,9 +950,6 @@ class LightningNode(object):
 
         return '{}x{}x{}'.format(self.bitcoin.rpc.getblockcount(), txnum, res['outnum'])
 
-    def getactivechannels(self):
-        return [c for c in self.rpc.listchannels()['channels'] if c['active']]
-
     def db_query(self, query):
         return self.db.query(query)
 
@@ -960,6 +969,12 @@ class LightningNode(object):
         return 'warning_bitcoind_sync' not in info and 'warning_lightningd_sync' not in info
 
     def start(self, wait_for_bitcoind_sync=True, stderr_redir=False):
+        # If we have a disconnect string, dump it to a file for daemon.
+        if 'dev-disconnect' in self.daemon.opts:
+            with open(self.daemon.opts['dev-disconnect'], "w") as f:
+                if self.disconnect is not None:
+                    f.write("\n".join(self.disconnect))
+
         self.daemon.start(stderr_redir=stderr_redir)
         # Cache `getinfo`, we'll be using it a lot
         self.info = self.rpc.getinfo()
@@ -1046,8 +1061,8 @@ class LightningNode(object):
                                  txnum, res['outnum'])
 
         if wait_for_active:
-            self.wait_channel_active(scid)
-            l2.wait_channel_active(scid)
+            self.wait_local_channel_active(scid)
+            l2.wait_local_channel_active(scid)
 
         return scid, res
 
@@ -1095,7 +1110,16 @@ class LightningNode(object):
             return None
         return channels[0]['channel_id']
 
+    def is_local_channel_active(self, scid):
+        """Is the local channel @scid usable?"""
+        channels = self.rpc.listpeerchannels()['channels']
+        return [c['state'] in ('CHANNELD_NORMAL', 'CHANNELD_AWAITING_SPLICE') for c in channels if c.get('short_channel_id') == scid] == [True]
+
+    def wait_local_channel_active(self, scid):
+        wait_for(lambda: self.is_local_channel_active(scid))
+
     def is_channel_active(self, chanid):
+        """Does gossip show this channel as enabled both ways?"""
         channels = self.rpc.listchannels(chanid)['channels']
         active = [(c['short_channel_id'], c['channel_flags']) for c in channels if c['active']]
         return (chanid, 0) in active and (chanid, 1) in active
@@ -1104,8 +1128,8 @@ class LightningNode(object):
         txid = only_one(self.rpc.listpeerchannels(peerid)['channels'])['scratch_txid']
         wait_for(lambda: txid in self.bitcoin.rpc.getrawmempool())
 
-    def wait_channel_active(self, chanid):
-        wait_for(lambda: self.is_channel_active(chanid))
+    def wait_channel_active(self, scid):
+        wait_for(lambda: self.is_channel_active(scid))
 
     # This waits until gossipd sees channel_update in both directions
     # (or for local channels, at least a local announcement)
@@ -1142,9 +1166,19 @@ class LightningNode(object):
                     wait_for(lambda: len(self.rpc.listpeerchannels(peer["id"])['channels'][idx]['htlcs']) == 0)
 
     # This sends money to a directly connected peer
-    def pay(self, dst, amt, label=None):
+    # if `route` is `True`, it can also send over the network.
+    def pay(self, dst, amt, label=None, route=False):
         if not label:
             label = ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(20))
+
+        if route is True:
+            invoice = dst.rpc.invoice(amt, label, "desc")
+            route = self.rpc.getroute(dst.info["id"], amt, riskfactor=0, fuzzpercent=0)
+            self.rpc.sendpay(route["route"], invoice["payment_hash"], payment_secret=invoice.get('payment_secret'))
+            result = self.rpc.waitsendpay(invoice["payment_hash"])
+            assert(result.get('status') == 'complete')
+            self.wait_for_htlcs()
+            return
 
         # check we are connected
         dst_id = dst.info['id']
@@ -1265,11 +1299,17 @@ class LightningNode(object):
         # Hack so we can mutate the txid: pass it in a list
         def rbf_or_txid_broadcast(txids):
             # RBF onchain txid d4b597505b543a4b8b42ab4d481fd7a533febb7e7df150ca70689e6d046612f7 (fee 6564sat) with txid 979878b8f855d3895d1cd29bd75a60b21492c4842e38099186a8e649bee02c7c (fee 8205sat)
-            # We can have noop RBFs: ignore those (increases are logged INFO level)
-            line = self.daemon.is_in_log(" INFO    .*RBF (onchain|HTLC) txid {}".format(txids[-1]))
-            if line is not None:
-                newtxid = re.search(r'with txid ([0-9a-fA-F]*)', line).group(1)
-                txids.append(newtxid)
+            # Even DEBUG-level "noop" rbfs can get landed, if they're the first one!
+            self.daemon.logs_catchup()
+            for t in txids:
+                for line in self.daemon.logs:
+                    m = re.search(fr'RBF (onchain|HTLC) txid {t} \(fee [0-9]*sat\) with txid ([0-9a-fA-F]*)', line)
+                    if m is None:
+                        continue
+                    newtxid = m.group(2)
+                    if newtxid not in txids:
+                        txids.append(newtxid)
+
             mempool = self.bitcoin.rpc.getrawmempool()
             return any([t in mempool for t in txids])
 
@@ -1347,14 +1387,14 @@ class LightningNode(object):
 
     def dev_pay(self, bolt11, amount_msat=None, label=None, riskfactor=None,
                 maxfeepercent=None, retry_for=None,
-                maxdelay=None, exemptfee=None, use_shadow=True, exclude=[]):
+                maxdelay=None, exemptfee=None, dev_use_shadow=True, exclude=[]):
         """Wrapper for rpc.dev_pay which suppresses the request schema"""
         # FIXME? dev options are not in schema
         old_check = self.rpc.check_request_schemas
         self.rpc.check_request_schemas = False
         ret = self.rpc.dev_pay(bolt11, amount_msat, label, riskfactor,
                                maxfeepercent, retry_for,
-                               maxdelay, exemptfee, use_shadow, exclude)
+                               maxdelay, exemptfee, dev_use_shadow, exclude)
         self.rpc.check_request_schemas = old_check
         return ret
 
@@ -1587,8 +1627,8 @@ class NodeFactory(object):
 
         # Wait for all channels to be active (locally)
         for i, n in enumerate(scids):
-            nodes[i].wait_channel_active(scids[i])
-            nodes[i + 1].wait_channel_active(scids[i])
+            nodes[i].wait_local_channel_active(scids[i])
+            nodes[i + 1].wait_local_channel_active(scids[i])
 
         if not wait_for_announce:
             return
@@ -1622,7 +1662,7 @@ class NodeFactory(object):
             # leak detection upsets VALGRIND by reading uninitialized mem,
             # and valgrind adds extra fds.
             # If it's dead, we'll catch it below.
-            if not self.valgrind and DEVELOPER:
+            if not self.valgrind:
                 try:
                     # This also puts leaks in log.
                     leaks = self.nodes[i].rpc.dev_memleak()['leaks']

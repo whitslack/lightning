@@ -3,10 +3,12 @@ from fixtures import *  # noqa: F401,F403
 from pathlib import Path
 from pyln import grpc as clnpb
 from pyln.testing.utils import env, TEST_NETWORK, wait_for, sync_blockheight, TIMEOUT
+from utils import first_scid
 import grpc
 import pytest
 import subprocess
 import os
+import re
 
 # Skip the entire module if we don't have Rust.
 pytestmark = pytest.mark.skipif(
@@ -44,7 +46,7 @@ def test_plugin_start(node_factory):
     assert str(bin_path) in l1.rpc.listconfigs()['configs']['plugin']['values_str']
 
     # Now check that the `testmethod was registered ok
-    l1.rpc.help("testmethod") == {
+    assert l1.rpc.help("testmethod") == {
         'help': [
             {
                 'command': 'testmethod ',
@@ -57,6 +59,8 @@ def test_plugin_start(node_factory):
     }
 
     assert l1.rpc.testmethod() == "Hello"
+    assert l1.rpc.test_custom_notification() == "Notification sent"
+    l1.daemon.wait_for_log(r'Received a test_custom_notification')
 
     l1.connect(l2)
     l1.daemon.wait_for_log(r'Got a connect hook call')
@@ -177,11 +181,16 @@ def test_grpc_generate_certificate(node_factory):
 
 def test_grpc_no_auto_start(node_factory):
     """Ensure that we do not start cln-grpc unless a port is configured.
+    Also check that we do not generate certificates.
     """
     l1 = node_factory.get_node()
 
     wait_for(lambda: [p for p in l1.rpc.plugin('list')['plugins'] if 'cln-grpc' in p['name']] == [])
     assert l1.daemon.is_in_log(r'plugin-cln-grpc: Killing plugin: disabled itself at init')
+    p = Path(l1.daemon.lightning_dir) / TEST_NETWORK
+    files = os.listdir(p)
+    pem_files = [f for f in files if re.match(r".*\.pem$", f)]
+    assert pem_files == []
 
 
 def test_grpc_wrong_auth(node_factory):
@@ -305,6 +314,9 @@ def test_grpc_keysend_routehint(bitcoind, node_factory):
             )
         ])
     ])
+
+    # FIXME: keysend needs (unannounced) channel in gossip_store
+    l1.wait_channel_active(first_scid(l1, l2))
 
     # And now we send a keysend with that routehint list
     call = clnpb.KeysendRequest(

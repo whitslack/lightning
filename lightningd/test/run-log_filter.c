@@ -55,10 +55,10 @@ void json_add_string(struct json_stream *js UNNEEDED,
 		     const char *fieldname UNNEEDED,
 		     const char *str TAKES UNNEEDED)
 { fprintf(stderr, "json_add_string called!\n"); abort(); }
-/* Generated stub for json_add_time */
-void json_add_time(struct json_stream *result UNNEEDED, const char *fieldname UNNEEDED,
+/* Generated stub for json_add_timestr */
+void json_add_timestr(struct json_stream *result UNNEEDED, const char *fieldname UNNEEDED,
 			  struct timespec ts UNNEEDED)
-{ fprintf(stderr, "json_add_time called!\n"); abort(); }
+{ fprintf(stderr, "json_add_timestr called!\n"); abort(); }
 /* Generated stub for json_array_end */
 void json_array_end(struct json_stream *js UNNEEDED)
 { fprintf(stderr, "json_array_end called!\n"); abort(); }
@@ -118,7 +118,7 @@ int main(int argc, char *argv[])
 	struct log_book *lb;
 	struct node_id node_id;
 	struct lightningd *ld;
-	char tmpfiletemplate[] = "/tmp/run-log_filter.XXXXXX";
+	char *tmpfile;
 
 	common_setup(argv[0]);
 
@@ -131,8 +131,8 @@ int main(int argc, char *argv[])
 	ld->log = new_logger(ld, lb, NULL, "dummy");
 	assert(arg_log_to_file("-", ld) == NULL);
 
-	assert(mkstemp(tmpfiletemplate) >= 0);
-	assert(arg_log_to_file(tmpfiletemplate, ld) == NULL);
+	assert(tmpdir_mkstemp(tmpctx, "run-log_filter.XXXXXX", &tmpfile) >= 0);
+	assert(arg_log_to_file(tmpfile, ld) == NULL);
 
 	/* Log level default. */
 	assert(opt_log_level("BROKEN", lb) == NULL);
@@ -224,7 +224,7 @@ int main(int argc, char *argv[])
 	assert(try_log(lb, "prefix", NULL, LOG_IO_IN) == 0);
 
 	/* File exception: tmpfile logs everything */
-	assert(opt_log_level(tal_fmt(tmpctx, "io::%s", tmpfiletemplate), lb) == NULL);
+	assert(opt_log_level(tal_fmt(tmpctx, "io::%s", tmpfile), lb) == NULL);
 	assert(try_log(lb, "stdout1", NULL, LOG_BROKEN) == 2);
 	assert(try_log(lb, "stdout1", NULL, LOG_INFORM) == 2);
 	assert(try_log(lb, "stdout1", NULL, LOG_DBG) == 2);

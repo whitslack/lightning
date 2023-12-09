@@ -45,10 +45,14 @@ OPTIONS
 
 ### General options
 
+* **developer**
+
+  This enables developer mode, allowing developer options and commands to be used.  It also disabled deprecated APIs; use `allow-deprecated-apis=true` to re-enable them.
+
 * **allow-deprecated-apis**=*BOOL*
 
   Enable deprecated options, JSONRPC commands, fields, etc. It defaults to
-*true*, but you should set it to *false* when testing to ensure that an
+*true* outside developer mode, but you should set it to *false* when testing to ensure that an
 upgrade won't break your configuration.
 
 * **help**
@@ -290,9 +294,9 @@ connections; default is not to activate the plugin at all.
 
 ### Lightning node customization options
 
-* **recover**=*codex32secret*
+* **recover**=*hsmsecret*
 
-  Restore the node from a 32-byte secret encoded as a codex32 secret string: this will fail if the `hsm_secret` file exists.  Your node will start the node in offline mode, for manual recovery.  The secret can be extracted from the `hsm_secret` using hsmtool(8).
+  Restore the node from a 32-byte secret encoded as either a codex32 secret string or a 64-character hex string: this will fail if the `hsm_secret` file exists.  Your node will start the node in offline mode, for manual recovery.  The secret can be extracted from the `hsm_secret` using hsmtool(8).
 
 * **alias**=*NAME*
 
@@ -385,13 +389,9 @@ use the RPC call lightning-setchannel(7).
 
 ### Lightning channel and HTLC options
 
-* **large-channels**
+* **large-channels** (deprecated in v23.11)
 
-  Removes capacity limits for channel creation.  Version 1.0 of the specification
-limited channel sizes to 16777215 satoshi.  With this option (which your
-node will advertize to peers), your node will accept larger incoming channels
-and if the peer supports it, will open larger channels.  Note: this option
-is spelled **large-channels** but it's pronounced **wumbo**.
+  As of v23.11, this is the default (and thus, the option is ignored).  Previously if you didn't specify this, channel sizes were limited to 16777215 satoshi.  Note: this option is spelled **large-channels** but it's pronounced **wumbo**.
 
 * **watchtime-blocks**=*BLOCKS*
 
@@ -415,6 +415,11 @@ opens a channel before the channel is usable.
 
   The percentage of *estimatesmartfee 2/CONSERVATIVE* to use for the commitment
 transactions: default is 100.
+
+* **commit-feerate-offset**=*INTEGER*
+
+  The additional feerate a channel opener adds to their preferred feerate to
+lessen the odds of a disconnect due to feerate disagreement (default 5).
 
 * **max-concurrent-htlcs**=*INTEGER*
 
@@ -599,22 +604,29 @@ all DNS lookups, to avoid leaking information.
   Set a Tor control password, which may be needed for *autotor:* to
 authenticate to the Tor control port.
 
-* **rest-port**=*PORT* [plugin `clnrest.py`]
+* **clnrest-port**=*PORT* [plugin `clnrest.py`]
 
   Sets the REST server port to listen to (3010 is common).  If this is not specified, the clnrest.py plugin will be disabled.
 
-* **rest-protocol**=*PROTOCOL* [plugin `clnrest.py`]
+* **clnrest-protocol**=*PROTOCOL* [plugin `clnrest.py`]
 
   Specifies the REST server protocol. Default is HTTPS.
 
-* **rest-host**=*HOST* [plugin `clnrest.py`]
+* **clnrest-host**=*HOST* [plugin `clnrest.py`]
 
   Defines the REST server host. Default is 127.0.0.1.
 
-* **rest-certs**=*PATH*  [plugin `clnrest.py`]
+* **clnrest-certs**=*PATH*  [plugin `clnrest.py`]
 
   Defines the path for HTTPS cert & key. Default path is same as RPC file path to utilize gRPC's client certificate. If it is missing at the configured location, new identity (`client.pem` and `client-key.pem`) will be generated.
 
+* **clnrest-cors-origins**=*CORSORIGINS*  [plugin `clnrest.py`]
+
+  Define multiple origins which are allowed to share resources on web pages to a domain different from the one that served the web page. Default is `*` which allows all origins.
+
+* **clnrest-csp**=*CSPOLICY*  [plugin `clnrest.py`]
+
+  Creates a whitelist of trusted content sources that can run on a webpage and helps mitigate the risk of attacks. Default CSP is `default-src 'self'; font-src 'self'; img-src 'self' data:; frame-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';`.
 
 ### Lightning Plugins
 

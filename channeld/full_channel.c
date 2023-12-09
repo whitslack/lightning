@@ -18,13 +18,11 @@
   /* Needs to be at end, since it doesn't include its own hdrs */
   #include "full_channel_error_names_gen.h"
 
-#if DEVELOPER
 static void memleak_help_htlcmap(struct htable *memtable,
 				 struct htlc_map *htlcs)
 {
 	memleak_scan_htable(memtable, &htlcs->raw);
 }
-#endif /* DEVELOPER */
 
 /* This is a dangerous thing!  Because we apply HTLCs in many places
  * in bulk, we can temporarily go negative.  You must check balance_ok()
@@ -312,6 +310,7 @@ struct bitcoin_tx **channel_txs(const tal_t *ctx,
 	struct bitcoin_tx **txs;
 	const struct htlc **committed;
 	struct keyset keyset;
+	int local_anchor;
 
 	if (!derive_keyset(per_commitment_point,
 			   &channel->basepoints[side],
@@ -345,7 +344,7 @@ struct bitcoin_tx **channel_txs(const tal_t *ctx,
 	    commitment_number ^ channel->commitment_number_obscurer,
 	    channel_has(channel, OPT_ANCHOR_OUTPUTS),
 	    channel_has(channel, OPT_ANCHORS_ZERO_FEE_HTLC_TX),
-	    side);
+	    side, &local_anchor);
 
 	/* Set the remote/local pubkeys on the commitment tx psbt */
 	psbt_input_add_pubkey(txs[0]->psbt, 0,

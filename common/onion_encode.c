@@ -45,7 +45,7 @@ u8 *onion_nonfinal_hop(const tal_t *ctx,
 
 	/* BOLT #4:
 	 *
-	 * The writer of `tlv_payload`:
+	 * The writer of the TLV `payload`:
 	 *...
 	 * - For every node outside of a blinded route:
 	 *    - MUST include `amt_to_forward` and `outgoing_cltv_value`.
@@ -75,7 +75,7 @@ u8 *onion_final_hop(const tal_t *ctx,
 
 	/* BOLT #4:
 	 *
-	 * The writer of `tlv_payload`:
+	 * The writer of the TLV `payload`:
 	 *...
 	 *  - For every node outside of a blinded route:
 	 *    - MUST include `amt_to_forward` and `outgoing_cltv_value`.
@@ -120,7 +120,7 @@ u8 *onion_blinded_hop(const tal_t *ctx,
 	}
 	tlv->outgoing_cltv_value = cast_const(u32 *, outgoing_cltv_value);
 	tlv->encrypted_recipient_data = cast_const(u8 *, enctlv);
-	tlv->blinding_point = cast_const(struct pubkey *, blinding);
+	tlv->current_blinding_point = cast_const(struct pubkey *, blinding);
 
 	return make_tlv_hop(ctx, tlv);
 }

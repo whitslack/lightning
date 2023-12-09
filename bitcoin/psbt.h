@@ -48,7 +48,18 @@ struct wally_psbt *new_psbt(const tal_t *ctx,
  * @ctx - allocation context
  * @psbt - psbt to be cloned
  */
-struct wally_psbt *clone_psbt(const tal_t *ctx, struct wally_psbt *psbt);
+struct wally_psbt *clone_psbt(const tal_t *ctx, const struct wally_psbt *psbt);
+
+/**
+ * combine_psbt - Combine two PSBT into a cloned copy
+ *
+ * @ctx - allocation context
+ * @psbt0 - one psbt
+ * @psbt1 - other psbt
+ */
+struct wally_psbt *combine_psbt(const tal_t *ctx,
+				const struct wally_psbt *psbt0,
+				const struct wally_psbt *psbt1);
 
 /**
  * psbt_is_finalized - Check if tx is ready to be extracted
@@ -239,6 +250,7 @@ struct wally_psbt *psbt_from_b64(const tal_t *ctx,
 char *psbt_to_b64(const tal_t *ctx, const struct wally_psbt *psbt);
 const u8 *psbt_get_bytes(const tal_t *ctx, const struct wally_psbt *psbt,
 			 size_t *bytes_written);
+bool validate_psbt(const struct wally_psbt *psbt);
 struct wally_psbt *psbt_from_bytes(const tal_t *ctx, const u8 *bytes,
 				   size_t byte_len);
 void towire_wally_psbt(u8 **pptr, const struct wally_psbt *psbt);
