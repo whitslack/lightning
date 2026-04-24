@@ -78,7 +78,6 @@ Core Lightning Documentation
    fundpsbt <fundpsbt.7.md>
    getemergencyrecoverdata <getemergencyrecoverdata.7.md>
    getinfo <getinfo.7.md>
-   getlog <getlog.7.md>
    getroute <getroute.7.md>
    getroutes <getroutes.7.md>
    help <help.7.md>

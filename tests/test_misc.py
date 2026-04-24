@@ -3757,19 +3757,6 @@ def test_notimestamp_logging(node_factory):
     assert l1.rpc.listconfigs()['configs']['log-timestamps']['value_bool'] is False
 
 
-def test_getlog(node_factory):
-    """Test the getlog command"""
-    l1 = node_factory.get_node(options={'log-level': 'io'})
-
-    # Default will skip some entries
-    logs = l1.rpc.getlog()['log']
-    assert [l for l in logs if l['type'] == 'SKIPPED'] != []
-
-    # This should not
-    logs = l1.rpc.getlog(level='io')['log']
-    assert [l for l in logs if l['type'] == 'SKIPPED'] == []
-
-
 def test_log_filter(node_factory):
     """Test the log-level option with subsystem filters"""
     # This actually suppresses debug!

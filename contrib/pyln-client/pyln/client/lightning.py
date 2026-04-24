@@ -864,15 +864,6 @@ class LightningRpc(UnixDomainSocketRpc):
         """
         return self.call("getinfo")
 
-    def getlog(self, level=None):
-        """
-        Show logs, with optional log {level} (info|unusual|debug|io).
-        """
-        payload = {
-            "level": level
-        }
-        return self.call("getlog", payload)
-
     def getpeer(self, peer_id, level=None):
         """
         Show peer with {peer_id}, if {level} is set, include {log}s.
@@ -1052,13 +1043,12 @@ class LightningRpc(UnixDomainSocketRpc):
         }
         return self.call("listpays", payload)
 
-    def listpeers(self, peerid=None, level=None):
+    def listpeers(self, peerid=None):
         """
-        Show current peers, if {level} is set, include {log}s".
+        Show current peers.
         """
         payload = {
             "id": peerid,
-            "level": level,
         }
         return self.call("listpeers", payload)
 

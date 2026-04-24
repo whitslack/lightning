@@ -63,18 +63,6 @@ void NORETURN fatal_vfmt(const char *fmt, va_list ap);
 void log_backtrace_print(const char *fmt, ...);
 void log_backtrace_exit(void);
 
-/* Adds an array showing log entries */
-void json_add_log(struct json_stream *result,
-		  const struct log_book *log_book,
-		  const struct node_id *node_id,
-		  enum log_level minlevel);
-
-struct command_result *param_loglevel(struct command *cmd,
-				      const char *name,
-				      const char *buffer,
-				      const jsmntok_t *tok,
-				      enum log_level **level);
-
 /* Reference counted log_prefix.  Log entries keep a pointer, and they
  * can outlast the log entry point which created them. */
 struct log_prefix {
@@ -86,7 +74,7 @@ struct log_entry {
 	struct timeabs time;
 	enum log_level level;
 	unsigned int skipped;
-	struct node_id_cache *nc;
+	const struct node_id *node_id;
 	struct log_prefix *prefix;
 	char *log;
 	/* Iff LOG_IO */

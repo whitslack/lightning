@@ -702,18 +702,6 @@ struct json_stream *json_stream_raw_for_cmd(struct command *cmd)
 	return js;
 }
 
-void json_stream_log_suppress_for_cmd(struct json_stream *js,
-				     const struct command *cmd)
-{
-	const char *nm = cmd->json_cmd->name;
-	const char *s = tal_fmt(tmpctx, "Suppressing logging of %s command", nm);
-	log_io(cmd->jcon->log, LOG_IO_OUT, NULL, s, NULL, 0);
-
-	/* Really shouldn't be used for anything else */
-	assert(streq(nm, "getlog"));
-	js->log = NULL;
-}
-
 static struct json_stream *json_start(struct command *cmd)
 {
 	struct json_stream *js = json_stream_raw_for_cmd(cmd);

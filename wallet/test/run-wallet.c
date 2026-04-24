@@ -426,12 +426,6 @@ bool invoices_resolve(struct invoices *invoices UNNEEDED,
 		      const struct json_escape *label UNNEEDED,
 		      const struct bitcoin_outpoint *outpoint UNNEEDED)
 { fprintf(stderr, "invoices_resolve called!\n"); abort(); }
-/* Generated stub for json_add_log */
-void json_add_log(struct json_stream *result UNNEEDED,
-		  const struct log_book *log_book UNNEEDED,
-		  const struct node_id *node_id UNNEEDED,
-		  enum log_level minlevel UNNEEDED)
-{ fprintf(stderr, "json_add_log called!\n"); abort(); }
 /* Generated stub for json_add_uncommitted_channel */
 void  json_add_uncommitted_channel(struct command *cmd UNNEEDED,
 						      struct json_stream *response UNNEEDED,
@@ -577,13 +571,6 @@ struct outpointfilter *outpointfilter_new(tal_t *ctx UNNEEDED)
 void outpointfilter_remove(struct outpointfilter *of UNNEEDED,
 			   const struct bitcoin_outpoint *outpoint UNNEEDED)
 { fprintf(stderr, "outpointfilter_remove called!\n"); abort(); }
-/* Generated stub for param_loglevel */
-struct command_result *param_loglevel(struct command *cmd UNNEEDED,
-				      const char *name UNNEEDED,
-				      const char *buffer UNNEEDED,
-				      const jsmntok_t *tok UNNEEDED,
-				      enum log_level **level UNNEEDED)
-{ fprintf(stderr, "param_loglevel called!\n"); abort(); }
 /* Generated stub for peer_restart_dualopend */
 bool peer_restart_dualopend(struct peer *peer UNNEEDED,
 			    struct peer_fd *peer_fd UNNEEDED,

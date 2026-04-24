@@ -441,12 +441,6 @@ void invoices_waitone(const tal_t *ctx UNNEEDED,
 		      void (*cb)(const u64 * UNNEEDED, void*) UNNEEDED,
 		      void *cbarg UNNEEDED)
 { fprintf(stderr, "invoices_waitone called!\n"); abort(); }
-/* Generated stub for json_add_log */
-void json_add_log(struct json_stream *result UNNEEDED,
-		  const struct log_book *log_book UNNEEDED,
-		  const struct node_id *node_id UNNEEDED,
-		  enum log_level minlevel UNNEEDED)
-{ fprintf(stderr, "json_add_log called!\n"); abort(); }
 /* Generated stub for json_add_uncommitted_channel */
 void  json_add_uncommitted_channel(struct command *cmd UNNEEDED,
 						      struct json_stream *response UNNEEDED,
@@ -550,13 +544,6 @@ struct command_result *param_index(struct command *cmd UNNEEDED, const char *nam
 				   const jsmntok_t *tok UNNEEDED,
 				   enum wait_index **index UNNEEDED)
 { fprintf(stderr, "param_index called!\n"); abort(); }
-/* Generated stub for param_loglevel */
-struct command_result *param_loglevel(struct command *cmd UNNEEDED,
-				      const char *name UNNEEDED,
-				      const char *buffer UNNEEDED,
-				      const jsmntok_t *tok UNNEEDED,
-				      enum log_level **level UNNEEDED)
-{ fprintf(stderr, "param_loglevel called!\n"); abort(); }
 /* Generated stub for peer_any_channel_bystate */
 struct channel *peer_any_channel_bystate(struct peer *peer UNNEEDED,
 					 bool (*channel_state_filter)(enum channel_state) UNNEEDED,

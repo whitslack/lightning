@@ -2460,8 +2460,7 @@ void channel_watch_funding(struct lightningd *ld, struct channel *channel)
 
 static void json_add_peer(struct lightningd *ld,
 			  struct json_stream *response,
-			  struct peer *p,
-			  const enum log_level *ll)
+			  struct peer *p)
 {
 	struct channel *channel;
 	u32 num_channels;
@@ -2489,8 +2488,6 @@ static void json_add_peer(struct lightningd *ld,
 	/* Note: If !PEER_CONNECTED, peer may use different features on reconnect */
 	json_add_hex_talarr(response, "features", p->their_features);
 
-	if (ll)
-		json_add_log(response, ld->log_book, &p->id, *ll);
 	json_object_end(response);
 }
 
@@ -2499,14 +2496,12 @@ static struct command_result *json_listpeers(struct command *cmd,
 					     const jsmntok_t *obj UNNEEDED,
 					     const jsmntok_t *params)
 {
-	enum log_level *ll;
 	struct node_id *specific_id;
 	struct peer *peer;
 	struct json_stream *response;
 
 	if (!param(cmd, buffer, params,
 		   p_opt("id", param_node_id, &specific_id),
-		   p_opt("level", param_loglevel, &ll),
 		   NULL))
 		return command_param_failed();
 
@@ -2515,14 +2510,14 @@ static struct command_result *json_listpeers(struct command *cmd,
 	if (specific_id) {
 		peer = peer_by_id(cmd->ld, specific_id);
 		if (peer)
-			json_add_peer(cmd->ld, response, peer, ll);
+			json_add_peer(cmd->ld, response, peer);
 	} else {
 		struct peer_node_id_map_iter it;
 
 		for (peer = peer_node_id_map_first(cmd->ld->peers, &it);
 		     peer;
 		     peer = peer_node_id_map_next(cmd->ld->peers, &it)) {
-			json_add_peer(cmd->ld, response, peer, ll);
+			json_add_peer(cmd->ld, response, peer);
 		}
 	}
 	json_array_end(response);
