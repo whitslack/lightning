@@ -2128,6 +2128,9 @@ void handle_peer_spoke(struct lightningd *ld, const u8 *msg)
 						"Multiple simultaneous opens not supported");
 			goto send_error;
 		}
+		error = towire_errorfmt(tmpctx, &channel_id,
+					"New channels not currently being accepted");
+		goto send_error;
 		peer->uncommitted_channel = new_uncommitted_channel(peer);
 		peer->uncommitted_channel->cid = channel_id;
 		pfd = sockpair(tmpctx, channel, &other_fd, &error);
@@ -2145,6 +2148,9 @@ void handle_peer_spoke(struct lightningd *ld, const u8 *msg)
 						"Didn't negotiate OPT_DUAL_FUND: cannot use open_channel2");
 			goto send_error;
 		}
+		error = towire_errorfmt(tmpctx, &channel_id,
+					"New channels not currently being accepted");
+		goto send_error;
 		channel = new_unsaved_channel(peer,
 					      peer->ld->config.fee_base,
 					      peer->ld->config.fee_per_satoshi);
