@@ -1,0 +1,152 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "unreserveinputs",
+  "title": "Release reserved UTXOs",
+  "description": [
+    "The **unreserveinputs** RPC command releases (or reduces reservation) on UTXOs which were previously marked as reserved, generally by lightning-reserveinputs(7)."
+  ],
+  "request": {
+    "required": [
+      "psbt"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "psbt": {
+        "type": "string",
+        "description": [
+          "Inputs to unreserve are the inputs specified in the passed-in *psbt*."
+        ]
+      },
+      "reserve": {
+        "type": "u32",
+        "description": [
+          "The number of blocks to decrease reservation by."
+        ],
+        "default": 72
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "reservations"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "reservations": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "txid",
+            "vout",
+            "was_reserved",
+            "reserved"
+          ],
+          "properties": {
+            "txid": {
+              "type": "txid",
+              "description": [
+                "The transaction id."
+              ]
+            },
+            "vout": {
+              "type": "u32",
+              "description": [
+                "The output number which was reserved."
+              ]
+            },
+            "was_reserved": {
+              "type": "boolean",
+              "description": [
+                "Whether the input was already reserved (usually `true`)."
+              ]
+            },
+            "reserved": {
+              "type": "boolean",
+              "description": [
+                "Whether the input is now reserved (may still be `true` if it was reserved for a long time)."
+              ]
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "additionalProperties": true,
+                "properties": {
+                  "reserved": {
+                    "enum": [
+                      true
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "reserved_to_block"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "txid": {},
+                  "vout": {},
+                  "was_reserved": {},
+                  "reserved": {},
+                  "reserved_to_block": {
+                    "type": "u32",
+                    "description": [
+                      "What blockheight the reservation will expire."
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "errors": [
+    "On failure, an error is reported and no UTXOs are unreserved.",
+    "",
+    "- -32602: Invalid parameter, i.e. an unparseable PSBT."
+  ],
+  "author": [
+    "Lisa Neigut [niftynei@gmail.com](mailto:niftynei@gmail.com) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-unreserveinputs(7)",
+    "lightning-signpsbt(7)",
+    "lightning-sendpsbt(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:unreserveinputs#1",
+        "method": "unreserveinputs",
+        "params": {
+          "psbt": "cHNidP8BAF4CAAAAAeo8S4s8Cz9Y1aFnzkXZK0Cu5HzE0pGBOScH+33ZNLWtAAAAAAD9////AahhAAAAAAAAIlEgAUDHIe8AMwf8RKCgKF+uqU1dPQg1v/7TjQ0PQvvvjrujAAAAAAEAiQIAAAABixvdQs5QxtEy9tQ2uXlDCXgnivw4U3qycsMXXeHGnkkBAAAAAP3///8CYg3NCwAAAAAiUSBuCf3Q1/13sw9JPs2LmjXONgvYxW4ccMzjSpkfFXrqyICEHgAAAAAAIgAgZ39EM2qkj2R6eylrL3yjvBuWGjwmoGk+btb3KO6w1zlKAAAAAQErYg3NCwAAAAAiUSBuCf3Q1/13sw9JPs2LmjXONgvYxW4ccMzjSpkfFXrqyAAA",
+          "reserve": 200
+        }
+      },
+      "response": {
+        "reservations": []
+      }
+    },
+    {
+      "request": {
+        "id": "example:unreserveinputs#2",
+        "method": "unreserveinputs",
+        "params": [
+          "cHNidP8BAF4CAAAAAeo8S4s8Cz9Y1aFnzkXZK0Cu5HzE0pGBOScH+33ZNLWtAAAAAAD9////AetRxQsAAAAAIlEgAwknCbnuaFVMsQAmNkUAiU72B5qy3pRvMCgSminZuxGjAAAAAAEAiQIAAAABixvdQs5QxtEy9tQ2uXlDCXgnivw4U3qycsMXXeHGnkkBAAAAAP3///8CYg3NCwAAAAAiUSBuCf3Q1/13sw9JPs2LmjXONgvYxW4ccMzjSpkfFXrqyICEHgAAAAAAIgAgZ39EM2qkj2R6eylrL3yjvBuWGjwmoGk+btb3KO6w1zlKAAAAAQErYg3NCwAAAAAiUSBuCf3Q1/13sw9JPs2LmjXONgvYxW4ccMzjSpkfFXrqyAAA"
+        ]
+      },
+      "response": {
+        "reservations": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,434 @@
+#ifndef LIGHTNING_CONNECTD_CONNECTD_H
+#define LIGHTNING_CONNECTD_CONNECTD_H
+#include "config.h"
+#include <bitcoin/short_channel_id.h>
+#include <ccan/htable/htable_type.h>
+#include <ccan/membuf/membuf.h>
+#include <ccan/timer/timer.h>
+#include <common/bigsize.h>
+#include <common/crypto_state.h>
+#include <common/node_id.h>
+#include <common/wireaddr.h>
+#include <connectd/handshake.h>
+
+struct io_conn;
+struct connecting;
+struct wireaddr_internal;
+
+/*~ All the gossip_store related fields are kept together for convenience. */
+struct gossip_state {
+	/* Is it active right now? */
+	bool active;
+	/* Except with dev override, this fires every 60 seconds */
+	struct oneshot *gossip_timer;
+	/* Timestamp filtering for gossip. */
+	u32 timestamp_min, timestamp_max;
+	/* I think this is called "echo cancellation" */
+	struct gossip_rcvd_filter *grf;
+	/* Offset within the gossip_store file */
+	struct gossmap_iter *iter;
+	/* Bytes sent in the last second. */
+	size_t bytes_this_second;
+	/* When that second starts */
+	struct timemono bytes_start_time;
+};
+
+/*~ We need to know if we were expecting a pong, and why */
+enum pong_expect_type {
+	/* We weren't expecting a ping reply */
+	PONG_UNEXPECTED = 0,
+	/* We were expecting a ping reply due to ping command */
+	PONG_EXPECTED_COMMAND = 1,
+	/* We were expecting a ping reply due to ping timer */
+	PONG_EXPECTED_PROBING = 2,
+};
+
+enum draining_state {
+	/* Normal state */
+	NOT_DRAINING,
+	/* First, reading remaining messages from subds */
+	READING_FROM_SUBDS,
+	/* Finally, writing any queued messages to peer */
+	WRITING_TO_PEER,
+};
+
+/*~ We keep a hash table (ccan/htable) of peers, which tells us what peers are
+ * already connected (by peer->id). */
+struct peer {
+	/* Main daemon */
+	struct daemon *daemon;
+
+	/* Are we connected via a websocket? */
+	enum is_websocket is_websocket;
+
+	/* The pubkey of the node */
+	struct node_id id;
+	/* Counters and keys for symmetric crypto */
+	struct crypto_state cs;
+	/* Time when we first connected */
+	struct timemono connect_starttime;
+	/* Features they told us about */
+	const u8 *their_features;
+
+	/* Connection to the peer (NULL if it's disconnected and we're flushing) */
+	struct io_conn *to_peer;
+
+	/* Non-zero if shutting down. */
+	enum draining_state draining_state;
+
+	/* Counter to distinguish this connection from the next re-connection */
+	u64 counter;
+
+	/* Connections to the subdaemons */
+	struct subd **subds;
+
+	/* Input buffer. */
+	u8 *peer_in;
+
+	/* Bytes received in the last second. */
+	size_t bytes_rcvd_this_second;
+	/* When that second starts */
+	struct timemono bytes_rcvd_start_time;
+	/* Timer when we're throttling input */
+	struct oneshot *recv_timer;
+	/* Only send message once if peer gets throttled */
+	bool throttle_warned;
+
+	/* Output buffer. */
+	struct msg_queue *peer_outq;
+
+	/* Encrypted peer sending buffer */
+	MEMBUF(u8) encrypted_peer_out;
+	size_t encrypted_peer_out_sent;
+	size_t peer_out_urgent;
+	bool flushing_nonurgent;
+	struct oneshot *nonurgent_flush_timer;
+
+	/* We stream from the gossip_store for them, when idle */
+	struct gossip_state gs;
+
+	/* Are we expecting a pong? */
+	enum pong_expect_type expecting_pong;
+	u64 ping_reqid;
+
+	/* Timestamp when we initially sent probe ping */
+	struct timemono ping_start;
+
+	/* Random ping timer, to detect dead connections. */
+	struct oneshot *ping_timer;
+
+	/* Last time we received traffic */
+	struct timemono last_recv_time;
+
+	/* How long have we been ignoring peer input? */
+	struct timemono peer_in_lasttime;
+	int peer_in_lastmsg;
+
+	/* Ratelimits for onion messages.  One token per msec. */
+	size_t onionmsg_incoming_tokens;
+	struct timemono onionmsg_last_incoming;
+	bool onionmsg_limit_warned;
+
+	bool dev_read_enabled;
+	/* If non-NULL, this counts down; 0 means disable */
+	u32 *dev_writes_enabled;
+
+	/* Are there outstanding responses for queries on short_channel_ids? */
+	const struct short_channel_id *scid_queries;
+	const bigsize_t *scid_query_flags;
+	size_t scid_query_idx;
+
+	/* Are there outstanding node_announcements from scid_queries? */
+	struct node_id *scid_query_nodes;
+	size_t scid_query_nodes_idx;
+};
+
+/* We gain one token per msec, and each msg uses 250 tokens. */
+#define ONION_MSG_MSEC		250
+#define ONION_MSG_TOKENS_MAX	(4*ONION_MSG_MSEC)
+
+/*~ The HTABLE_DEFINE_TYPE() macro needs a keyof() function to extract the key:
+ */
+static const struct node_id *peer_keyof(const struct peer *peer)
+{
+	return &peer->id;
+}
+
+/*~ We reuse node_id_hash from common/node_id.h, which uses siphash
+ * and a per-run seed. */
+
+/*~ We also define an equality function: is this element equal to this key? */
+static bool peer_eq_node_id(const struct peer *peer,
+			    const struct node_id *id)
+{
+	return node_id_eq(&peer->id, id);
+}
+
+/*~ This defines 'struct peer_htable' which contains 'struct peer' pointers. */
+HTABLE_DEFINE_NODUPS_TYPE(struct peer,
+			  peer_keyof,
+			  node_id_hash,
+			  peer_eq_node_id,
+			  peer_htable);
+
+/* Node id, with any addresses we were explicitly given for it */
+struct important_id {
+	struct daemon *daemon;
+
+	struct node_id id;
+	struct wireaddr_internal *addrs;
+
+	/* Backoff timer (increases by 2 each time) */
+	size_t reconnect_secs;
+	struct oneshot *reconnect_timer;
+};
+
+static const struct node_id *important_id_keyof(const struct important_id *imp)
+{
+	return &imp->id;
+}
+
+static bool important_id_eq_node_id(const struct important_id *imp,
+				    const struct node_id *id)
+{
+	return node_id_eq(&imp->id, id);
+}
+
+/*~ This defines 'struct important_id_htable' */
+HTABLE_DEFINE_NODUPS_TYPE(struct important_id,
+			  important_id_keyof,
+			  node_id_hash,
+			  important_id_eq_node_id,
+			  important_id_htable);
+
+/*~ Peers we're trying to reach: we iterate through addrs until we succeed
+ * or fail. */
+struct connecting {
+	struct daemon *daemon;
+
+	struct io_conn *conn;
+
+	/* The ID of the peer (not necessarily unique, in transit!) */
+	struct node_id id;
+
+	/* Are we queued waiting, to avoid too many connections at once? */
+	bool waiting;
+
+	/* We iterate through the tal_count(addrs) */
+	size_t addrnum;
+	struct wireaddr_internal *addrs;
+
+	/* How far did we get? */
+	const char *connstate;
+
+	/* Why are we connecting? */
+	const char *reason;
+
+	/* When did we start? */
+	struct timemono start;
+
+	/* Did we find an address we could attempt to connect to? */
+	bool connect_attempted;
+
+	/* Accumulated errors */
+	char *errors;
+};
+
+static const struct node_id *connecting_keyof(const struct connecting *connecting)
+{
+	return &connecting->id;
+}
+
+static bool connecting_eq_node_id(const struct connecting *connecting,
+				  const struct node_id *id)
+{
+	return node_id_eq(&connecting->id, id);
+}
+
+/*~ This defines 'struct connecting_htable' which contains 'struct connecting'
+ *  pointers. */
+HTABLE_DEFINE_NODUPS_TYPE(struct connecting,
+			  connecting_keyof,
+			  node_id_hash,
+			  connecting_eq_node_id,
+			  connecting_htable);
+
+struct scid_to_node_id {
+	struct short_channel_id scid;
+	struct node_id node_id;
+};
+
+static struct short_channel_id scid_to_node_id_keyof(const struct scid_to_node_id *scid_to_node_id)
+{
+	return scid_to_node_id->scid;
+}
+
+static bool scid_to_node_id_eq_scid(const struct scid_to_node_id *scid_to_node_id,
+				    const struct short_channel_id scid)
+{
+	return short_channel_id_eq(scid_to_node_id->scid, scid);
+}
+
+/*~ This defines 'struct scid_htable' which maps short_channel_ids to peers:
+ * we use this to forward onion messages which specify the next hop by scid/dir. */
+HTABLE_DEFINE_NODUPS_TYPE(struct scid_to_node_id,
+			  scid_to_node_id_keyof,
+			  hash_scid,
+			  scid_to_node_id_eq_scid,
+			  scid_htable);
+
+/*~ This is the global state, like `struct lightningd *ld` in lightningd. */
+struct daemon {
+	/* Who am I? */
+	struct node_id id;
+
+	/* --developer? */
+	bool developer;
+
+	/* pubkey equivalent. */
+	struct pubkey mykey;
+
+	/* Counter from which we derive connection identifiers. */
+	u64 connection_counter;
+
+	/* Base for timeout timers, and how long to wait for init msg */
+	struct timers timers;
+	u32 timeout_secs;
+
+	/* Peers that we've handed to `lightningd`, which it hasn't told us
+	 * have disconnected. */
+	struct peer_htable *peers;
+
+	/* Peers we are trying to reach right now. */
+	struct connecting_htable *connecting;
+
+	/* Important (non-transient) peers we should reconnect to */
+	struct important_id_htable *important_ids;
+
+	/* Connection to main daemon. */
+	struct daemon_conn *master;
+
+	/* Connection to gossip daemon. */
+	struct daemon_conn *gossipd;
+
+	/* Map of short_channel_ids to peers */
+	struct scid_htable *scid_htable;
+
+	/* Any listening sockets we have. */
+	struct io_listener **listeners;
+
+	/* Allow localhost to be considered "public", only with --developer */
+	bool dev_allow_localhost;
+
+	/* How much to gossip allow a peer every second (bytes) */
+	size_t gossip_stream_limit;
+
+	/* How much incomign traffic do we allow per peer every second (bytes) */
+	size_t incoming_stream_limit;
+
+	/* We support use of a SOCKS5 proxy (e.g. Tor) */
+	struct addrinfo *proxyaddr;
+
+	/* They can tell us we must use proxy even for non-Tor addresses. */
+	bool always_use_proxy;
+
+	/* There are DNS seeds we can use to look up node addresses as a last
+	 * resort, but doing so leaks our address so can be disabled. */
+	bool use_dns;
+
+	/* File descriptors to listen on once we're activated. */
+	const struct listen_fd **listen_fds;
+
+	/* Our features, as lightningd told us */
+	struct feature_set *our_features;
+
+	/* Subdaemon to proxy websocket requests. */
+	char *websocket_helper;
+
+	/* If non-zero, port to listen for websocket connections. */
+	u16 websocket_port;
+
+	/* The gossip store (access via get_gossmap!) */
+	struct gossmap *gossmap_raw;
+	/* Iterator which we keep at "recent" time */
+	u32 gossip_recent_time;
+	struct gossmap_iter *gossmap_iter_recent;
+
+	/* Shutting down, don't send new stuff */
+	bool shutting_down;
+
+	/* What (even) custom messages we accept */
+	u16 *custom_msgs;
+
+	/* Timer which releases one pending connection per second. */
+	struct oneshot *connect_release_timer;
+
+	/* How many connection attempts do we allow at once
+	 * (--dev-limit-connectsion-inflight sets this to 1 for testing). */
+	size_t max_connect_in_flight;
+
+	/* Add padding to messages (if peer seems ok) */
+	bool message_padding;
+
+	/* Hack to speed up gossip timer */
+	bool dev_fast_gossip;
+	/* Hack to avoid ping timeouts */
+	bool dev_no_ping_timer;
+	/* Hack to no longer send gossip */
+	bool dev_suppress_gossip;
+	/* dev_disconnect file */
+	int dev_disconnect_fd;
+	/* Did we exhaust fds?  If so, skip dev_report_fds */
+	bool dev_exhausted_fds;
+	/* Allow connections in, but don't send anything */
+	bool dev_handshake_no_reply;
+	/* --dev-no-reconnect */
+	bool dev_no_reconnect;
+	/* --dev-fast-reconnect */
+	bool dev_fast_reconnect;
+	/* Don't complain about lightningd being unresponsive. */
+	bool dev_lightningd_is_slow;
+	/* Don't set TCP_NODELAY */
+	bool dev_keep_nagle;
+ };
+
+/* Called by io_tor_connect once it has a connection out. */
+struct io_plan *connection_out(struct io_conn *conn, struct connecting *connect);
+
+/* Get and refresh gossmap */
+struct gossmap *get_gossmap(struct daemon *daemon);
+
+/* Catch up with recent changes */
+void update_recent_timestamp(struct daemon *daemon, struct gossmap *gossmap);
+
+/* add erros to error list */
+void add_errors_to_error_list(struct connecting *connect, const char *error);
+
+/* Called by peer_exchange_initmsg if successful. */
+struct io_plan *peer_connected(struct io_conn *conn,
+			       struct daemon *daemon,
+			       const struct node_id *id,
+			       const struct wireaddr_internal *addr,
+			       const struct wireaddr *remote_addr,
+			       struct crypto_state *cs,
+			       const u8 *their_features TAKES,
+			       enum is_websocket is_websocket,
+			       struct timemono starttime,
+			       bool incoming);
+
+/* Tell gossipd and lightningd that this peer is gone. */
+void send_disconnected(struct daemon *daemon,
+		       const struct node_id *id,
+		       u64 connectd_counter,
+		       struct timemono starttime);
+
+/* Free peer immediately (don't wait for draining). */
+void destroy_peer_immediately(struct peer *peer);
+
+/* Remove a random connection, when under stress. */
+void close_random_connection(struct daemon *daemon);
+
+/* If connections are waiting to avoid flooding lightningd, release one now */
+void release_one_waiting_connection(struct daemon *daemon, const char *why);
+
+#endif /* LIGHTNING_CONNECTD_CONNECTD_H */

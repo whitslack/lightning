@@ -1,0 +1,108 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "askrene-reserve",
+  "title": "Command for informing askrene that you are trying a path",
+  "added": "v24.11",
+  "description": [
+    "The **askrene-reserve** RPC command tells askrene that a path is being attempted.  This allows it to take that into account when other *getroutes* calls are made.  You should call *askrene-unreserve* after the attempt has completed (and before calling *askrene-inform*).",
+    "",
+    "Note that additional properties inside the *path* elements are ignored, which is useful when used with the result of *getroutes*."
+  ],
+  "request": {
+    "required": [
+      "path"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "path": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "short_channel_id_dir",
+            "amount_msat"
+          ],
+          "properties": {
+            "short_channel_id_dir": {
+              "type": "short_channel_id_dir",
+              "description": [
+                "The channel and direction joining these nodes."
+              ]
+            },
+            "amount_msat": {
+              "type": "msat",
+              "description": [
+                "The amount to send into this hop."
+              ]
+            },
+            "layer": {
+              "added": "v25.12",
+              "type": "string",
+              "description": [
+                "The layer to restrict this reservation to.  This is only useful for fake channels which are not uniquely identified by `short_channel_id_dir`, which would otherwise confuse multiple unrelated callers."
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "response": {
+    "required": [],
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "see_also": [
+    "lightning-getroutes(7)",
+    "lightning-askrene-unreserve(7)",
+    "lightning-askrene-listreservations(7)"
+  ],
+  "author": [
+    "Rusty Russell [rusty@rustcorp.com.au](mailto:rusty@rustcorp.com.au) is mainly responsible."
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:askrene-reserve#1",
+        "method": "askrene-reserve",
+        "params": {
+          "path": [
+            {
+              "short_channel_id_dir": "116x1x1/1",
+              "amount_msat": 1250000
+            },
+            {
+              "short_channel_id_dir": "130x1x0/0",
+              "amount_msat": 1250001
+            }
+          ]
+        }
+      },
+      "response": {}
+    },
+    {
+      "request": {
+        "id": "example:askrene-reserve#2",
+        "method": "askrene-reserve",
+        "params": {
+          "path": [
+            {
+              "short_channel_id_dir": "116x1x1/1",
+              "amount_msat": 1250000000000
+            },
+            {
+              "short_channel_id_dir": "130x1x0/0",
+              "amount_msat": 1250000000000
+            }
+          ]
+        }
+      },
+      "response": {}
+    }
+  ]
+}

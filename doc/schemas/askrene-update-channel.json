@@ -1,0 +1,111 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "askrene-update-channel",
+  "title": "Command to manipulate channel in a layer",
+  "added": "v24.11",
+  "description": [
+    "The **askrene-update-channel** RPC command overrides updates for an existing channel when the layer is applied."
+  ],
+  "request": {
+    "required": [
+      "layer",
+      "short_channel_id_dir"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "layer": {
+        "type": "string",
+        "description": [
+          "The name of the layer to apply this change to."
+        ]
+      },
+      "short_channel_id_dir": {
+        "type": "short_channel_id_dir",
+        "description": [
+          "The channel and direction to apply the change to."
+        ]
+      },
+      "enabled": {
+        "type": "boolean",
+        "description": [
+          "Whether the channel is usable at all."
+        ]
+      },
+      "htlc_minimum_msat": {
+        "type": "msat",
+        "description": [
+          "The minimum value allowed in this direction."
+        ]
+      },
+      "htlc_maximum_msat": {
+        "type": "msat",
+        "description": [
+          "The maximum value allowed in this direction."
+        ]
+      },
+      "fee_base_msat": {
+        "type": "msat",
+        "description": [
+          "The base fee to apply to use the channel in this direction."
+        ]
+      },
+      "fee_proportional_millionths": {
+        "type": "u32",
+        "description": [
+          "The proportional fee (in parts per million) to apply to use the channel in this direction."
+        ]
+      },
+      "cltv_expiry_delta": {
+        "type": "u16",
+        "description": [
+          "The CLTV delay required for this direction."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [],
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "see_also": [
+    "lightning-getroutes(7)",
+    "lightning-askrene-create-channel(7)"
+  ],
+  "author": [
+    "Rusty Russell [rusty@rustcorp.com.au](mailto:rusty@rustcorp.com.au) is mainly responsible."
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:askrene-update-channel#1",
+        "method": "askrene-update-channel",
+        "params": [
+          "test_layers",
+          "0x0x1/0"
+        ]
+      },
+      "response": {}
+    },
+    {
+      "request": {
+        "id": "example:askrene-update-channel#2",
+        "method": "askrene-update-channel",
+        "params": {
+          "layer": "test_layers",
+          "short_channel_id_dir": "0x0x1/0",
+          "htlc_minimum_msat": 100,
+          "htlc_maximum_msat": 900000000,
+          "fee_base_msat": 1,
+          "fee_proportional_millionths": 2,
+          "cltv_expiry_delta": 18
+        }
+      },
+      "response": {}
+    }
+  ]
+}

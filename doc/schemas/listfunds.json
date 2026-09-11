@@ -1,0 +1,460 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "listfunds",
+  "title": "Command showing all funds currently managed by the Core Lightning node",
+  "description": [
+    "The **listfunds** RPC command displays all funds available, either in unspent outputs (UTXOs) in the internal wallet or funds locked in currently open channels."
+  ],
+  "categories": [
+    "readonly"
+  ],
+  "request": {
+    "required": [],
+    "additionalProperties": false,
+    "properties": {
+      "spent": {
+        "type": "boolean",
+        "description": [
+          "If True, then the *outputs* will include spent outputs in addition to the unspent ones."
+        ],
+        "default": "False"
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "outputs",
+      "channels"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "outputs": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "txid",
+            "output",
+            "amount_msat",
+            "scriptpubkey",
+            "status",
+            "reserved"
+          ],
+          "properties": {
+            "txid": {
+              "type": "txid",
+              "description": [
+                "The ID of the spendable transaction."
+              ]
+            },
+            "output": {
+              "type": "u32",
+              "description": [
+                "The index within *txid*."
+              ]
+            },
+            "amount_msat": {
+              "type": "msat",
+              "description": [
+                "The amount of the output."
+              ]
+            },
+            "scriptpubkey": {
+              "type": "hex",
+              "description": [
+                "The scriptPubkey of the output."
+              ]
+            },
+            "address": {
+              "type": "string",
+              "description": [
+                "The bitcoin address of the output."
+              ]
+            },
+            "redeemscript": {
+              "type": "hex",
+              "description": [
+                "The redeemscript, only if it's p2sh-wrapped."
+              ]
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "unconfirmed",
+                "confirmed",
+                "spent",
+                "immature"
+              ]
+            },
+            "reserved": {
+              "type": "boolean",
+              "description": [
+                "Whether this UTXO is currently reserved for an in-flight tx."
+              ]
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "additionalProperties": true,
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "confirmed"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "additionalProperties": false,
+                "required": [
+                  "blockheight"
+                ],
+                "properties": {
+                  "txid": {},
+                  "output": {},
+                  "amount_msat": {},
+                  "scriptpubkey": {},
+                  "address": {},
+                  "value": {},
+                  "redeemscript": {},
+                  "status": {},
+                  "reserved": {},
+                  "reserved_to_block": {},
+                  "blockheight": {
+                    "type": "u32",
+                    "description": [
+                      "Block height where it was confirmed."
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "additionalProperties": true,
+                "properties": {
+                  "reserved": {
+                    "type": "boolean",
+                    "enum": [
+                      "true"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "additionalProperties": false,
+                "required": [
+                  "reserved_to_block"
+                ],
+                "properties": {
+                  "txid": {},
+                  "output": {},
+                  "amount_msat": {},
+                  "scriptpubkey": {},
+                  "address": {},
+                  "value": {},
+                  "redeemscript": {},
+                  "status": {},
+                  "blockheight": {},
+                  "reserved": {},
+                  "reserved_to_block": {
+                    "type": "u32",
+                    "description": [
+                      "Block height where reservation will expire."
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      },
+      "channels": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "peer_id",
+            "our_amount_msat",
+            "amount_msat",
+            "funding_txid",
+            "funding_output",
+            "connected",
+            "state",
+            "channel_id"
+          ],
+          "properties": {
+            "peer_id": {
+              "type": "pubkey",
+              "description": [
+                "The peer with which the channel is opened."
+              ]
+            },
+            "our_amount_msat": {
+              "type": "msat",
+              "description": [
+                "Available satoshis on our node's end of the channel."
+              ]
+            },
+            "amount_msat": {
+              "type": "msat",
+              "description": [
+                "Total channel value."
+              ]
+            },
+            "funding_txid": {
+              "type": "txid",
+              "description": [
+                "Funding transaction id."
+              ]
+            },
+            "funding_output": {
+              "type": "u32",
+              "description": [
+                "The 0-based index of the output in the funding transaction."
+              ]
+            },
+            "connected": {
+              "type": "boolean",
+              "description": [
+                "Whether the channel peer is connected."
+              ]
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "OPENINGD",
+                "CHANNELD_AWAITING_LOCKIN",
+                "CHANNELD_NORMAL",
+                "CHANNELD_SHUTTING_DOWN",
+                "CLOSINGD_SIGEXCHANGE",
+                "CLOSINGD_COMPLETE",
+                "AWAITING_UNILATERAL",
+                "FUNDING_SPEND_SEEN",
+                "ONCHAIN",
+                "DUALOPEND_OPEN_INIT",
+                "DUALOPEND_AWAITING_LOCKIN",
+                "CHANNELD_AWAITING_SPLICE",
+                "DUALOPEND_OPEN_COMMITTED",
+                "DUALOPEND_OPEN_COMMIT_READY"
+              ],
+              "description": [
+                "The channel state, in particular `CHANNELD_NORMAL` means the channel can be used normally."
+              ]
+            },
+            "channel_id": {
+              "type": "hash",
+              "description": [
+                "The full channel_id (funding txid Xored with output number)."
+              ],
+              "added": "v23.05"
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "additionalProperties": true,
+                "properties": {
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "CHANNELD_NORMAL"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "additionalProperties": false,
+                "required": [
+                  "short_channel_id"
+                ],
+                "properties": {
+                  "peer_id": {},
+                  "our_amount_msat": {},
+                  "channel_sat": {},
+                  "amount_msat": {},
+                  "channel_total_sat": {},
+                  "funding_txid": {},
+                  "funding_output": {},
+                  "connected": {},
+                  "state": {},
+                  "channel_id": {},
+                  "short_channel_id": {
+                    "type": "short_channel_id",
+                    "description": [
+                      "Short channel id of channel."
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "additionalProperties": true,
+                "properties": {
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "CHANNELD_SHUTTING_DOWN",
+                      "CLOSINGD_SIGEXCHANGE",
+                      "CLOSINGD_COMPLETE",
+                      "AWAITING_UNILATERAL",
+                      "FUNDING_SPEND_SEEN",
+                      "ONCHAIN"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "additionalProperties": false,
+                "required": [],
+                "properties": {
+                  "peer_id": {},
+                  "our_amount_msat": {},
+                  "channel_sat": {},
+                  "amount_msat": {},
+                  "channel_total_sat": {},
+                  "funding_txid": {},
+                  "funding_output": {},
+                  "connected": {},
+                  "state": {},
+                  "channel_id": {},
+                  "short_channel_id": {
+                    "type": "short_channel_id",
+                    "description": [
+                      "Short channel id of channel (only if funding reached lockin depth before closing)."
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "author": [
+    "Felix [fixone@gmail.com](mailto:fixone@gmail.com) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-newaddr(7)",
+    "lightning-fundchannel(7)",
+    "lightning-withdraw(7)",
+    "lightning-listtransactions(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:listfunds#1",
+        "method": "listfunds",
+        "params": {}
+      },
+      "response": {
+        "outputs": [
+          {
+            "txid": "9860f25fc55272e7250d4829e0ebf37f524c3a57ef6841e9585a2132c19b0f06",
+            "output": 0,
+            "amount_msat": 497105000,
+            "scriptpubkey": "512073c774833ecca0547ce8ecd2ffc856ac1f7889f15ac1cf80b13aa3cc61601ca0",
+            "address": "bcrt1pw0rhfqe7ejs9gl8ganf0ljzk4s0h3z03ttqulq93823ucctqrjsq4ew6qm",
+            "status": "unconfirmed",
+            "reserved": false
+          },
+          {
+            "txid": "df0d67b5c14dc69c1f7dea24111e4557aaa9a01bca5c683cd81efda21f12031f",
+            "output": 1,
+            "amount_msat": 995073000,
+            "scriptpubkey": "512083dbe98bf7a7bfae203d7f09ffe645aa105138793b05935f3c332566c399be29",
+            "address": "bcrt1ps0d7nzlh57l6ugpa0uyllej94gg9zwre8vzexheuxvjkdsuehc5s3940ps",
+            "status": "confirmed",
+            "blockheight": 168,
+            "reserved": false
+          },
+          {
+            "txid": "d3a6d332f7ce629300e973ea2ebd3536a3bf523459a408d45b3fbd3b09d168d1",
+            "output": 0,
+            "amount_msat": 497105000,
+            "scriptpubkey": "5120c0a2f19bd78ecf3cdfa39e07bead69530099f4739c6d68c07f84cdcf45e31f82",
+            "address": "bcrt1pcz30rx7h3m8neharncrmattf2vqfnarnn3kk3srlsnxu730rr7pqnxrf7d",
+            "status": "confirmed",
+            "blockheight": 167,
+            "reserved": false
+          },
+          {
+            "txid": "085495a1f868a8422b5d6797209e3a6a1972438cd18bc7663e010f7b3b52d2df",
+            "output": 1,
+            "amount_msat": 203398803000,
+            "scriptpubkey": "5120d2d0f24d9a3e596e2fbc0819e8894c83c5c583eb862d90156a5e129239194dd5",
+            "address": "bcrt1p6tg0ynv68evkutaupqv73z2vs0zutqltsckeq9t2tcffywgefh2syue8tv",
+            "status": "confirmed",
+            "blockheight": 148,
+            "reserved": false
+          },
+          {
+            "txid": "085495a1f868a8422b5d6797209e3a6a1972438cd18bc7663e010f7b3b52d2df",
+            "output": 6,
+            "amount_msat": 1000000,
+            "scriptpubkey": "0014295f94257ef514dec3ed7d4549c4ee263ae16e84",
+            "address": "bcrt1q990egft7752dasld04z5n38wycawzm5yxkv7ra",
+            "status": "confirmed",
+            "blockheight": 148,
+            "reserved": false
+          },
+          {
+            "txid": "085495a1f868a8422b5d6797209e3a6a1972438cd18bc7663e010f7b3b52d2df",
+            "output": 8,
+            "amount_msat": 25000000,
+            "scriptpubkey": "5120182af728bb638b6402708b0031f4aa2544e94acdd63d1381eb7e207d6ba8d998",
+            "address": "bcrt1prq40w29mvw9kgqns3vqrra92y4zwjjkd6c738q0t0cs866agmxvqc307xy",
+            "status": "confirmed",
+            "blockheight": 148,
+            "reserved": false
+          }
+        ],
+        "channels": [
+          {
+            "peer_id": "02287bfac8b99b35477ebe9334eede1e32b189e24644eb701c079614712331cec0",
+            "connected": false,
+            "state": "CLOSINGD_COMPLETE",
+            "channel_id": "473851bb98a42329724d897b5ea85fcda29e9973b70e4e7b2bbce82ff996c601",
+            "short_channel_id": "168x1x0",
+            "our_amount_msat": 500000000,
+            "amount_msat": 1000000000,
+            "funding_txid": "df0d67b5c14dc69c1f7dea24111e4557aaa9a01bca5c683cd81efda21f12031f",
+            "funding_output": 0
+          },
+          {
+            "peer_id": "038194b5f32bdf0aa59812c86c4ef7ad2f294104fa027d1ace9b469bb6f88cf37b",
+            "connected": true,
+            "state": "CHANNELD_NORMAL",
+            "channel_id": "2c383675809577b343f57acbea98d51dd913817874a3b621173f3fe2ea519c45",
+            "short_channel_id": "116x1x1",
+            "our_amount_msat": 609507210,
+            "amount_msat": 1000000000,
+            "funding_txid": "6958d6b2c23a79254dfd48b9b3d2a357c8c12c52a8bbd90bf48bd04e55996368",
+            "funding_output": 1
+          },
+          {
+            "peer_id": "03cecbfdc68544cc596223b68ce0710c9e5d2c9cb317ee07822d95079acc703d31",
+            "connected": true,
+            "state": "CHANNELD_NORMAL",
+            "channel_id": "60a870b5b9d8a5a59213cb7b3ad81b3548ed107d0d627c3615746097b1374b55",
+            "short_channel_id": "130x1x0",
+            "our_amount_msat": 899996000,
+            "amount_msat": 1000000000,
+            "funding_txid": "88c5963d6e1b0790375d5ce51c7fdd58b9b241c104754d2b704aee8cbdc5e7b5",
+            "funding_output": 0
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,91 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "waitblockheight",
+  "title": "Command for waiting for blocks on the blockchain",
+  "description": [
+    "The **waitblockheight** RPC command waits until the blockchain has reached the specified *blockheight*."
+  ],
+  "request": {
+    "required": [
+      "blockheight"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "blockheight": {
+        "type": "u32",
+        "description": [
+          "Current blockheight of the blockchain if the value is greater than this number. If it is a present or past block height, then the command returns immediately."
+        ]
+      },
+      "timeout": {
+        "type": "u32",
+        "description": [
+          "Only wait up to specified seconds."
+        ],
+        "default": "60 seconds"
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "blockheight"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "blockheight": {
+        "type": "u32",
+        "description": [
+          "The current block height (>= *blockheight* parameter)."
+        ]
+      }
+    },
+    "post_return_value_notes": [
+      "If *timeout* seconds is reached without the specified blockheight being reached, this command will fail with a code of `2000`."
+    ]
+  },
+  "errors": [
+    "The following error codes may occur:",
+    "",
+    "- 2000: Timed out."
+  ],
+  "author": [
+    "ZmnSCPxj [ZmnSCPxj@protonmail.com](mailto:ZmnSCPxj@protonmail.com) is mainly responsible."
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "description": [
+        "This will return immediately since the current blockheight exceeds the requested waitblockheight."
+      ],
+      "request": {
+        "id": "example:waitblockheight#1",
+        "method": "waitblockheight",
+        "params": {
+          "blockheight": 126
+        }
+      },
+      "response": {
+        "blockheight": 137
+      }
+    },
+    {
+      "description": [
+        "This will return after the next block is mined because requested waitblockheight is one block higher than the current blockheight."
+      ],
+      "request": {
+        "id": "example:waitblockheight#2",
+        "method": "waitblockheight",
+        "params": {
+          "blockheight": 138,
+          "timeout": 600
+        }
+      },
+      "response": {
+        "blockheight": 138
+      }
+    }
+  ]
+}

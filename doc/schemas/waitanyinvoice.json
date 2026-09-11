@@ -1,0 +1,278 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "waitanyinvoice",
+  "title": "Command for waiting for payments",
+  "description": [
+    "The **waitanyinvoice** RPC command waits until an invoice is paid, then returns a single entry as per **listinvoices**. It will not return for any invoices paid prior to or including the *lastpay_index*.",
+    "",
+    "This is usually called iteratively: once with no arguments, then repeatedly with the returned *pay_index* entry. This ensures that no paid invoice is missed. The *pay_index* is a monotonically-increasing number assigned to an invoice when it gets paid. The first valid *pay_index* is 1."
+  ],
+  "request": {
+    "required": [],
+    "additionalProperties": false,
+    "properties": {
+      "lastpay_index": {
+        "type": "u64",
+        "description": [
+          "Ignores any invoices paid prior to or including this index. 0 is equivalent to not specifying and negative value is invalid."
+        ]
+      },
+      "timeout": {
+        "type": "u64",
+        "description": [
+          "If specified, wait at most that number of seconds, which must be an integer. If the specified *timeout* is reached, this command will return with an error. You can specify this to 0 so that **waitanyinvoice** will return immediately with an error if no pending invoice is available yet. If unspecified, this command will wait indefinitely."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "label",
+      "payment_hash",
+      "status",
+      "created_index",
+      "expires_at"
+    ],
+    "additionalProperties": true,
+    "properties": {
+      "label": {
+        "type": "string",
+        "description": [
+          "Unique label supplied at invoice creation."
+        ]
+      },
+      "description": {
+        "type": "string",
+        "description": [
+          "Description used in the invoice."
+        ]
+      },
+      "payment_hash": {
+        "type": "hash",
+        "description": [
+          "The hash of the *payment_preimage* which will prove payment."
+        ]
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "paid",
+          "expired"
+        ],
+        "description": [
+          "Whether it's paid or expired."
+        ]
+      },
+      "expires_at": {
+        "type": "u64",
+        "description": [
+          "UNIX timestamp of when it will become / became unpayable."
+        ]
+      },
+      "amount_msat": {
+        "type": "msat",
+        "description": [
+          "The amount required to pay this invoice."
+        ]
+      },
+      "bolt11": {
+        "type": "string",
+        "description": [
+          "The BOLT11 string (always present unless *bolt12* is)."
+        ]
+      },
+      "bolt12": {
+        "type": "string",
+        "description": [
+          "The BOLT12 string (always present unless *bolt11* is)."
+        ]
+      },
+      "created_index": {
+        "type": "u64",
+        "added": "v23.08",
+        "description": [
+          "1-based index indicating order this invoice was created in."
+        ]
+      },
+      "updated_index": {
+        "type": "u64",
+        "added": "v23.08",
+        "description": [
+          "1-based index indicating order this invoice was changed (only present if it has changed since creation)."
+        ]
+      }
+    },
+    "allOf": [
+      {
+        "if": {
+          "additionalProperties": true,
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "paid"
+              ]
+            }
+          }
+        },
+        "then": {
+          "additionalProperties": false,
+          "required": [
+            "pay_index",
+            "amount_received_msat",
+            "paid_at",
+            "payment_preimage"
+          ],
+          "properties": {
+            "label": {},
+            "description": {},
+            "payment_hash": {},
+            "status": {},
+            "msatoshi": {},
+            "amount_msat": {},
+            "bolt11": {},
+            "bolt12": {},
+            "expires_at": {},
+            "created_index": {},
+            "updated_index": {},
+            "pay_index": {
+              "type": "u64",
+              "description": [
+                "Unique incrementing index for this payment."
+              ]
+            },
+            "amount_received_msat": {
+              "type": "msat",
+              "description": [
+                "The amount actually received (could be slightly greater than *amount_msat*, since clients may overpay)."
+              ]
+            },
+            "paid_at": {
+              "type": "u64",
+              "description": [
+                "UNIX timestamp of when it was paid."
+              ]
+            },
+            "paid_outpoint": {
+              "type": "object",
+              "description": [
+                "Outpoint this invoice was paid with."
+              ],
+              "added": "v23.11",
+              "additionalProperties": false,
+              "required": [
+                "txid",
+                "outnum"
+              ],
+              "properties": {
+                "txid": {
+                  "added": "v23.11",
+                  "type": "txid",
+                  "description": [
+                    "ID of the transaction that paid the invoice."
+                  ]
+                },
+                "outnum": {
+                  "added": "v23.11",
+                  "type": "u32",
+                  "description": [
+                    "The 0-based output number of the transaction that paid the invoice."
+                  ]
+                }
+              }
+            },
+            "payment_preimage": {
+              "type": "secret",
+              "description": [
+                "Proof of payment."
+              ]
+            }
+          }
+        },
+        "else": {
+          "additionalProperties": false,
+          "properties": {
+            "label": {},
+            "description": {},
+            "payment_hash": {},
+            "status": {},
+            "msatoshi": {},
+            "amount_msat": {},
+            "bolt11": {},
+            "bolt12": {},
+            "created_index": {},
+            "updated_index": {},
+            "expires_at": {}
+          }
+        }
+      }
+    ]
+  },
+  "errors": [
+    "The following error codes may occur:",
+    "",
+    "- 904: The *timeout* was reached without an invoice being paid."
+  ],
+  "author": [
+    "Rusty Russell [rusty@rustcorp.com.au](mailto:rusty@rustcorp.com.au) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-waitinvoice(7)",
+    "lightning-listinvoices(7)",
+    "lightning-delinvoice(7)",
+    "lightning-invoice(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:waitanyinvoice#1",
+        "method": "waitanyinvoice",
+        "params": {}
+      },
+      "response": {
+        "label": "lbl balance l1 to l2",
+        "bolt11": "lnbcrt5m1pne035qsp5f7fj3w9sqj6974p0gnpd7snqr2qfezav2mp26e20nx3vty5cweaqpp5r9rj6sc3p7m56lpfg6934mqf45hsp2gl4aa3kwt56pmrphh7w6ssdpcv3jhxcmjd9c8g6t0dcs8xetwvss8xmmdv5s8xct5wvsxcvfqw3hjqmpjxqyjw5qcqp9rzjq08vhlwxs4zvcktzywmgecr3pj096tyukvt7upuz9k2s0xkvwq7nzqqqwcqqqqgqqqqqqqqpqqqqqzsqqc9qxpqysgqxjn3ms2m2xm65w5pf0ulf7km28ma0luz2whhgpajnt5ecmwhp2x3ks3qzwxr907fc9g5l3quwn97u8tf0gkm5ppfvxh2dndy3z6up0cqyk54qc",
+        "payment_hash": "19472d43110fb74d7c29468b1aec09ad2f00a91faf7b1b3974d07630defe76a1",
+        "amount_msat": 500000000,
+        "status": "paid",
+        "pay_index": 1,
+        "amount_received_msat": 500000000,
+        "paid_at": 1738000000,
+        "payment_preimage": "09e7f193a0100e9f09e7f193a0100e9f09e7f193a0100e9f09e7f193a0100e9f",
+        "description": "description send some sats l1 to l2",
+        "expires_at": 1738604800,
+        "created_index": 1,
+        "updated_index": 1
+      }
+    },
+    {
+      "request": {
+        "id": "example:waitanyinvoice#2",
+        "method": "waitanyinvoice",
+        "params": {
+          "lastpay_index": 1,
+          "timeout": 0
+        }
+      },
+      "response": {
+        "label": "test_injectpaymentonion1",
+        "bolt11": "lnbcrt10n1pne035qsp5mt93g3n37t0rp9pq8my8cafesa8m3u3e5zcvs0tu67n3x5esl6tqpp58u5g36uzcl7sx433jmfgmdlydrd8rzhhd2ft3cy3846lxjt0gt5sdp6w3jhxapqd9hx5etrw3cxz7tdv4h8gmmwd9hkuvfqv3jhxcmjd9c8g6t0dcxqyjw5qcqp99qxpqysgqvy0vk8yrft3ym47d36hxz4y43ch6nfcxtycn25lh25fdlwacpq0rmzqk59p8rmakfvzay7lhvsvpsvuh5vemf7s9e4a65dg3cklcr8cq7grtgs",
+        "payment_hash": "3f2888eb82c7fd03563196d28db7e468da718af76a92b8e0913d75f3496f42e9",
+        "amount_msat": 1000,
+        "status": "paid",
+        "pay_index": 2,
+        "amount_received_msat": 1000,
+        "paid_at": 1738000000,
+        "payment_preimage": "09e7f193a0100ea509e7f193a0100ea509e7f193a0100ea509e7f193a0100ea5",
+        "description": "test injectpaymentonion1 description",
+        "expires_at": 1738604800,
+        "created_index": 8,
+        "updated_index": 2
+      }
+    }
+  ]
+}

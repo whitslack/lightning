@@ -1,0 +1,333 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "listnodes",
+  "title": "Command to get the list of nodes in the known network.",
+  "description": [
+    "The **listnodes** command returns nodes the node has learned about via gossip messages, or a single one if the node *id* was specified."
+  ],
+  "categories": [
+    "readonly"
+  ],
+  "request": {
+    "required": [],
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "type": "pubkey",
+        "description": [
+          "The public key of the node to list."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "nodes"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "nodes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "nodeid"
+          ],
+          "properties": {
+            "nodeid": {
+              "type": "pubkey",
+              "description": [
+                "The public key of the node."
+              ]
+            },
+            "last_timestamp": {
+              "type": "u32",
+              "description": [
+                "A node_announcement has been received for this node (UNIX timestamp)."
+              ]
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "required": [
+                  "last_timestamp"
+                ]
+              },
+              "then": {
+                "additionalProperties": false,
+                "required": [
+                  "nodeid",
+                  "last_timestamp",
+                  "alias",
+                  "color",
+                  "features",
+                  "addresses"
+                ],
+                "properties": {
+                  "nodeid": {},
+                  "last_timestamp": {},
+                  "option_will_fund": {},
+                  "alias": {
+                    "type": "string",
+                    "description": [
+                      "The fun alias this node advertized."
+                    ],
+                    "maxLength": 32
+                  },
+                  "color": {
+                    "type": "hex",
+                    "description": [
+                      "The favorite RGB color this node advertized."
+                    ],
+                    "minLength": 6,
+                    "maxLength": 6
+                  },
+                  "features": {
+                    "type": "hex",
+                    "description": [
+                      "BOLT #9 features bitmap this node advertized."
+                    ]
+                  },
+                  "addresses": {
+                    "type": "array",
+                    "description": [
+                      "The addresses this node advertized."
+                    ],
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "type",
+                        "port"
+                      ],
+                      "additionalProperties": true,
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": [
+                            "dns",
+                            "ipv4",
+                            "ipv6",
+                            "torv2",
+                            "torv3"
+                          ],
+                          "description": [
+                            "Type of connection (until 23.08, `websocket` was also allowed)."
+                          ]
+                        },
+                        "port": {
+                          "type": "u16",
+                          "description": [
+                            "Port number."
+                          ]
+                        }
+                      },
+                      "if": {
+                        "additionalProperties": true,
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "dns",
+                              "ipv4",
+                              "ipv6",
+                              "torv2",
+                              "torv3"
+                            ]
+                          }
+                        }
+                      },
+                      "then": {
+                        "required": [
+                          "type",
+                          "address",
+                          "port"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                          "type": {},
+                          "port": {},
+                          "address": {
+                            "type": "string",
+                            "description": [
+                              "Address in expected format for **type**."
+                            ]
+                          }
+                        }
+                      },
+                      "else": {
+                        "required": [
+                          "type",
+                          "port"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                          "type": {},
+                          "port": {}
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "else": {
+                "additionalProperties": false,
+                "properties": {
+                  "nodeid": {}
+                }
+              }
+            },
+            {
+              "if": {
+                "required": [
+                  "option_will_fund"
+                ]
+              },
+              "then": {
+                "additionalProperties": true,
+                "required": [
+                  "option_will_fund"
+                ],
+                "properties": {
+                  "option_will_fund": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "lease_fee_base_msat",
+                      "lease_fee_basis",
+                      "funding_weight",
+                      "channel_fee_max_base_msat",
+                      "channel_fee_max_proportional_thousandths",
+                      "compact_lease"
+                    ],
+                    "properties": {
+                      "lease_fee_base_msat": {
+                        "type": "msat",
+                        "description": [
+                          "The fixed fee for a lease (whole number of satoshis)."
+                        ]
+                      },
+                      "lease_fee_basis": {
+                        "type": "u32",
+                        "description": [
+                          "The proportional fee in basis points (parts per 10,000) for a lease."
+                        ]
+                      },
+                      "funding_weight": {
+                        "type": "u32",
+                        "description": [
+                          "The onchain weight you'll have to pay for a lease."
+                        ]
+                      },
+                      "channel_fee_max_base_msat": {
+                        "type": "msat",
+                        "description": [
+                          "The maximum base routing fee this node will charge during the lease."
+                        ]
+                      },
+                      "channel_fee_max_proportional_thousandths": {
+                        "type": "u32",
+                        "description": [
+                          "The maximum proportional routing fee this node will charge during the lease (in thousandths, not millionths like channel_update)."
+                        ]
+                      },
+                      "compact_lease": {
+                        "type": "hex",
+                        "description": [
+                          "The lease as represented in the node_announcement."
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "errors": [
+    "On failure, one of the following error codes may be returned:",
+    "",
+    "- -32602: Error in given parameters."
+  ],
+  "author": [
+    "Vincenzo Palazzo [vincenzo.palazzo@protonmail.com](mailto:vincenzo.palazzo@protonmail.com) wrote the initial version of this man page,",
+    "but many others did the hard work of actually implementing this rpc command."
+  ],
+  "see_also": [
+    "lightning-listchannels(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:listnodes#1",
+        "method": "listnodes",
+        "params": {
+          "id": "03cecbfdc68544cc596223b68ce0710c9e5d2c9cb317ee07822d95079acc703d31"
+        }
+      },
+      "response": {
+        "nodes": [
+          {
+            "nodeid": "03cecbfdc68544cc596223b68ce0710c9e5d2c9cb317ee07822d95079acc703d31",
+            "alias": "HOPPINGFIRE-v26.09",
+            "color": "03cecb",
+            "last_timestamp": 1738000000,
+            "features": "808898882a8a59a1",
+            "addresses": []
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "id": "example:listnodes#2",
+        "method": "listnodes",
+        "params": {}
+      },
+      "response": {
+        "nodes": [
+          {
+            "nodeid": "033845802d25b4e074ccfd7cd8b339a41dc75bf9978a034800444b51d42b07799a",
+            "alias": "SILENTARTIST-v26.09",
+            "color": "033845",
+            "last_timestamp": 1738000000,
+            "features": "808898882a8a59a1",
+            "addresses": []
+          },
+          {
+            "nodeid": "038194b5f32bdf0aa59812c86c4ef7ad2f294104fa027d1ace9b469bb6f88cf37b",
+            "alias": "JUNIORBEAM-v26.09",
+            "color": "038194",
+            "last_timestamp": 1738000000,
+            "features": "808898882a8a59a1",
+            "addresses": []
+          },
+          {
+            "nodeid": "03cecbfdc68544cc596223b68ce0710c9e5d2c9cb317ee07822d95079acc703d31",
+            "alias": "HOPPINGFIRE-v26.09",
+            "color": "03cecb",
+            "last_timestamp": 1738000000,
+            "features": "808898882a8a59a1",
+            "addresses": []
+          },
+          {
+            "nodeid": "02287bfac8b99b35477ebe9334eede1e32b189e24644eb701c079614712331cec0",
+            "alias": "JUNIORFELONY-v26.09",
+            "color": "02287b",
+            "last_timestamp": 1738000000,
+            "features": "808898882a8a59a1",
+            "addresses": []
+          }
+        ]
+      }
+    }
+  ]
+}

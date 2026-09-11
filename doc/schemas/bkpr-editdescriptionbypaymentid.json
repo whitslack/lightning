@@ -1,0 +1,304 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "added": "v24.11",
+  "additionalProperties": false,
+  "rpc": "bkpr-editdescriptionbypaymentid",
+  "title": "Command to change the description for events with `payment_id` after they're made",
+  "description": [
+    "The **bkpr-editdescriptionbypaymentid** RPC command updates all chain and channel events that match the `payment_id` with the provided `description`"
+  ],
+  "request": {
+    "required": [
+      "payment_id",
+      "description"
+    ],
+    "properties": {
+      "payment_id": {
+        "type": "string",
+        "description": [
+          "The payment hash (payment_id) to update the description for."
+        ]
+      },
+      "description": {
+        "type": "string",
+        "description": [
+          "The description to update to"
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "updated"
+    ],
+    "properties": {
+      "updated": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "account",
+            "type",
+            "tag",
+            "credit_msat",
+            "debit_msat",
+            "currency",
+            "timestamp"
+          ],
+          "properties": {
+            "account": {
+              "type": "string",
+              "description": [
+                "The account name. If the account is a channel, the channel_id."
+              ]
+            },
+            "type": {
+              "type": "string",
+              "enum": [
+                "chain",
+                "channel"
+              ],
+              "description": [
+                "Coin movement type."
+              ]
+            },
+            "tag": {
+              "type": "string",
+              "description": [
+                "Description of movement."
+              ]
+            },
+            "credit_msat": {
+              "type": "msat",
+              "description": [
+                "Amount credited."
+              ]
+            },
+            "debit_msat": {
+              "type": "msat",
+              "description": [
+                "Amount debited."
+              ]
+            },
+            "currency": {
+              "type": "string",
+              "description": [
+                "Human-readable bech32 part for this coin type."
+              ]
+            },
+            "timestamp": {
+              "type": "u32",
+              "description": [
+                "Timestamp this event was recorded by the node. For consolidated events such as onchain_fees, the most recent timestamp."
+              ]
+            },
+            "description": {
+              "type": "string",
+              "description": [
+                "The description of this event"
+              ]
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "chain"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "account": {},
+                  "type": {},
+                  "tag": {},
+                  "credit_msat": {},
+                  "debit_msat": {},
+                  "currency": {},
+                  "timestamp": {},
+                  "outpoint": {
+                    "type": "string",
+                    "description": [
+                      "The txid:outnum for this event."
+                    ]
+                  },
+                  "blockheight": {
+                    "type": "u32",
+                    "description": [
+                      "For chain events, blockheight this occured at."
+                    ]
+                  },
+                  "origin": {
+                    "type": "string",
+                    "description": [
+                      "The account this movement originated from."
+                    ]
+                  },
+                  "payment_id": {
+                    "type": "hex",
+                    "description": [
+                      "Lightning payment identifier. For an htlc, this will be the preimage."
+                    ]
+                  },
+                  "txid": {
+                    "type": "txid",
+                    "description": [
+                      "The txid of the transaction that created this event."
+                    ]
+                  }
+                },
+                "required": [
+                  "outpoint",
+                  "blockheight"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "onchain_fee"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "account": {},
+                  "type": {},
+                  "tag": {},
+                  "credit_msat": {},
+                  "debit_msat": {},
+                  "currency": {},
+                  "timestamp": {},
+                  "description": {},
+                  "txid": {
+                    "type": "txid",
+                    "description": [
+                      "The txid of the transaction that created this event."
+                    ]
+                  }
+                },
+                "required": [
+                  "txid"
+                ],
+                "additionalProperties": false
+              }
+            },
+            {
+              "if": {
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "channel"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "properties": {
+                  "account": {},
+                  "type": {},
+                  "tag": {},
+                  "credit_msat": {},
+                  "debit_msat": {},
+                  "currency": {},
+                  "timestamp": {},
+                  "description": {},
+                  "fees_msat": {
+                    "type": "msat",
+                    "description": [
+                      "Amount paid in fees."
+                    ]
+                  },
+                  "is_rebalance": {
+                    "type": "boolean",
+                    "description": [
+                      "Is this payment part of a rebalance."
+                    ]
+                  },
+                  "payment_id": {
+                    "type": "hex",
+                    "description": [
+                      "Lightning payment identifier. For an htlc, this will be the preimage."
+                    ]
+                  },
+                  "part_id": {
+                    "type": "u32",
+                    "description": [
+                      "Counter for multi-part payments."
+                    ]
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "author": [
+    "Lisa Neigut [niftynei@gmail.com](mailto:niftynei@gmail.com) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-bkpr-editdescriptionbyoutpoint(7)",
+    "lightning-bkpr-listaccountevents(7)",
+    "lightning-bkpr-listincome(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:bkpr-editdescriptionbypaymentid#1",
+        "method": "bkpr-editdescriptionbypaymentid",
+        "params": {
+          "payment_id": "8fad68e532db4edf02984be14e59dc5e8ffbbdf0f7c4e8cfa26a6bb8f9fe4c41",
+          "description": "edited invoice description from description send some sats l2 to l3"
+        }
+      },
+      "response": {
+        "updated": [
+          {
+            "account": "c51daaf63cd67a9092a021076a8b3def61b38dea85019b0a074ddada3e1a4e6c",
+            "type": "channel",
+            "tag": "invoice",
+            "credit_msat": 500000000,
+            "debit_msat": 0,
+            "currency": "bcrt",
+            "payment_id": "8fad68e532db4edf02984be14e59dc5e8ffbbdf0f7c4e8cfa26a6bb8f9fe4c41",
+            "part_id": 0,
+            "description": "edited invoice description from description send some sats l2 to l3",
+            "timestamp": 1738000007,
+            "is_rebalance": false
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "id": "example:bkpr-editdescriptionbypaymentid#2",
+        "method": "bkpr-editdescriptionbypaymentid",
+        "params": {
+          "payment_id": "c000010101010101010101010101010101010101010101010101010101010101",
+          "description": "edited invoice description for non existing payment id"
+        }
+      },
+      "response": {
+        "updated": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,165 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "added": "v23.08",
+  "rpc": "splice_update",
+  "title": "Command to initiate a channel to a peer",
+  "description": [
+    "`splice_update` is a low level RPC command which updates the active channel splice associated with `channel_id`.",
+    "",
+    "`splice_update` must be called repeatidly until the result `commitments_secured` is `true`. Each time `splice_update` is called, it will return a new PSBT that may have changes. In the simplest case, you take the returned `psbt` and pass it back into `splice_update` for the incoming `psbt` field.",
+    "",
+    "For more complex use cases, you may modify the `psbt` both before calling `splice_update` and inbetween subsequent calls until `commitments_secured` is `true`. After which point you can no long make modifications to the PSBT (beyond signing, which comes later with `splice_signed`).",
+    "",
+    "Each `splice_update` result may include changes to the PSBT specified by your channel peer. You can review these changes between calls to `splice_update` to perform additional validation or strategy adjustment.",
+    "",
+    "Typically, `splice_update` will return `commitments_secured` true after one call but you should assume it will need multiple calls."
+  ],
+  "request": {
+    "required": [
+      "channel_id",
+      "psbt"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "channel_id": {
+        "type": "hash",
+        "description": [
+          "The channel id of the channel to be spliced."
+        ]
+      },
+      "psbt": {
+        "type": "string",
+        "description": [
+          "The base 64 encoded PSBT returned from `splice_init` with any changes added by the user."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "psbt",
+      "commitments_secured",
+      "signatures_secured"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "psbt": {
+        "type": "string",
+        "description": [
+          "The (incomplete) PSBT of the splice transaction."
+        ]
+      },
+      "commitments_secured": {
+        "type": "boolean",
+        "description": [
+          "Whether or not the commitments were secured."
+        ]
+      },
+      "signatures_secured": {
+        "added": "v24.11",
+        "type": "boolean",
+        "description": [
+          "whether or not the peer sent us their signatures for this splice"
+        ]
+      }
+    }
+  },
+  "usage": [
+    "Here is an example way to call `splice_update`",
+    "",
+    "```shell",
+    "RESULT={\"commitments_secured\":false}",
+    "while [[ $(echo $RESULT | jq -r \".commitments_secured\") == \"false\" ]]",
+    "do",
+    "  RESULT=$(lightning-cli splice_update $CHANNEL_ID $PSBT)",
+    "  PSBT=$(echo $RESULT | jq -r \".psbt\")",
+    "  echo $RESULT",
+    "done",
+    "```",
+    "",
+    "Before each call to `splice_update` you have the opportunity to make additional changes.",
+    "",
+    "Here is an example set of splice commands that will splice in 100,000 sats to the first channel that comes out of `listpeerchannels`.",
+    "",
+    "The example assumes you already have at least one confirmed channel.",
+    "",
+    "1: Get the channel id of the first channel.",
+    "",
+    "```shell",
+    "CHANNEL_ID=$(echo $(lightning-cli listpeerchannels) | jq -r \".channels[0].channel_id\")",
+    "```",
+    "2: Get the PSBT from fundpsbt.",
+    "",
+    "```shell",
+    "INITIALPSBT=$(echo $(lightning-cli fundpsbt -k satoshi=100000sat feerate=urgent startweight=800 excess_as_change=true) | jq -r \".psbt\")",
+    "```",
+    "3: Initiate the splice by passing channel id and initialpsbt received from above steps.",
+    "",
+    "```shell",
+    "PSBT_SPLICE_INIT=$(echo $(lightning-cli splice_init $CHANNEL_ID 100000 $INITIALPSBT) | jq -r \".psbt\")",
+    "```",
+    "4: Update PSBTs with the splice_update command.",
+    "",
+    "```shell",
+    "RESULT={\"commitments_secured\":false}",
+    "while [[ $(echo $RESULT | jq -r \".commitments_secured\") == \"false\" ]]",
+    "do",
+    "  PSBT_SPLICE_UPDATE=$(echo $(lightning-cli splice_update $CHANNEL_ID $PSBT_SPLICE_INIT) | jq -r \".psbt\")",
+    "  echo $PSBT_SPLICE_UPDATE",
+    "done",
+    "```",
+    "5: Sign the updated PSBT.",
+    "",
+    "```shell",
+    "SIGNPSBT=$(echo $(lightning-cli signpsbt -k psbt=\"$PSBT_SPLICE_UPDATE\") | jq -r \".signed_psbt\")",
+    "```",
+    "6: Finally, call splice_signed with channel id and signed PSBT parameters.",
+    "",
+    "```shell",
+    "lightning-cli splice_signed $CHANNEL_ID $SIGNPSBT",
+    "```"
+  ],
+  "author": [
+    "Dusty [@dusty_daemon](mailto:@dustydaemon) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-splice_init(7)",
+    "lightning-splice_signed(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:splice_update#1",
+        "method": "splice_update",
+        "params": {
+          "channel_id": "7737aa5fa943152b8c5ae46c8a6c471456ba9d598c53821ee1e586753d57fe6d",
+          "psbt": "cHNidP8BALICAAAAAnc3ql+pQxUrjFrkbIpsRxRWup1ZjFOCHuHlhnU9V/5tAQAAAAD9////dzeqX6lDFSuMWuRsimxHFFa6nVmMU4Ie4eWGdT1X/m0AAAAAAAAAAAAC53wNAAAAAAAiUSBSlWiKI9gVGI7BmbKZhJvgs9f/L1o2mk1e06hLnBF1D+DIEAAAAAAAIgAgqdI3gfzTiGpT2bmHiitPQzF8GB+fat5EifoGEmTvGC+dAAAAAAEAiQIAAAABw46UB0D3+pgGYf57Ommcpgbs1bV8lq6drRu+zNV9EBEAAAAAAP3///8CQEIPAAAAAAAiACCp0jeB/NOIalPZuYeKK09DMXwYH59q3kSJ+gYSZO8YLwEvDwAAAAAAIlEg5++fCJM+KMbzMV9c1/CDlmyUog/5snqNKQtytowuwYyXAAAAAQErAS8PAAAAAAAiUSDn758Ikz4oxvMxX1zX8IOWbJSiD/myeo0pC3K2jC7BjAz8CWxpZ2h0bmluZwEIM8sVaI7bmqIAAQCJAgAAAAHDjpQHQPf6mAZh/ns6aZymBuzVtXyWrp2tG77M1X0QEQAAAAAA/f///wJAQg8AAAAAACIAIKnSN4H804hqU9m5h4orT0MxfBgfn2reRIn6BhJk7xgvAS8PAAAAAAAiUSDn758Ikz4oxvMxX1zX8IOWbJSiD/myeo0pC3K2jC7BjJcAAAABAStAQg8AAAAAACIAIKnSN4H804hqU9m5h4orT0MxfBgfn2reRIn6BhJk7xgvAQVHUiECftsxE95eqr16K2AKx2GxD09ZsKkB3zYU8n+arz/NPSAhAp0X2rEQ84XTUiTDsBR3Xjwsxlzwuj37R6pxuhLNXIESUq4M/AlsaWdodG5pbmcBCDXLFWiO25qiAAz8CWxpZ2h0bmluZwEIN8sVaI7bmqIADPwJbGlnaHRuaW5nAQg5yxVojtuaogA="
+        }
+      },
+      "response": {
+        "psbt": "cHNidP8BALICAAAAAnc3ql+pQxUrjFrkbIpsRxRWup1ZjFOCHuHlhnU9V/5tAQAAAAD9////dzeqX6lDFSuMWuRsimxHFFa6nVmMU4Ie4eWGdT1X/m0AAAAAAAAAAAAC53wNAAAAAAAiUSBSlWiKI9gVGI7BmbKZhJvgs9f/L1o2mk1e06hLnBF1D+DIEAAAAAAAIgAgqdI3gfzTiGpT2bmHiitPQzF8GB+fat5EifoGEmTvGC+dAAAAAAEAiQIAAAABw46UB0D3+pgGYf57Ommcpgbs1bV8lq6drRu+zNV9EBEAAAAAAP3///8CQEIPAAAAAAAiACCp0jeB/NOIalPZuYeKK09DMXwYH59q3kSJ+gYSZO8YLwEvDwAAAAAAIlEg5++fCJM+KMbzMV9c1/CDlmyUog/5snqNKQtytowuwYyXAAAAAQErAS8PAAAAAAAiUSDn758Ikz4oxvMxX1zX8IOWbJSiD/myeo0pC3K2jC7BjAz8CWxpZ2h0bmluZwEIM8sVaI7bmqIAAQCJAgAAAAHDjpQHQPf6mAZh/ns6aZymBuzVtXyWrp2tG77M1X0QEQAAAAAA/f///wJAQg8AAAAAACIAIKnSN4H804hqU9m5h4orT0MxfBgfn2reRIn6BhJk7xgvAS8PAAAAAAAiUSDn758Ikz4oxvMxX1zX8IOWbJSiD/myeo0pC3K2jC7BjJcAAAABAStAQg8AAAAAACIAIKnSN4H804hqU9m5h4orT0MxfBgfn2reRIn6BhJk7xgvIgICftsxE95eqr16K2AKx2GxD09ZsKkB3zYU8n+arz/NPSBHMEQCIASzsNrFtZdWNkRf1pNT+uLypRbZSv+V9uxZ7om4+TLfAiA7gzUz3et9AoXu3wH15mCAdLQOL6pVDnaRGpWoYXqynwEiAgKdF9qxEPOF01Ikw7AUd148LMZc8Lo9+0eqcboSzVyBEkcwRAIgZly44GjlbjEIxC78SjacPBqtNA0AvyaKuqFglxbBjaACIBeSP/Dx9ZnlGa69dKq/wSlXUkCyiYegBWLCIGAV9YUdAQEDBAEAAAABBUdSIQJ+2zET3l6qvXorYArHYbEPT1mwqQHfNhTyf5qvP809ICECnRfasRDzhdNSJMOwFHdePCzGXPC6PftHqnG6Es1cgRJSrgz8CWxpZ2h0bmluZwEINcsVaI7bmqIADPwJbGlnaHRuaW5nAQg3yxVojtuaogAM/AlsaWdodG5pbmcBCDnLFWiO25qiAA==",
+        "commitments_secured": true,
+        "signatures_secured": true
+      }
+    },
+    {
+      "request": {
+        "id": "example:splice_update#2",
+        "method": "splice_update",
+        "params": [
+          "7737aa5fa943152b8c5ae46c8a6c471456ba9d598c53821ee1e586753d57fe6d",
+          "cHNidP8BAgQCAAAAAQMEngAAAAEEAQEBBQECAQYBAwH7BAIAAAAAAQCyAgAAAAJ3N6pfqUMVK4xa5GyKbEcUVrqdWYxTgh7h5YZ1PVf+bQEAAAAA/f///3c3ql+pQxUrjFrkbIpsRxRWup1ZjFOCHuHlhnU9V/5tAAAAAAAAAAAAAud8DQAAAAAAIlEgUpVoiiPYFRiOwZmymYSb4LPX/y9aNppNXtOoS5wRdQ/gyBAAAAAAACIAIKnSN4H804hqU9m5h4orT0MxfBgfn2reRIn6BhJk7xgvnQAAAAEBK+DIEAAAAAAAIgAgqdI3gfzTiGpT2bmHiitPQzF8GB+fat5EifoGEmTvGC8BBUdSIQJ+2zET3l6qvXorYArHYbEPT1mwqQHfNhTyf5qvP809ICECnRfasRDzhdNSJMOwFHdePCzGXPC6PftHqnG6Es1cgRJSrgEOIKw2UAUkiToXFrPANl1/5EBUGdF5FS2UxoFciYSyDkY3AQ8EAQAAAAEQBAAAAAAM/AlsaWdodG5pbmcBCDvLFWiO25qiAAEDCKCGAQAAAAAAAQQiUSATyov16hoWIyHtO+w9+tKb+t2b831zz+Kz5snDlJsjcQz8CWxpZ2h0bmluZwEIPcsVaI7bmqIAAQMIMBsPAAAAAAABBCIAIKnSN4H804hqU9m5h4orT0MxfBgfn2reRIn6BhJk7xgvDPwJbGlnaHRuaW5nAQg/yxVojtuaogA="
+        ]
+      },
+      "response": {
+        "psbt": "cHNidP8BAgQCAAAAAQMEngAAAAEEAQEBBQECAQYBAwH7BAIAAAAAAQCyAgAAAAJ3N6pfqUMVK4xa5GyKbEcUVrqdWYxTgh7h5YZ1PVf+bQEAAAAA/f///3c3ql+pQxUrjFrkbIpsRxRWup1ZjFOCHuHlhnU9V/5tAAAAAAAAAAAAAud8DQAAAAAAIlEgUpVoiiPYFRiOwZmymYSb4LPX/y9aNppNXtOoS5wRdQ/gyBAAAAAAACIAIKnSN4H804hqU9m5h4orT0MxfBgfn2reRIn6BhJk7xgvnQAAAAEBK+DIEAAAAAAAIgAgqdI3gfzTiGpT2bmHiitPQzF8GB+fat5EifoGEmTvGC8iAgJ+2zET3l6qvXorYArHYbEPT1mwqQHfNhTyf5qvP809IEcwRAIgZyoSSrD4n69ygFlLef/PlCQYZRpcP7El8K4EdRdIPwsCIEuYRvxjoEdSHJd7DtCVfWD5HTIBnNMjlKXTiS+IvBCjASICAp0X2rEQ84XTUiTDsBR3Xjwsxlzwuj37R6pxuhLNXIESRzBEAiBHCVZUCHg8oiV5Nbn8NC9nKdfeM2rB5ge69EkA8ImMygIgCV8Ax/3vA2q8Sw2foXfK9v0Bc/drgdS/Zhb7SDyiBf0BAQMEAQAAAAEFR1IhAn7bMRPeXqq9eitgCsdhsQ9PWbCpAd82FPJ/mq8/zT0gIQKdF9qxEPOF01Ikw7AUd148LMZc8Lo9+0eqcboSzVyBElKuAQ4grDZQBSSJOhcWs8A2XX/kQFQZ0XkVLZTGgVyJhLIORjcBDwQBAAAAARAEAAAAAAz8CWxpZ2h0bmluZwEIO8sVaI7bmqIAAQMIoIYBAAAAAAABBCJRIBPKi/XqGhYjIe077D360pv63ZvzfXPP4rPmycOUmyNxDPwJbGlnaHRuaW5nAQg9yxVojtuaogABAwgwGw8AAAAAAAEEIgAgqdI3gfzTiGpT2bmHiitPQzF8GB+fat5EifoGEmTvGC8M/AlsaWdodG5pbmcBCD/LFWiO25qiAA==",
+        "commitments_secured": true,
+        "signatures_secured": true
+      }
+    }
+  ]
+}

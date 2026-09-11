@@ -1,0 +1,107 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "help",
+  "title": "Command to return all information about RPC commands.",
+  "description": [
+    "The **help** is a RPC command which is possible consult all information about the RPC commands, or a specific command if *command* is given.",
+    "",
+    "Note that the lightning-cli(1) tool will prefer to list a man page when a specific *command* is specified, and will only return the JSON if the man page is not found."
+  ],
+  "request": {
+    "required": [],
+    "additionalProperties": false,
+    "properties": {
+      "command": {
+        "type": "string",
+        "description": [
+          "Command to get information about."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "help",
+      "format-hint"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "help": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "command"
+          ],
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": [
+                "The command."
+              ]
+            }
+          }
+        }
+      },
+      "format-hint": {
+        "type": "string",
+        "enum": [
+          "simple"
+        ],
+        "description": [
+          "Prints the help in human-readable flat form."
+        ]
+      }
+    }
+  },
+  "errors": [
+    "On failure, one of the following error codes may be returned:",
+    "",
+    "- -32602: Error in given parameters."
+  ],
+  "author": [
+    "Vincenzo Palazzo [vincenzo.palazzo@protonmail.com](mailto:vincenzo.palazzo@protonmail.com) wrote the initial version of this man page,",
+    "but many others did the hard work of actually implementing this rpc command."
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:help#1",
+        "method": "help",
+        "params": {
+          "command": "pay"
+        }
+      },
+      "response": {
+        "help": [
+          {
+            "command": "pay invstring [amount_msat] [label] [riskfactor] [maxfeepercent] [retry_for] [maxdelay] [exemptfee] [localinvreqid] [exclude] [maxfee] [description] [partial_msat] [dev_use_shadow]"
+          }
+        ],
+        "format-hint": "simple"
+      }
+    },
+    {
+      "request": {
+        "id": "example:help#2",
+        "method": "help",
+        "params": {
+          "command": "dev"
+        }
+      },
+      "response": {
+        "help": [
+          {
+            "command": "dev subcommand=crash|rhash|slowcmd"
+          }
+        ],
+        "format-hint": "simple"
+      }
+    }
+  ]
+}

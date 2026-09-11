@@ -1,0 +1,51 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "stop",
+  "title": "Command to shutdown the Core Lightning node.",
+  "description": [
+    "The **stop** is a RPC command to shut off the Core Lightning node."
+  ],
+  "request": {
+    "required": [],
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "response": {
+    "required": [
+      "result"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "result": {
+        "type": "string",
+        "added": "v24.05",
+        "enum": [
+          "Shutdown complete"
+        ]
+      }
+    }
+  },
+  "author": [
+    "Vincenzo Palazzo [vincenzo.palazzo@protonmail.com](mailto:vincenzo.palazzo@protonmail.com) wrote the initial version of this man page,",
+    "but many others did the hard work of actually implementing this rpc command."
+  ],
+  "see_also": [
+    "lightning-graceful(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:stop#1",
+        "method": "stop",
+        "params": {}
+      },
+      "response": {
+        "result": "Shutdown complete"
+      }
+    }
+  ]
+}

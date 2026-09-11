@@ -1,0 +1,230 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "createinvoice",
+  "title": "Low-level invoice creation",
+  "description": [
+    "The **createinvoice** RPC command signs and saves an invoice into the database."
+  ],
+  "request": {
+    "required": [
+      "invstring",
+      "label",
+      "preimage"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "invstring": {
+        "type": "string",
+        "description": [
+          "The bolt11/bolt12 invoice, but the final signature is ignored. Minimal sanity checks are done."
+        ]
+      },
+      "label": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          }
+        ],
+        "description": [
+          "A unique string or number (which is treated as a string, so `01` is different from `1`); it is never revealed to other nodes on the lightning network, but it can be used to query the status of this invoice."
+        ]
+      },
+      "preimage": {
+        "type": "hex",
+        "description": [
+          "The preimage to supply upon successful payment of the invoice."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "label",
+      "created_index",
+      "payment_hash",
+      "status",
+      "expires_at"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "label": {
+        "type": "string",
+        "description": [
+          "The label for the invoice."
+        ]
+      },
+      "bolt11": {
+        "type": "string",
+        "description": [
+          "The bolt11 string (always present unless **bolt12** is)."
+        ]
+      },
+      "bolt12": {
+        "type": "string",
+        "description": [
+          "The bolt12 string instead of **bolt11**"
+        ]
+      },
+      "payment_hash": {
+        "type": "hash",
+        "description": [
+          "The hash of the *payment_preimage* which will prove payment."
+        ]
+      },
+      "amount_msat": {
+        "type": "msat",
+        "description": [
+          "The amount of the invoice (if it has one)."
+        ]
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "paid",
+          "expired",
+          "unpaid"
+        ],
+        "description": [
+          "Whether it has been paid, or can no longer be paid."
+        ]
+      },
+      "description": {
+        "type": "string",
+        "description": [
+          "Description extracted from **bolt11** or **bolt12**."
+        ]
+      },
+      "expires_at": {
+        "type": "u64",
+        "description": [
+          "UNIX timestamp of when invoice expires (or expired)."
+        ]
+      },
+      "created_index": {
+        "type": "u64",
+        "added": "v23.08",
+        "description": [
+          "1-based index indicating order this invoice was created in."
+        ]
+      },
+      "pay_index": {
+        "type": "u64",
+        "description": [
+          "Incrementing id for when this was paid (**status** *paid* only)."
+        ]
+      },
+      "amount_received_msat": {
+        "type": "msat",
+        "description": [
+          "Amount actually received (**status** *paid* only)."
+        ]
+      },
+      "paid_at": {
+        "type": "u64",
+        "description": [
+          "UNIX timestamp of when invoice was paid (**status** *paid* only)."
+        ]
+      },
+      "paid_outpoint": {
+        "type": "object",
+        "description": [
+          "Outpoint this invoice was paid with (**status** *paid* only)."
+        ],
+        "added": "v23.11",
+        "additionalProperties": false,
+        "required": [
+          "txid",
+          "outnum"
+        ],
+        "properties": {
+          "txid": {
+            "added": "v23.11",
+            "type": "txid",
+            "description": [
+              "ID of the transaction that paid the invoice (**status** *paid* only)."
+            ]
+          },
+          "outnum": {
+            "added": "v23.11",
+            "type": "u32",
+            "description": [
+              "The 0-based output number of the transaction that paid the invoice (**status** *paid* only)."
+            ]
+          }
+        }
+      },
+      "payment_preimage": {
+        "type": "secret",
+        "description": [
+          "The proof of payment: SHA256 of this **payment_hash**."
+        ]
+      },
+      "local_offer_id": {
+        "type": "hex",
+        "description": [
+          "The *id* of our offer which created this invoice."
+        ],
+        "maxLength": 64,
+        "minLength": 64
+      },
+      "invreq_payer_note": {
+        "type": "string",
+        "description": [
+          "The optional *invreq_payer_note* from invoice_request which created this invoice."
+        ]
+      }
+    },
+    "pre_return_value_notes": [
+      "(Note: the return format is the same as lightning-listinvoices(7))."
+    ]
+  },
+  "errors": [
+    "On failure, an error is returned and no invoice is created. If the lightning process fails before responding, the caller should use lightning-listinvoices(7) to query whether this invoice was created or not.",
+    "",
+    "The following error codes may occur:",
+    "",
+    "- -1: Catchall nonspecific error.",
+    "- 900: An invoice with the given *label* already exists."
+  ],
+  "author": [
+    "Rusty Russell [rusty@rustcorp.com.au](mailto:rusty@rustcorp.com.au) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-invoice(7)",
+    "lightning-listinvoices(7)",
+    "lightning-delinvoice(7)",
+    "lightning-getroute(7)",
+    "lightning-sendpay(7)",
+    "lightning-offer(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:createinvoice#1",
+        "method": "createinvoice",
+        "params": {
+          "invstring": "lnbcrt1u1pne035qsp5j9w8t9p2y6an5se63n3vkpp8c20vdsthtn78sv5t2lmt57l742wqpp5wtxkappzcsrlkmgfs6g0zyct0hkhashh7hsaxz7e65slq9fkx7fsdqcdscnxgryv4ekxunfwp6xjmmwxqyjw5qcqp9rzjqvuytqpdyk6wqaxvl47d3vee5swuwklej79qxjqqg394r4ptqaue5qqqwsqqqqgqqyqqqqqpqqqqqzsqqc9qxpqysgq5lem7pan063777cxw3grnc0wk0g8fc9ae9f5megyh532caqsc3cjh2ggl79dkq5ltzwcs930gwznt94alnwwnmsum2d7ewq0xye9ymspes6h5h",
+          "label": "lbl_l13",
+          "preimage": "0101010101010101010101010101010101010101010101010101010101010101"
+        }
+      },
+      "response": {
+        "label": "lbl_l13",
+        "bolt11": "lnbcrt1u1pne035qsp5j9w8t9p2y6an5se63n3vkpp8c20vdsthtn78sv5t2lmt57l742wqpp5wtxkappzcsrlkmgfs6g0zyct0hkhashh7hsaxz7e65slq9fkx7fsdqcdscnxgryv4ekxunfwp6xjmmwxqyjw5qcqp9rzjqvuytqpdyk6wqaxvl47d3vee5swuwklej79qxjqqg394r4ptqaue5qqqwsqqqqgqqyqqqqqpqqqqqzsqqc9qxpqysgqqaemjv2lvc6zfl6zjt320drsvqx2g2ewlcv6cja38vzqwd45vy7y4w2u2wxxydtukl4uplukq7a70q638r6nv32c2j0jdw8clf5k2gsp32pee4",
+        "payment_hash": "72cd6e8422c407fb6d098690f1130b7ded7ec2f7f5e1d30bd9d521f015363793",
+        "amount_msat": 100000,
+        "status": "unpaid",
+        "description": "l13 description",
+        "expires_at": 1738604800,
+        "created_index": 7
+      }
+    }
+  ]
+}

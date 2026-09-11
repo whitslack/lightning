@@ -1,0 +1,813 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "added": "v23.08",
+  "rpc": "wait",
+  "title": "Command to wait for creations, changes and deletions",
+  "description": [
+    "The **wait** RPC command returns once the index given by *indexname* in *subsystem* reaches or exceeds *nextvalue*. All indexes start at 0, when no events have happened (**wait** with a *nextvalue* of 0 is a way of getting the current index, though naturally this is racy!)."
+  ],
+  "request": {
+    "required": [
+      "subsystem",
+      "indexname",
+      "nextvalue"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "subsystem": {
+        "type": "string",
+        "description": [
+          "The subsystem to get the next index value from.",
+          "  `invoices`: corresponding to `listinvoices` (added in *v23.08*).",
+          "  `sendpays`: corresponding to `listsendpays` (added in *v23.11*).",
+          "  `forwards`: corresponding to `listforwards` (added in *v23.11*).",
+          "  `htlcs`: corresponding to `listhtlcs` (added in *v25.05*).",
+          "  `chainmoves`: corresponding to `listchainmoves` (added in *v25.09*).",
+          "  `channelmoves`: corresponding to `listchannelmoves` (added in *v25.09*).",
+          "  `networkevents`: corresponding to `listnetworkevents` (added in *v25.12*)."
+        ],
+        "enum": [
+          "invoices",
+          "forwards",
+          "sendpays",
+          "htlcs",
+          "chainmoves",
+          "channelmoves",
+          "networkevents"
+        ]
+      },
+      "indexname": {
+        "type": "string",
+        "description": [
+          "The name of the index to get the next value for.",
+          "  `created` is incremented by one for every new object.",
+          "  `updated` is incremented by one every time an object is changed.",
+          "  `deleted` is incremented by one every time an object is deleted."
+        ],
+        "enum": [
+          "created",
+          "updated",
+          "deleted"
+        ]
+      },
+      "nextvalue": {
+        "type": "u64",
+        "description": [
+          "The next value of the index."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "subsystem"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "subsystem": {
+        "type": "string",
+        "enum": [
+          "invoices",
+          "forwards",
+          "sendpays",
+          "htlcs",
+          "chainmoves",
+          "channelmoves",
+          "networkevents"
+        ]
+      },
+      "created": {
+        "type": "u64",
+        "description": [
+          "1-based index indicating order entry was created."
+        ]
+      },
+      "updated": {
+        "type": "u64",
+        "description": [
+          "1-based index indicating order entry was updated."
+        ]
+      },
+      "deleted": {
+        "type": "u64",
+        "description": [
+          "1-based index indicating order entry was deleted."
+        ]
+      },
+      "forwards": {},
+      "invoices": {},
+      "sendpays": {},
+      "htlcs": {},
+      "chainmoves": {},
+      "channelmoves": {},
+      "networkevents": {},
+      "details": {}
+    },
+    "allOf": [
+      {
+        "if": {
+          "additionalProperties": true,
+          "properties": {
+            "subsystem": {
+              "type": "string",
+              "enum": [
+                "invoices"
+              ]
+            }
+          }
+        },
+        "then": {
+          "additionalProperties": false,
+          "properties": {
+            "subsystem": {},
+            "created": {},
+            "updated": {},
+            "deleted": {},
+            "details": {
+              "type": "object",
+              "additionalProperties": false,
+              "deprecated": [
+                "v25.05",
+                "v26.06"
+              ],
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "unpaid",
+                    "paid",
+                    "expired"
+                  ],
+                  "description": [
+                    "Whether it's paid, unpaid or unpayable."
+                  ]
+                },
+                "label": {
+                  "type": "string",
+                  "description": [
+                    "Unique label supplied at invoice creation."
+                  ]
+                },
+                "description": {
+                  "type": "string",
+                  "description": [
+                    "Description used in the invoice."
+                  ]
+                },
+                "bolt11": {
+                  "type": "string",
+                  "description": [
+                    "The BOLT11 string."
+                  ]
+                },
+                "bolt12": {
+                  "type": "string",
+                  "description": [
+                    "The BOLT12 string."
+                  ]
+                }
+              }
+            },
+            "invoices": {
+              "type": "object",
+              "added": "v25.05",
+              "additionalProperties": false,
+              "properties": {
+                "status": {
+                  "added": "v25.05",
+                  "type": "string",
+                  "enum": [
+                    "unpaid",
+                    "paid",
+                    "expired"
+                  ],
+                  "description": [
+                    "Whether it's paid, unpaid or unpayable."
+                  ]
+                },
+                "label": {
+                  "added": "v25.05",
+                  "type": "string",
+                  "description": [
+                    "Unique label supplied at invoice creation."
+                  ]
+                },
+                "description": {
+                  "added": "v25.05",
+                  "type": "string",
+                  "description": [
+                    "Description used in the invoice."
+                  ]
+                },
+                "bolt11": {
+                  "added": "v25.05",
+                  "type": "string",
+                  "description": [
+                    "The BOLT11 string."
+                  ]
+                },
+                "bolt12": {
+                  "added": "v25.05",
+                  "type": "string",
+                  "description": [
+                    "The BOLT12 string."
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "additionalProperties": true,
+          "properties": {
+            "subsystem": {
+              "type": "string",
+              "enum": [
+                "forwards"
+              ]
+            }
+          }
+        },
+        "then": {
+          "additionalProperties": false,
+          "properties": {
+            "subsystem": {},
+            "created": {},
+            "updated": {},
+            "deleted": {},
+            "details": {
+              "type": "object",
+              "additionalProperties": false,
+              "deprecated": [
+                "v25.05",
+                "v26.06"
+              ],
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "offered",
+                    "settled",
+                    "failed",
+                    "local_failed"
+                  ],
+                  "description": [
+                    "Still ongoing, completed, failed locally, or failed after forwarding."
+                  ]
+                },
+                "in_channel": {
+                  "type": "short_channel_id",
+                  "description": [
+                    "Unique label supplied at invoice creation."
+                  ]
+                },
+                "in_htlc_id": {
+                  "type": "u64",
+                  "description": [
+                    "The unique HTLC id the sender gave this (not present if incoming channel was closed before upgrade to v22.11)."
+                  ]
+                },
+                "in_msat": {
+                  "type": "msat",
+                  "description": [
+                    "The value of the incoming HTLC."
+                  ]
+                },
+                "out_channel": {
+                  "type": "short_channel_id",
+                  "description": [
+                    "The channel that the HTLC (trying to) forward to."
+                  ]
+                }
+              }
+            },
+            "forwards": {
+              "added": "v25.05",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "status": {
+                  "added": "v25.05",
+                  "type": "string",
+                  "enum": [
+                    "offered",
+                    "settled",
+                    "failed",
+                    "local_failed"
+                  ],
+                  "description": [
+                    "Still ongoing, completed, failed locally, or failed after forwarding."
+                  ]
+                },
+                "in_channel": {
+                  "added": "v25.05",
+                  "type": "short_channel_id",
+                  "description": [
+                    "Unique label supplied at invoice creation."
+                  ]
+                },
+                "in_htlc_id": {
+                  "added": "v25.05",
+                  "type": "u64",
+                  "description": [
+                    "The unique HTLC id the sender gave this (not present if incoming channel was closed before upgrade to v22.11)."
+                  ]
+                },
+                "in_msat": {
+                  "added": "v25.05",
+                  "type": "msat",
+                  "description": [
+                    "The value of the incoming HTLC."
+                  ]
+                },
+                "out_channel": {
+                  "added": "v25.05",
+                  "type": "short_channel_id",
+                  "description": [
+                    "The channel that the HTLC (trying to) forward to."
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "additionalProperties": true,
+          "properties": {
+            "subsystem": {
+              "type": "string",
+              "enum": [
+                "sendpays"
+              ]
+            }
+          }
+        },
+        "then": {
+          "additionalProperties": false,
+          "properties": {
+            "subsystem": {},
+            "created": {},
+            "updated": {},
+            "deleted": {},
+            "details": {
+              "type": "object",
+              "additionalProperties": false,
+              "deprecated": [
+                "v25.05",
+                "v26.06"
+              ],
+              "properties": {
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "failed",
+                    "complete"
+                  ],
+                  "description": [
+                    "Status of the payment."
+                  ]
+                },
+                "partid": {
+                  "type": "u64",
+                  "description": [
+                    "Part number (for multiple parts to a single payment)."
+                  ]
+                },
+                "groupid": {
+                  "type": "u64",
+                  "description": [
+                    "Grouping key to disambiguate multiple attempts to pay an invoice or the same payment_hash."
+                  ]
+                },
+                "payment_hash": {
+                  "type": "hash",
+                  "description": [
+                    "The hash of the *payment_preimage* which will prove payment."
+                  ]
+                }
+              }
+            },
+            "sendpays": {
+              "type": "object",
+              "added": "v25.05",
+              "additionalProperties": false,
+              "properties": {
+                "status": {
+                  "added": "v25.05",
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "failed",
+                    "complete"
+                  ],
+                  "description": [
+                    "Status of the payment."
+                  ]
+                },
+                "partid": {
+                  "added": "v25.05",
+                  "type": "u64",
+                  "description": [
+                    "Part number (for multiple parts to a single payment)."
+                  ]
+                },
+                "groupid": {
+                  "added": "v25.05",
+                  "type": "u64",
+                  "description": [
+                    "Grouping key to disambiguate multiple attempts to pay an invoice or the same payment_hash."
+                  ]
+                },
+                "payment_hash": {
+                  "added": "v25.05",
+                  "type": "hash",
+                  "description": [
+                    "The hash of the *payment_preimage* which will prove payment."
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "additionalProperties": true,
+          "properties": {
+            "subsystem": {
+              "type": "string",
+              "enum": [
+                "htlcs"
+              ]
+            }
+          }
+        },
+        "then": {
+          "additionalProperties": false,
+          "properties": {
+            "subsystem": {},
+            "created": {},
+            "updated": {},
+            "deleted": {},
+            "htlcs": {
+              "added": "v25.05",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "SENT_ADD_HTLC",
+                    "SENT_ADD_COMMIT",
+                    "RCVD_ADD_REVOCATION",
+                    "RCVD_ADD_ACK_COMMIT",
+                    "SENT_ADD_ACK_REVOCATION",
+                    "RCVD_REMOVE_HTLC",
+                    "RCVD_REMOVE_COMMIT",
+                    "SENT_REMOVE_REVOCATION",
+                    "SENT_REMOVE_ACK_COMMIT",
+                    "RCVD_REMOVE_ACK_REVOCATION",
+                    "RCVD_ADD_HTLC",
+                    "RCVD_ADD_COMMIT",
+                    "SENT_ADD_REVOCATION",
+                    "SENT_ADD_ACK_COMMIT",
+                    "RCVD_ADD_ACK_REVOCATION",
+                    "SENT_REMOVE_HTLC",
+                    "SENT_REMOVE_COMMIT",
+                    "RCVD_REMOVE_REVOCATION",
+                    "RCVD_REMOVE_ACK_COMMIT",
+                    "SENT_REMOVE_ACK_REVOCATION"
+                  ],
+                  "added": "v25.05",
+                  "description": [
+                    "The first 10 states are for `out`, the next 10 are for `in`."
+                  ]
+                },
+                "htlc_id": {
+                  "added": "v25.05",
+                  "type": "u64",
+                  "description": [
+                    "The `id` field which uniquely identifies this HTLC for this channel and direction."
+                  ]
+                },
+                "short_channel_id": {
+                  "added": "v25.05",
+                  "type": "short_channel_id",
+                  "description": [
+                    "The channel that contains/contained the HTLC."
+                  ]
+                },
+                "cltv_expiry": {
+                  "added": "v25.05",
+                  "type": "u32",
+                  "description": [
+                    "The block number where this HTLC expires/expired."
+                  ]
+                },
+                "amount_msat": {
+                  "type": "msat",
+                  "added": "v25.05",
+                  "description": [
+                    "The value of the HTLC."
+                  ]
+                },
+                "direction": {
+                  "type": "string",
+                  "added": "v25.05",
+                  "enum": [
+                    "out",
+                    "in"
+                  ],
+                  "description": [
+                    "Out if we offered this to the peer, in if they offered it."
+                  ]
+                },
+                "payment_hash": {
+                  "added": "v25.05",
+                  "type": "hash",
+                  "description": [
+                    "Payment hash sought by HTLC."
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "additionalProperties": true,
+          "properties": {
+            "subsystem": {
+              "type": "string",
+              "enum": [
+                "chainmoves"
+              ]
+            }
+          }
+        },
+        "then": {
+          "additionalProperties": false,
+          "properties": {
+            "subsystem": {},
+            "created": {},
+            "updated": {},
+            "deleted": {},
+            "channelmoves": {},
+            "chainmoves": {
+              "added": "v25.09",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "account",
+                "credit_msat",
+                "debit_msat"
+              ],
+              "properties": {
+                "account": {
+                  "added": "v25.09",
+                  "type": "string",
+                  "description": [
+                    "The account (e.g. channel id) associated with this movement."
+                  ]
+                },
+                "credit_msat": {
+                  "added": "v25.09",
+                  "type": "msat",
+                  "description": [
+                    "The amount incoming"
+                  ]
+                },
+                "debit_msat": {
+                  "added": "v25.09",
+                  "type": "msat",
+                  "description": [
+                    "The amount outgoing"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "additionalProperties": true,
+          "properties": {
+            "subsystem": {
+              "type": "string",
+              "enum": [
+                "channelmoves"
+              ]
+            }
+          }
+        },
+        "then": {
+          "additionalProperties": false,
+          "properties": {
+            "subsystem": {},
+            "created": {},
+            "updated": {},
+            "deleted": {},
+            "chainmoves": {},
+            "channelmoves": {
+              "added": "v25.09",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "account",
+                "credit_msat",
+                "debit_msat"
+              ],
+              "properties": {
+                "account": {
+                  "added": "v25.09",
+                  "type": "string",
+                  "description": [
+                    "The account (e.g. channel id) associated with this movement."
+                  ]
+                },
+                "credit_msat": {
+                  "added": "v25.09",
+                  "type": "msat",
+                  "description": [
+                    "The amount incoming"
+                  ]
+                },
+                "debit_msat": {
+                  "added": "v25.09",
+                  "type": "msat",
+                  "description": [
+                    "The amount outgoing"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "if": {
+          "additionalProperties": true,
+          "properties": {
+            "subsystem": {
+              "type": "string",
+              "enum": [
+                "networkevents"
+              ]
+            }
+          }
+        },
+        "then": {
+          "additionalProperties": false,
+          "properties": {
+            "subsystem": {},
+            "created": {},
+            "updated": {},
+            "deleted": {},
+            "networkevents": {
+              "added": "v25.12",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "created_index": {
+                  "added": "v25.12",
+                  "type": "u64",
+                  "description": [
+                    "The created_index of the record added/deleted"
+                  ]
+                },
+                "type": {
+                  "added": "v25.12",
+                  "type": "string",
+                  "enum": [
+                    "connect",
+                    "connect_fail",
+                    "ping",
+                    "disconnect"
+                  ],
+                  "description": [
+                    "The kind of network event"
+                  ]
+                },
+                "peer_id": {
+                  "added": "v25.12",
+                  "type": "pubkey",
+                  "description": [
+                    "The peer this network event was with"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    ]
+  },
+  "reliability": [
+    "Indices can go forward by more than one; in particular, if multiple objects were created and the one deleted, you could see this effect (a channel closing will delete all the htlcs, for example).  You can also see if it changes happen more rapidly than you can call wait again.",
+    "",
+    "Indices only monotoncally increase."
+  ],
+  "usage": [
+    "The **wait** RPC is used to track changes in the system. Consider tracking invoices being paid or expiring.",
+    "",
+    "The simplest (and inefficient method) would be:",
+    "",
+    "1: Call `listinvoices` to get the current state of all invoices, and remember the highest `updated_index`. Say it was 5.",
+    "",
+    "2: Call `wait invoices updated 6`.",
+    "",
+    "3: When it returns, call `listinvoices` again to see what changed.",
+    "",
+    "This is obviously inefficient, so there are two optimizations:",
+    "",
+    "1: Call `listinvoices` with `index=updated` and `start=6` to only see invoices with `updated_index` greater than or equal to 6.",
+    "",
+    "2: `wait` itself may also return some limited subset of fields from the list command (it can't do this in all cases); for `invoices` this is `label` and `status`, allowing many callers to avoid the `listinvoices` call."
+  ],
+  "errors": [
+    "On error the returned object will contain `code` and `message` properties, with `code` being one of the following:",
+    "",
+    "- -32602: If the given parameters are wrong."
+  ],
+  "author": [
+    "Rusty Russell [rusty@rustcorp.com.au](mailto:rusty@rustcorp.com.au) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-listinvoices(7)",
+    "lightning-listforwards(7)",
+    "lightning-listsendpays(7)",
+    "lightning-listhtlcs(7)",
+    "lightning-listchainmoves(7)",
+    "lightning-listchannelmoves(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:wait#1",
+        "method": "wait",
+        "params": {
+          "subsystem": "invoices",
+          "indexname": "created",
+          "nextvalue": 0
+        }
+      },
+      "response": {
+        "subsystem": "invoices",
+        "created": 16
+      }
+    },
+    {
+      "request": {
+        "id": "example:wait#2",
+        "method": "wait",
+        "params": {
+          "subsystem": "sendpays",
+          "indexname": "created",
+          "nextvalue": 18
+        }
+      },
+      "response": {
+        "subsystem": "sendpays",
+        "created": 18,
+        "sendpays": {
+          "status": "pending",
+          "partid": 0,
+          "groupid": 1,
+          "payment_hash": "65fc42d3b3f31bbd55195022f72851337e8df95572e6638402e3ec429cea80fe"
+        }
+      }
+    },
+    {
+      "request": {
+        "id": "example:wait#3",
+        "method": "wait",
+        "params": [
+          "sendpays",
+          "updated",
+          18
+        ]
+      },
+      "response": {
+        "subsystem": "sendpays",
+        "updated": 18,
+        "sendpays": {
+          "status": "complete",
+          "partid": 0,
+          "groupid": 1,
+          "payment_hash": "65fc42d3b3f31bbd55195022f72851337e8df95572e6638402e3ec429cea80fe"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,370 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "askrene-create-layer",
+  "title": "Command to create a new layer",
+  "added": "v24.11",
+  "description": [
+    "The **askrene-create-layer** RPC command tells askrene to create a new, empty layer.  This layer can then be populated with `askrene-create-channel` and `askrene-inform-channel`, and be used in `getroutes`."
+  ],
+  "request": {
+    "required": [
+      "layer"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "layer": {
+        "type": "string",
+        "description": [
+          "The name of the layer to create."
+        ]
+      },
+      "persistent": {
+        "type": "boolean",
+        "default": "False",
+        "description": [
+          "True if askrene should save and restore this layer.  As a side-effect, create-layer also succeeds if the layer already exists and persistent is true."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "layers"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "layers": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "layer",
+            "persistent",
+            "disabled_nodes",
+            "created_channels",
+            "channel_updates",
+            "constraints",
+            "impressions",
+            "biases",
+            "node_biases"
+          ],
+          "properties": {
+            "layer": {
+              "type": "string",
+              "description": [
+                "The name of the layer."
+              ]
+            },
+            "persistent": {
+              "type": "boolean",
+              "description": [
+                "Whether the layer is saved/restored across restarts."
+              ]
+            },
+            "disabled_nodes": {
+              "type": "array",
+              "items": {
+                "type": "pubkey",
+                "description": [
+                  "The id of the disabled node."
+                ]
+              }
+            },
+            "disabled_channels": {
+              "type": "array",
+              "items": {
+                "type": "short_channel_id_dir",
+                "description": [
+                  "The channel and direction which is disabled."
+                ]
+              }
+            },
+            "created_channels": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "source",
+                  "destination",
+                  "short_channel_id",
+                  "capacity_msat"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "source": {
+                    "type": "pubkey",
+                    "description": [
+                      "The source node id for the channel."
+                    ]
+                  },
+                  "destination": {
+                    "type": "pubkey",
+                    "description": [
+                      "The destination node id for the channel."
+                    ]
+                  },
+                  "short_channel_id": {
+                    "type": "short_channel_id",
+                    "description": [
+                      "The short channel id for the channel."
+                    ]
+                  },
+                  "capacity_msat": {
+                    "type": "msat",
+                    "description": [
+                      "The capacity (onchain size) of the channel."
+                    ]
+                  }
+                }
+              }
+            },
+            "channel_updates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "short_channel_id_dir"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "htlc_minimum_msat": {
+                    "type": "msat",
+                    "description": [
+                      "The minimum value allowed in this direction."
+                    ]
+                  },
+                  "htlc_maximum_msat": {
+                    "type": "msat",
+                    "description": [
+                      "The maximum value allowed in this direction."
+                    ]
+                  },
+                  "fee_base_msat": {
+                    "type": "msat",
+                    "description": [
+                      "The base fee to apply to use the channel in this direction."
+                    ]
+                  },
+                  "fee_proportional_millionths": {
+                    "type": "u32",
+                    "description": [
+                      "The proportional fee (in parts per million) to apply to use the channel in this direction."
+                    ]
+                  },
+                  "delay": {
+                    "type": "u16",
+                    "description": [
+                      "The CLTV delay required for this direction."
+                    ]
+                  }
+                }
+              }
+            },
+            "constraints": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "short_channel_id",
+                  "direction"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "short_channel_id": {
+                    "type": "short_channel_id",
+                    "description": [
+                      "The short channel id."
+                    ]
+                  },
+                  "direction": {
+                    "type": "u32",
+                    "description": [
+                      "The direction."
+                    ]
+                  },
+                  "maximum_msat": {
+                    "type": "msat",
+                    "description": [
+                      "The maximum value which this channel could pass.  This or *minimum_msat* will be present, but not both."
+                    ]
+                  },
+                  "minimum_msat": {
+                    "type": "msat",
+                    "description": [
+                      "The minimum value which this channel could pass.  This or *minimum_msat* will be present, but not both."
+                    ]
+                  }
+                }
+              }
+            },
+            "impressions": {
+              "added": "v26.09",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "short_channel_id_dir",
+                  "timestamp",
+                  "amount_msat"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "short_channel_id_dir": {
+                    "type": "short_channel_id_dir",
+                    "description": [
+                      "The short channel id and direction."
+                    ]
+                  },
+                  "timestamp": {
+                    "type": "u64",
+                    "description": [
+                      "The UNIX timestamp when this impression was created."
+                    ]
+                  },
+                  "amount_msat": {
+                    "type": "msat",
+                    "description": [
+                      "The amount we successfully sent through this channel (implying its capacity is that much less, and the reverse direction that much more)"
+                    ]
+                  }
+                }
+              }
+            },
+            "biases": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "short_channel_id_dir",
+                  "bias",
+                  "timestamp"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "short_channel_id_dir": {
+                    "type": "short_channel_id_dir",
+                    "description": [
+                      "The short channel id and direction"
+                    ]
+                  },
+                  "bias": {
+                    "type": "integer",
+                    "description": [
+                      "The bias (-100 to +100)"
+                    ]
+                  },
+                  "description": {
+                    "type": "string",
+                    "description": [
+                      "Description/annotation to display in askrene-listlayers(7)"
+                    ]
+                  },
+                  "timestamp": {
+                    "type": "u64",
+                    "added": "v25.12",
+                    "description": [
+                      "The UNIX timestamp when this bias was created."
+                    ]
+                  }
+                }
+              }
+            },
+            "node_biases": {
+              "added": "v25.12",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "node",
+                  "in_bias",
+                  "out_bias",
+                  "timestamp"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "node": {
+                    "added": "v25.12",
+                    "type": "pubkey",
+                    "description": [
+                      "The id of the biased node."
+                    ]
+                  },
+                  "in_bias": {
+                    "added": "v25.12",
+                    "type": "integer",
+                    "description": [
+                      "The bias (-100 to +100) on incoming channels."
+                    ]
+                  },
+                  "out_bias": {
+                    "added": "v25.12",
+                    "type": "integer",
+                    "description": [
+                      "The bias (-100 to +100) on outgoing channels."
+                    ]
+                  },
+                  "description": {
+                    "added": "v25.12",
+                    "type": "string",
+                    "description": [
+                      "A human readable annotation."
+                    ]
+                  },
+                  "timestamp": {
+                    "added": "v25.12",
+                    "type": "u64",
+                    "description": [
+                      "The UNIX timestamp when this bias was created or last updated."
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "see_also": [
+    "lightning-askrene-remove-layer(7)",
+    "lightning-getroutes(7)",
+    "lightning-askrene-create-channel(7)",
+    "lightning-askrene-inform-channel(7)",
+    "lightning-askrene-listlayers(7)",
+    "lightning-askrene-age(7)"
+  ],
+  "author": [
+    "Rusty Russell [rusty@rustcorp.com.au](mailto:rusty@rustcorp.com.au) is mainly responsible."
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:askrene-create-layer#1",
+        "method": "askrene-create-layer",
+        "params": {
+          "layer": "test_layers"
+        }
+      },
+      "response": {
+        "layers": [
+          {
+            "layer": "test_layers",
+            "persistent": false,
+            "disabled_nodes": [],
+            "created_channels": [],
+            "channel_updates": [],
+            "constraints": [],
+            "impressions": [],
+            "biases": [],
+            "node_biases": []
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+#!/usr/bin/env bash
+
+if [ $# = 0 ]; then
+    echo 'Usage: mockup.sh <filename> [SYMBOLS...]' >&2
+    exit 1
+fi
+
+UPDIRNAME=$(dirname "$(dirname "$1")")
+shift
+
+function process_line {
+	LINE=$1
+	case "$LINE" in
+	    *undefined\ reference\ to*)
+		# file.cc:(.text+0x10): undefined reference to `foo()'
+		LINE=${LINE#*undefined reference to \`}
+		echo "${LINE%\'*}"
+		;;
+	    *undefined\ symbol:*)
+		# ld: error: undefined symbol: foo()
+		echo "${LINE#*undefined symbol: }"
+		;;
+	    *,\ referenced\ from:*)
+		# Apple clang version 11.0.3 (clang-1103.0.32.29)
+                # "_towire", referenced from:
+		LINE=${LINE#\"_}
+		echo "${LINE%\"*}"
+		;;
+	    *)
+		return
+		;;
+	esac
+}
+
+if [ $# -eq 0 ]; then
+    # With no args, read stdin to scrape compiler output.
+    # shellcheck disable=SC2046
+    set -- $(while read -r LINE; do
+	process_line "$LINE"; done | LC_ALL=C sort -u)
+fi
+
+for SYMBOL; do
+    STUB=""
+    # If there are multiple declarations, pick first (eg. common/memleak.h
+    # has notleak_ as a declaration, and then an inline).
+    # Also, prefer local headers over generic ones.
+    WHERE=$(shopt -s nullglob; grep -nH "^[a-zA-Z0-9_ (),]* [*]*$SYMBOL(" "$UPDIRNAME"/*.h "$UPDIRNAME"/../*.h ./*/*.h | head -n1)
+    if [ -z "$WHERE" ]; then
+	WHERE=$(shopt -s nullglob; grep -nH "^extern [a-zA-Z0-9_ (),]* [*]*$SYMBOL;" "$UPDIRNAME"/*.h ./*/*.h | head -n1)
+	STUB=";"
+	if [ -z "$WHERE" ]; then
+	    echo "/* Could not find declaration for $SYMBOL */"
+	    continue
+	fi
+    fi
+
+    FILE=${WHERE%%:*}
+    FILE_AND_LINE=${WHERE%:*}
+    LINE=${FILE_AND_LINE#*:}
+    END=$(tail -n "+${LINE}" < "$FILE" | grep -n ';$');
+    NUM=${END%%:*}
+
+    if [ -z "$STUB" ]; then
+	if grep -q "$SYMBOL.*mock empty" "$FILE"; then
+	    STUB="{ }"
+	else
+	    # \n on RHS is a GNU extension, and we want to work on FreeBSD
+	    # shellcheck disable=SC1004
+	    STUB='\
+{ fprintf(stderr, "'$SYMBOL' called!\\n"); abort(); }'
+	fi
+    fi
+
+    echo "/* Generated stub for $SYMBOL */"
+
+    tail -n "+${LINE}" < "$FILE" | head -n "$NUM" | $SED 's/^extern *//' | $SED 's/PRINTF_FMT([^)]*)//' | $SED 's/NON_NULL_ARGS([^)]*)//' | $SED 's/NO_NULL_ARGS//g' | $SED 's/NORETURN//g' | $SED 's/RETURNS_NONNULL//g' | $SED 's/LAST_ARG_NULL//g' | $SED 's/WARN_UNUSED_RESULT//g' | $SED 's/,/ UNNEEDED,/g' | $SED 's/\([a-z0-9A-Z*_]* [a-z0-9A-Z*_]*\));/\1 UNNEEDED);/' | $SED "s/;\$/$STUB/" | $SED 's/[[:space:]]*$//'
+done

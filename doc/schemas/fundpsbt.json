@@ -1,0 +1,253 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "fundpsbt",
+  "title": "Command to populate PSBT inputs from the wallet",
+  "description": [
+    "`fundpsbt` is a low-level RPC command which creates a PSBT using unreserved inputs in the wallet, optionally reserving them as well."
+  ],
+  "request": {
+    "required": [
+      "satoshi",
+      "feerate",
+      "startweight"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "satoshi": {
+        "type": "sat_or_all",
+        "description": [
+          "The minimum satoshi value of the output(s) needed (or the string `all` meaning use all unreserved inputs). If a value, it can be a whole number, a whole number ending in *sat*, a whole number ending in *000msat*, or a number with 1 to 8 decimal places ending in *btc*."
+        ]
+      },
+      "feerate": {
+        "type": "feerate",
+        "description": [
+          "Used for the transaction as initial feerate."
+        ],
+        "default": "*normal*"
+      },
+      "startweight": {
+        "type": "u32",
+        "description": [
+          "The weight of the transaction before *fundpsbt* has added any inputs."
+        ]
+      },
+      "minconf": {
+        "type": "u32",
+        "description": [
+          "The minimum number of confirmations that used outputs should have."
+        ],
+        "default": "1"
+      },
+      "reserve": {
+        "type": "u32",
+        "description": [
+          "If not zero, then *reserveinputs* is called (successfully, with *exclusive* true) on the returned PSBT for this number of blocks."
+        ],
+        "default": "72 blocks"
+      },
+      "locktime": {
+        "type": "u32",
+        "description": [
+          "The locktime of the transaction. if not set, it is set to a recent block height."
+        ]
+      },
+      "min_witness_weight": {
+        "type": "u32",
+        "description": [
+          "Minimum weight to use for a UTXO's witness. If the actual witness weight is greater than the provided minimum, the actual witness weight will be used."
+        ]
+      },
+      "excess_as_change": {
+        "type": "boolean",
+        "description": [
+          "Flag to add a change output for the excess sats."
+        ]
+      },
+      "nonwrapped": {
+        "added": "v23.02",
+        "type": "boolean",
+        "description": [
+          "To signal to filter out any p2sh-wrapped inputs from funding this PSBT."
+        ]
+      },
+      "opening_anchor_channel": {
+        "added": "v23.08",
+        "type": "boolean",
+        "description": [
+          "To signel that it needs emergency reserve for anchors so that we can lowball our commitment tx fees, and min-emergency-msat for reserving some sats for closing anchor channels."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "psbt",
+      "feerate_per_kw",
+      "estimated_final_weight",
+      "excess_msat"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "psbt": {
+        "type": "string",
+        "description": [
+          "Unsigned PSBT which fulfills the parameters given."
+        ]
+      },
+      "feerate_per_kw": {
+        "type": "u32",
+        "description": [
+          "The feerate used to create the PSBT, in satoshis-per-kiloweight."
+        ]
+      },
+      "estimated_final_weight": {
+        "type": "u32",
+        "description": [
+          "The estimated weight of the transaction once fully signed."
+        ]
+      },
+      "excess_msat": {
+        "type": "msat",
+        "description": [
+          "The amount above *satoshi* which is available. This could be zero, or dust; it will be zero if *change_outnum* is also returned."
+        ]
+      },
+      "change_outnum": {
+        "type": "u32",
+        "description": [
+          "The 0-based output number where change was placed (only if parameter *excess_as_change* was true and there was sufficient funds)."
+        ]
+      },
+      "reservations": {
+        "type": "array",
+        "description": [
+          "If *reserve* was true or a non-zero number, just as per lightning- reserveinputs(7)."
+        ],
+        "items": {
+          "type": "object",
+          "required": [
+            "txid",
+            "vout",
+            "was_reserved",
+            "reserved",
+            "reserved_to_block"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "txid": {
+              "type": "txid",
+              "description": [
+                "The txid of the transaction."
+              ]
+            },
+            "vout": {
+              "type": "u32",
+              "description": [
+                "The 0-based output number."
+              ]
+            },
+            "was_reserved": {
+              "type": "boolean",
+              "enum": [
+                false
+              ],
+              "description": [
+                "Whether this output was previously reserved."
+              ]
+            },
+            "reserved": {
+              "type": "boolean",
+              "enum": [
+                true
+              ],
+              "description": [
+                "Whether this output is now reserved."
+              ]
+            },
+            "reserved_to_block": {
+              "type": "u32",
+              "description": [
+                "The blockheight the reservation will expire."
+              ]
+            }
+          }
+        }
+      }
+    },
+    "post_return_value_notes": [
+      "If *excess_as_change* is true and the excess is enough to cover an additional output above the `dust_limit`, then an output is added to the PSBT for the excess amount. The *excess_msat* will be zero. A *change_outnum* will be returned with the index of the change output."
+    ]
+  },
+  "usage": [
+    "Let's assume the caller is trying to produce a 100,000 satoshi output.",
+    "",
+    "First, the caller estimates the weight of the core (typically 42) and known outputs of the transaction (typically (9 + scriptlen) * 4). For a simple P2WPKH it's a 22 byte scriptpubkey, so that's 124 weight.",
+    "",
+    "It calls \"*fundpsbt* 100000sat slow 166\", which succeeds, and returns the *psbt* and *feerate_per_kw* it used, the *estimated_final_weight* and any *excess_msat*.",
+    "",
+    "If *excess_msat* is greater than the cost of adding a change output, the caller adds a change output randomly to position 0 or 1 in the PSBT. Say *feerate_per_kw* is 253, and the change output is a P2WPKH (weight 124), the cost is around 31 sats. With the dust limit disallowing payments below 546 satoshis, we would only create a change output if *excess_msat* was greater or equal to 31 + 546."
+  ],
+  "errors": [
+    "On error the returned object will contain `code` and `message` properties, with `code` being one of the following:",
+    "",
+    "- -32602: If the given parameters are wrong.",
+    "- -1: Catchall nonspecific error.",
+    "- 301: Insufficient UTXOs to meet *satoshi* value.",
+    "- 313: The `min-emergency-msat` reserve could not be preserved (and we have or are opening anchor channels)."
+  ],
+  "author": [
+    "Rusty Russell [rusty@rustcorp.com.au](mailto:rusty@rustcorp.com.au) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-utxopsbt(7)",
+    "lightning-reserveinputs(7)",
+    "lightning-unreserveinputs(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:fundpsbt#1",
+        "method": "fundpsbt",
+        "params": {
+          "satoshi": 1000000,
+          "feerate": "253perkw",
+          "startweight": 250,
+          "reserve": 0
+        }
+      },
+      "response": {
+        "psbt": "cHNidP8BAF4CAAAAAeo8S4s8Cz9Y1aFnzkXZK0Cu5HzE0pGBOScH+33ZNLWtAAAAAAD9////AahhAAAAAAAAIlEgAUDHIe8AMwf8RKCgKF+uqU1dPQg1v/7TjQ0PQvvvjrujAAAAAAEAiQIAAAABixvdQs5QxtEy9tQ2uXlDCXgnivw4U3qycsMXXeHGnkkBAAAAAP3///8CYg3NCwAAAAAiUSBuCf3Q1/13sw9JPs2LmjXONgvYxW4ccMzjSpkfFXrqyICEHgAAAAAAIgAgZ39EM2qkj2R6eylrL3yjvBuWGjwmoGk+btb3KO6w1zlKAAAAAQErYg3NCwAAAAAiUSBuCf3Q1/13sw9JPs2LmjXONgvYxW4ccMzjSpkfFXrqyAAA",
+        "feerate_per_kw": 253,
+        "estimated_final_weight": 652,
+        "excess_msat": 196962518000,
+        "change_outnum": 0
+      }
+    },
+    {
+      "request": {
+        "id": "example:fundpsbt#2",
+        "method": "fundpsbt",
+        "params": {
+          "satoshi": 500000,
+          "feerate": "urgent",
+          "startweight": 166,
+          "reserve": 0,
+          "excess_as_change": true,
+          "min_witness_weight": 110
+        }
+      },
+      "response": {
+        "psbt": "cHNidP8BAF4CAAAAAeo8S4s8Cz9Y1aFnzkXZK0Cu5HzE0pGBOScH+33ZNLWtAAAAAAD9////AetRxQsAAAAAIlEgAwknCbnuaFVMsQAmNkUAiU72B5qy3pRvMCgSminZuxGjAAAAAAEAiQIAAAABixvdQs5QxtEy9tQ2uXlDCXgnivw4U3qycsMXXeHGnkkBAAAAAP3///8CYg3NCwAAAAAiUSBuCf3Q1/13sw9JPs2LmjXONgvYxW4ccMzjSpkfFXrqyICEHgAAAAAAIgAgZ39EM2qkj2R6eylrL3yjvBuWGjwmoGk+btb3KO6w1zlKAAAAAQErYg3NCwAAAAAiUSBuCf3Q1/13sw9JPs2LmjXONgvYxW4ccMzjSpkfFXrqyAAA",
+        "feerate_per_kw": 11000,
+        "estimated_final_weight": 613,
+        "excess_msat": 0,
+        "change_outnum": 0
+      }
+    }
+  ]
+}

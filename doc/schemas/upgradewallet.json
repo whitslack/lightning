@@ -1,0 +1,114 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "upgradewallet",
+  "title": "Command to spend all P2SH-wrapped inputs into a Native Segwit output",
+  "description": [
+    "`upgradewallet` is a convenience RPC which will spend all p2sh-wrapped Segwit deposits in a wallet into a single Native Segwit P2WPKH address."
+  ],
+  "request": {
+    "required": [],
+    "additionalProperties": false,
+    "properties": {
+      "feerate": {
+        "type": "feerate",
+        "description": [
+          "Feerate for the upgrade transaction."
+        ],
+        "added": "v23.02",
+        "default": "*opening*"
+      },
+      "reservedok": {
+        "type": "boolean",
+        "description": [
+          "Tells the wallet to include all P2SH-wrapped inputs, including reserved ones."
+        ],
+        "added": "v23.02"
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "upgraded_outs"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "upgraded_outs": {
+        "type": "u64",
+        "description": [
+          "Count of spent/upgraded UTXOs."
+        ],
+        "added": "v23.02"
+      },
+      "psbt": {
+        "type": "string",
+        "description": [
+          "The PSBT that was finalized and sent."
+        ],
+        "added": "v23.02"
+      },
+      "tx": {
+        "type": "hex",
+        "description": [
+          "The raw transaction which was sent."
+        ],
+        "added": "v23.02"
+      },
+      "txid": {
+        "type": "txid",
+        "description": [
+          "The txid of the **tx**."
+        ],
+        "added": "v23.02"
+      }
+    }
+  },
+  "errors": [
+    "On failure, an error is reported and no transaction is created.",
+    "",
+    "- -1: Catchall nonspecific error.",
+    "- 301: There are not enough funds in the internal wallet (including fees) to create the transaction.",
+    "- 313: The `min-emergency-msat` reserve could not be preserved (and we have anchor channels)."
+  ],
+  "usage": [
+    "The caller is trying to buy a liquidity ad but the command keeps failing. They have funds in their wallet, but they're all P2SH-wrapped outputs.",
+    "",
+    "The caller can call `upgradewallet` to convert their funds to native segwit outputs, which are valid for liquidity ad buys."
+  ],
+  "author": [
+    "Lisa Neigut [niftynei@gmail.com](mailto:niftynei@gmail.com) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-utxopsbt(7)",
+    "lightning-reserveinputs(7)",
+    "lightning-unreserveinputs(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:upgradewallet#1",
+        "method": "upgradewallet",
+        "params": {}
+      },
+      "response": {
+        "upgraded_outs": 0
+      }
+    },
+    {
+      "request": {
+        "id": "example:upgradewallet#2",
+        "method": "upgradewallet",
+        "params": {
+          "feerate": "urgent",
+          "reservedok": true
+        }
+      },
+      "response": {
+        "upgraded_outs": 0
+      }
+    }
+  ]
+}

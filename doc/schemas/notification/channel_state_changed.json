@@ -1,0 +1,114 @@
+{
+  "$schema": "../../rpc-schema-draft.json",
+  "type": "object",
+  "additionalProperties": false,
+  "notification": "channel_state_changed",
+  "title": "Notification for channel state change",
+  "description": [
+    "The **channel_state_changed** notification informs whenever the state of the channel has been updated."
+  ],
+  "added": "pre-v0.10.1",
+  "request": {},
+  "response": {
+    "required": [
+      "peer_id",
+      "channel_id",
+      "timestamp",
+      "new_state",
+      "cause"
+    ],
+    "properties": {
+      "peer_id": {
+        "type": "pubkey",
+        "description": [
+          "The peer id of the channel."
+        ]
+      },
+      "channel_id": {
+        "type": "hash",
+        "description": [
+          "The channel id of the channel."
+        ]
+      },
+      "short_channel_id": {
+        "type": "short_channel_id",
+        "description": [
+          "The short channel id of the channel. If the channel is not yet confirmed, this field will be null."
+        ]
+      },
+      "timestamp": {
+        "type": "string",
+        "description": [
+          "The timestamp of the state change."
+        ]
+      },
+      "old_state": {
+        "type": "string",
+        "enum": [
+          "OPENINGD",
+          "CHANNELD_AWAITING_LOCKIN",
+          "CHANNELD_NORMAL",
+          "CHANNELD_SHUTTING_DOWN",
+          "CLOSINGD_SIGEXCHANGE",
+          "CLOSINGD_COMPLETE",
+          "AWAITING_UNILATERAL",
+          "FUNDING_SPEND_SEEN",
+          "ONCHAIN",
+          "DUALOPEND_OPEN_INIT",
+          "DUALOPEND_AWAITING_LOCKIN",
+          "CHANNELD_AWAITING_SPLICE",
+          "DUALOPEND_OPEN_COMMITTED",
+          "DUALOPEND_OPEN_COMMIT_READY"
+        ],
+        "description": [
+          "The channel state, in particular \"CHANNELD_NORMAL\" and \"CHANNELD_AWAITING_SPLICE\" mean the channel can be used normally.",
+          "The deprecated value 'unknown' was also present for new channels up until v26.04, it was removed in v26.06."
+        ]
+      },
+      "new_state": {
+        "type": "string",
+        "enum": [
+          "OPENINGD",
+          "CHANNELD_AWAITING_LOCKIN",
+          "CHANNELD_NORMAL",
+          "CHANNELD_SHUTTING_DOWN",
+          "CLOSINGD_SIGEXCHANGE",
+          "CLOSINGD_COMPLETE",
+          "AWAITING_UNILATERAL",
+          "FUNDING_SPEND_SEEN",
+          "ONCHAIN",
+          "DUALOPEND_OPEN_INIT",
+          "DUALOPEND_AWAITING_LOCKIN",
+          "CHANNELD_AWAITING_SPLICE",
+          "DUALOPEND_OPEN_COMMITTED",
+          "DUALOPEND_OPEN_COMMIT_READY",
+          "CLOSED"
+        ],
+        "description": [
+          "The channel state, in particular \"CHANNELD_NORMAL\" and \"CHANNELD_AWAITING_SPLICE\" mean the channel can be used normally.",
+          "Note: *CLOSED* state was only added in v25.12."
+        ]
+      },
+      "cause": {
+        "type": "string",
+        "enum": [
+          "unknown",
+          "local",
+          "user",
+          "remote",
+          "protocol",
+          "onchain"
+        ],
+        "description": [
+          "The cause of the state change."
+        ]
+      },
+      "message": {
+        "type": "string",
+        "description": [
+          "The state change message."
+        ]
+      }
+    }
+  }
+}

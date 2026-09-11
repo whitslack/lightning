@@ -1,0 +1,71 @@
+---
+name: Mac OS pytest
+on:
+  pull_request:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  smoke-test:
+    name: Smoke Test macOS
+    runs-on: macos-14
+    timeout-minutes: 120
+    strategy:
+      fail-fast: true
+      matrix:
+        bitcoind-version: ["27.1"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Download Bitcoin ${{ matrix.bitcoind-version }} & install binaries
+        run: |
+          export BITCOIND_VERSION=${{ matrix.bitcoind-version }}
+          export TARGET_ARCH="arm64-apple-darwin"
+
+          wget https://bitcoincore.org/bin/bitcoin-core-${BITCOIND_VERSION}/bitcoin-${BITCOIND_VERSION}-${TARGET_ARCH}.tar.gz
+          tar -xzf bitcoin-${BITCOIND_VERSION}-${TARGET_ARCH}.tar.gz
+          sudo mv bitcoin-${BITCOIND_VERSION}/bin/* /usr/local/bin
+          rm -rf bitcoin-${BITCOIND_VERSION}-${TARGET_ARCH}.tar.gz bitcoin-${BITCOIND_VERSION}
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Install dependencies
+        run: |
+          export PATH="/usr/local/opt:/Users/runner/.local/bin:/opt/homebrew/bin/python3.10/bin:$PATH"
+
+          brew install gnu-sed autoconf automake libtool openssl lowdown libsodium make
+
+          # https://github.com/grpc/grpc/issues/31737#issuecomment-1323796842
+          export GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=1
+          export GRPC_PYTHON_BUILD_SYSTEM_ZLIB=1
+          uv sync --all-groups
+
+      - name: Build and install CLN
+        run: |
+          export CPATH=/opt/homebrew/include
+          export LIBRARY_PATH=/opt/homebrew/lib
+
+          uv run ./configure --disable-valgrind --disable-compat
+          uv run gmake
+          uv run gmake check-gen-updated
+          sudo gmake install
+
+      - name: Run pytest
+        env:
+          SLOW_MACHINE: 1
+          PYTEST_OPTS: "-vvv --timeout=1800 --durations=10"
+          PYTEST_TESTS: |
+            tests/test_misc.py::test_ipv4_and_ipv6
+            tests/test_misc.py::test_low_fd_limit
+            tests/test_connection.py::test_websocket
+            tests/test_connection.py::test_wss_proxy
+            tests/test_plugin.py::test_inline_plugin_wait_for_log_no_selfmatch
+        run: |
+          VALGRIND=0 uv run pytest $PYTEST_TESTS -n $(sysctl -n hw.ncpu) ${PYTEST_OPTS}

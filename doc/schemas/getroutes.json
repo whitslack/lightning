@@ -1,0 +1,310 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "getroutes",
+  "title": "Command for routing a payment",
+  "added": "v24.08",
+  "description": [
+    "The **getroutes** RPC command attempts to find the best set of paths for the payment from *source* to *destination* of *amount_msat*, using the given *layers* on top of the gossip information.  The result is constrained by *maxfee*, and will arrive at the destination with *final_cltv*.",
+    "",
+    "NOTE: The returned paths are a different format then *getroute*, being more appropriate for creating intermediary onion layers.",
+    "",
+    "Layers are generally maintained by plugins, either to contain persistent information about capacities which have been discovered, or to contain transient information for this particular payment (such as blinded paths or routehints).",
+    "",
+    "There are some automatic layers: *auto.localchans* contains information on local channels from this node (including non-public ones), and their exact current spendable capacities. *auto.sourcefree* overrides all channels (including those from previous layers) leading out of the *source* to be zero fee and zero delay.  These are both useful in the case where the source is the current node.  *auto.include_fees* that fixes the send amount and deducts fee from there, ie. the receiver pays for fees instead of the sender.  *auto.no_mpp_support* is deprecated in v26.06: use `maxparts=1` instead."
+  ],
+  "categories": [
+    "readonly"
+  ],
+  "request": {
+    "required": [
+      "source",
+      "destination",
+      "amount_msat",
+      "layers",
+      "maxfee_msat",
+      "final_cltv"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "source": {
+        "type": "pubkey",
+        "description": [
+          "Node pubkey to start the paths"
+        ]
+      },
+      "destination": {
+        "type": "pubkey",
+        "description": [
+          "Node pubkey to end the paths"
+        ]
+      },
+      "amount_msat": {
+        "type": "msat",
+        "description": [
+          "Amount to send. It can be a whole number, or a whole number ending in *msat* or *sat*, or a number with three decimal places ending in *sat*, or a number with 1 to 11 decimal places ending in *btc*."
+        ]
+      },
+      "layers": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "description": [
+            "Layer to apply to the gossip map before attempting to find routes."
+          ]
+        }
+      },
+      "maxfee_msat": {
+        "type": "msat",
+        "description": [
+          "Maximum fee to spend: we will never return a set of routes more expensive than this. It can be a whole number, or a whole number ending in *msat* or *sat*, or a number with three decimal places ending in *sat*, or a number with 1 to 11 decimal places ending in *btc*."
+        ]
+      },
+      "final_cltv": {
+        "type": "u32",
+        "description": [
+          "Number of blocks for the final node.  We need to know this because no HTLC is allowed to have a CLTV delay more than 2016 blocks."
+        ]
+      },
+      "maxdelay": {
+        "type": "u32",
+        "added": "v25.02",
+        "description": [
+          "Maximum number of blocks of delay for the route. Cannot be bigger than 2016."
+        ],
+        "default": "2016"
+      },
+      "maxparts": {
+        "type": "u32",
+        "added": "v25.09",
+        "description": [
+          "Maximum number of routes in the solution."
+        ],
+        "default": "100"
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "probability_ppm",
+      "routes"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "probability_ppm": {
+        "type": "u64",
+        "description": [
+          "The estimated probability of success using these routes, in millionths."
+        ]
+      },
+      "routes": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "probability_ppm",
+            "amount_msat",
+            "final_cltv",
+            "path"
+          ],
+          "properties": {
+            "probability_ppm": {
+              "type": "u64",
+              "description": [
+                "The estimated probability of success using this route, in millionths."
+              ]
+            },
+            "amount_msat": {
+              "type": "msat",
+              "description": [
+                "The amount delivered to the *destination* by this path."
+              ]
+            },
+            "final_cltv": {
+              "type": "u32",
+              "description": [
+                "Number of blocks required by the final node (set by caller)"
+              ]
+            },
+            "path": {
+              "type": "array",
+              "description": [
+                "The hops to get from *source* to *destination*."
+              ],
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "short_channel_id_dir",
+                  "node_id_in",
+                  "node_id_out",
+                  "amount_in_msat",
+                  "amount_out_msat",
+                  "cltv_in",
+                  "cltv_out"
+                ],
+                "properties": {
+                  "short_channel_id_dir": {
+                    "type": "short_channel_id_dir",
+                    "description": [
+                      "The channel and direction joining these nodes."
+                    ]
+                  },
+                  "amount_in_msat": {
+                    "added": "v26.06",
+                    "type": "msat",
+                    "description": [
+                      "The amount to send into this hop."
+                    ]
+                  },
+                  "amount_out_msat": {
+                    "added": "v26.06",
+                    "type": "msat",
+                    "description": [
+                      "The amount which arrives at the far end of this hop."
+                    ]
+                  },
+                  "node_id_in": {
+                    "added": "v26.06",
+                    "type": "pubkey",
+                    "description": [
+                      "The peer id at the start of this hop."
+                    ]
+                  },
+                  "node_id_out": {
+                    "added": "v26.06",
+                    "type": "pubkey",
+                    "description": [
+                      "The peer id at the end of this hop."
+                    ]
+                  },
+                  "cltv_in": {
+                    "added": "v26.06",
+                    "type": "u32",
+                    "description": [
+                      "The total CLTV expected by the node at the start of this hop."
+                    ]
+                  },
+                  "cltv_out": {
+                    "added": "v26.06",
+                    "type": "u32",
+                    "description": [
+                      "The total CLTV expected by the node at the end of this hop."
+                    ]
+                  },
+                  "amount_msat": {
+                    "type": "msat",
+                    "description": [
+                      "The amount to send into this hop."
+                    ],
+                    "deprecated": [
+                      "v26.06",
+                      "v27.06"
+                    ]
+                  },
+                  "next_node_id": {
+                    "type": "pubkey",
+                    "description": [
+                      "The peer id at the end of this hop."
+                    ],
+                    "deprecated": [
+                      "v26.06",
+                      "v27.06"
+                    ]
+                  },
+                  "delay": {
+                    "type": "u32",
+                    "description": [
+                      "The total CLTV expected by the node at the start of this hop."
+                    ],
+                    "deprecated": [
+                      "v26.06",
+                      "v27.06"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "errors": [
+    "The following error codes may occur:",
+    "",
+    "- -1: Catchall nonspecific error.",
+    "- 205: Unable to find a route.",
+    "- 206: Route too expensive. Either the max_delay or maxfee_msat was exceeded.",
+    "- 215: We don't have enough funds in all our channels to pay this.",
+    "- 220: We can't find sufficient capacity into the destination."
+  ],
+  "author": [
+    "[lagrang3@protonmail.com](mailto:lagrang3@protonmail.com) wrote the minimum-cost-flow solver, Rusty Russell [rusty@rustcorp.com.au](mailto:rusty@rustcorp.com.au) wrote the API and this documentation."
+  ],
+  "see_also": [
+    "lightning-askrene-reserve(7)",
+    "lightning-askrene-unreserve(7)",
+    "lightning-askrene-disable-node(7)",
+    "lightning-askrene-create-channel(7)",
+    "lightning-askrene-inform-channel(7)",
+    "lightning-askrene-report(7)",
+    "lightning-askrene-age(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:getroutes#1",
+        "method": "getroutes",
+        "params": {
+          "source": "038194b5f32bdf0aa59812c86c4ef7ad2f294104fa027d1ace9b469bb6f88cf37b",
+          "destination": "03cecbfdc68544cc596223b68ce0710c9e5d2c9cb317ee07822d95079acc703d31",
+          "amount_msat": 1250000,
+          "layers": [],
+          "maxfee_msat": 125000,
+          "final_cltv": 0
+        }
+      },
+      "response": {
+        "probability_ppm": 997501,
+        "routes": [
+          {
+            "probability_ppm": 997501,
+            "amount_msat": 1250000,
+            "final_cltv": 0,
+            "path": [
+              {
+                "short_channel_id_dir": "116x1x1/1",
+                "node_id_in": "038194b5f32bdf0aa59812c86c4ef7ad2f294104fa027d1ace9b469bb6f88cf37b",
+                "node_id_out": "033845802d25b4e074ccfd7cd8b339a41dc75bf9978a034800444b51d42b07799a",
+                "amount_in_msat": 1250026,
+                "amount_out_msat": 1250013,
+                "cltv_in": 12,
+                "cltv_out": 6,
+                "next_node_id": "033845802d25b4e074ccfd7cd8b339a41dc75bf9978a034800444b51d42b07799a",
+                "amount_msat": 1250026,
+                "delay": 12
+              },
+              {
+                "short_channel_id_dir": "130x1x0/0",
+                "node_id_in": "033845802d25b4e074ccfd7cd8b339a41dc75bf9978a034800444b51d42b07799a",
+                "node_id_out": "03cecbfdc68544cc596223b68ce0710c9e5d2c9cb317ee07822d95079acc703d31",
+                "amount_in_msat": 1250013,
+                "amount_out_msat": 1250000,
+                "cltv_in": 6,
+                "cltv_out": 0,
+                "next_node_id": "03cecbfdc68544cc596223b68ce0710c9e5d2c9cb317ee07822d95079acc703d31",
+                "amount_msat": 1250013,
+                "delay": 6
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

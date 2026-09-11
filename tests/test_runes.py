@@ -1,0 +1,919 @@
+from fixtures import *  # noqa: F401,F403
+from fixtures import TEST_NETWORK
+from pyln.client import RpcError
+from utils import only_one
+import base64
+import os
+import pytest
+import time
+import unittest
+
+
+def test_createrune(node_factory):
+    l1 = node_factory.get_node(options={
+        'allow-deprecated-apis': True,
+    })
+
+    # l1's master rune secret is 4ac018131e70b044e17891e67960f59b9d602525d3aef9956e900189f456e595
+    rune1 = l1.rpc.createrune()
+    assert rune1['rune'] == 'I9TZsYEWiAwThQye-gYhpWIe1h15szWEN_qNyMSBOdE9MA=='
+    assert rune1['unique_id'] == '0'
+    rune2 = l1.rpc.createrune(restrictions="readonly")
+    assert rune2['rune'] == 's0IEnsikGDw76tdpAiMbqzigYhlkjqSVh0ZuvJ1Np1w9MSZtZXRob2RebGlzdHxtZXRob2ReZ2V0fG1ldGhvZD1zdW1tYXJ5Jm1ldGhvZC9saXN0ZGF0YXN0b3Jl'
+    assert rune2['unique_id'] == '1'
+    rune3 = l1.rpc.createrune(restrictions=[["time>1656675211"]])
+    assert rune3['rune'] == 'K0c0pWvBWb3y9HF1GMy33Zx2KRg1zcEvQLr2vtWwMew9MiZ0aW1lPjE2NTY2NzUyMTE='
+    assert rune3['unique_id'] == '2'
+    rune4 = l1.rpc.createrune(restrictions=[["id^022d223620a359a47ff7"], ["method=listpeers"]])
+    assert rune4['rune'] == 'ixuStVB4oewJtVNnim1P_qEL89ZU0G8Tnxg_JZgJTUk9MyZpZF4wMjJkMjIzNjIwYTM1OWE0N2ZmNyZtZXRob2Q9bGlzdHBlZXJz'
+    assert rune4['unique_id'] == '3'
+    rune5 = l1.rpc.createrune(rune4['rune'], [["pnamelevel!", "pnamelevel/io"]])
+    assert rune5['rune'] == 'NUPHrMs1TEdfWbRfO_KJ4rXhJSBjmSqbdcz-W0yH9J89MyZpZF4wMjJkMjIzNjIwYTM1OWE0N2ZmNyZtZXRob2Q9bGlzdHBlZXJzJnBuYW1lbGV2ZWwhfHBuYW1lbGV2ZWwvaW8='
+    assert rune5['unique_id'] == '3'
+    rune6 = l1.rpc.createrune(rune5['rune'], [["parr1!", "parr1/io"]])
+    assert rune6['rune'] == 'sloBq0jn21v4LWhkswsHZgdtvQ0-jqgXXp_2jNNWLJA9MyZpZF4wMjJkMjIzNjIwYTM1OWE0N2ZmNyZtZXRob2Q9bGlzdHBlZXJzJnBuYW1lbGV2ZWwhfHBuYW1lbGV2ZWwvaW8mcGFycjEhfHBhcnIxL2lv'
+    assert rune6['unique_id'] == '3'
+    rune7 = l1.rpc.createrune(restrictions=[["pnum=0"]])
+    assert rune7['rune'] == 'k6kQt9dkGMaz75f51-PEkPk8Qovbiqz2HXconizqa-w9NCZwbnVtPTA='
+    assert rune7['unique_id'] == '4'
+    rune8 = l1.rpc.createrune(rune7['rune'], [["rate=3"]])
+    assert rune8['rune'] == 'jHidm2_terhiOytrn8xgEWR1pvFkKuoIvKgvcEeLLQQ9NCZwbnVtPTAmcmF0ZT0z'
+    assert rune8['unique_id'] == '4'
+    rune9 = l1.rpc.createrune(rune8['rune'], [["rate=1"]])
+    assert rune9['rune'] == 'AWO9sW94iv7Y99h0b6kyQO5yePUXQOSIpSuTRp8XFTM9NCZwbnVtPTAmcmF0ZT0zJnJhdGU9MQ=='
+    assert rune9['unique_id'] == '4'
+
+    # Test rune with \|.
+    weirdrune = l1.rpc.createrune(restrictions=[["method=invoice"],
+                                                ["pnamedescription=@tipjar|jb55@sendsats.lol"]])
+
+    with pytest.raises(RpcError, match='Not permitted:') as exc_info:
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=weirdrune['rune'],
+                         method='invoice',
+                         params={"amount_msat": "any",
+                                 "label": "lbl",
+                                 "description": "@tipjar\\|jb55@sendsats.lol"})
+    assert exc_info.value.error['code'] == 0x5de
+
+    assert l1.rpc.checkrune(nodeid=l1.info['id'],
+                            rune=weirdrune['rune'],
+                            method='invoice',
+                            params={"amount_msat": "any",
+                                    "label": "lbl",
+                                    "description": "@tipjar|jb55@sendsats.lol"})['valid'] is True
+
+    runedecodes = ((rune1, []),
+                   (rune2, [{'alternatives': ['method^list', 'method^get', 'method=summary'],
+                             'summary': "method (of command) starts with 'list' OR method (of command) starts with 'get' OR method (of command) equal to 'summary'"},
+                            {'alternatives': ['method/listdatastore'],
+                             'summary': "method (of command) unequal to 'listdatastore'"}]),
+                   (rune4, [{'alternatives': ['id^022d223620a359a47ff7'],
+                             'summary': "id (of commanding peer) starts with '022d223620a359a47ff7'"},
+                            {'alternatives': ['method=listpeers'],
+                             'summary': "method (of command) equal to 'listpeers'"}]),
+                   (rune5, [{'alternatives': ['id^022d223620a359a47ff7'],
+                             'summary': "id (of commanding peer) starts with '022d223620a359a47ff7'"},
+                            {'alternatives': ['method=listpeers'],
+                             'summary': "method (of command) equal to 'listpeers'"},
+                            {'alternatives': ['pnamelevel!', 'pnamelevel/io'],
+                             'summary': "pnamelevel (object parameter 'level') is missing OR pnamelevel (object parameter 'level') unequal to 'io'"}]),
+                   (rune6, [{'alternatives': ['id^022d223620a359a47ff7'],
+                             'summary': "id (of commanding peer) starts with '022d223620a359a47ff7'"},
+                            {'alternatives': ['method=listpeers'],
+                             'summary': "method (of command) equal to 'listpeers'"},
+                            {'alternatives': ['pnamelevel!', 'pnamelevel/io'],
+                             'summary': "pnamelevel (object parameter 'level') is missing OR pnamelevel (object parameter 'level') unequal to 'io'"},
+                            {'alternatives': ['parr1!', 'parr1/io'],
+                             'summary': "parr1 (array parameter #1) is missing OR parr1 (array parameter #1) unequal to 'io'"}]),
+                   (rune7, [{'alternatives': ['pnum=0'],
+                             'summary': "pnum (number of command parameters) equal to 0"}]),
+                   (rune8, [{'alternatives': ['pnum=0'],
+                             'summary': "pnum (number of command parameters) equal to 0"},
+                            {'alternatives': ['rate=3'],
+                             'summary': "rate (max per minute) equal to 3"}]),
+                   (rune9, [{'alternatives': ['pnum=0'],
+                             'summary': "pnum (number of command parameters) equal to 0"},
+                            {'alternatives': ['rate=3'],
+                             'summary': "rate (max per minute) equal to 3"},
+                            {'alternatives': ['rate=1'],
+                             'summary': "rate (max per minute) equal to 1"}]))
+    for decode in runedecodes:
+        rune = decode[0]
+        restrictions = decode[1]
+        decoded = l1.rpc.decode(rune['rune'])
+        assert decoded['type'] == 'rune'
+        assert decoded['unique_id'] == rune['unique_id']
+        assert decoded['valid'] is True
+        assert decoded['restrictions'] == restrictions
+
+    # Time handling is a bit special, since we annotate the timestamp with how far away it is.
+    decoded = l1.rpc.decode(rune3['rune'])
+    assert decoded['type'] == 'rune'
+    assert decoded['unique_id'] == rune3['unique_id']
+    assert decoded['valid'] is True
+    assert len(decoded['restrictions']) == 1
+    assert decoded['restrictions'][0]['alternatives'] == ['time>1656675211']
+    assert decoded['restrictions'][0]['summary'].startswith("time (in seconds since 1970) greater than 1656675211 (")
+
+    # Replace rune3 with a more useful timestamp!
+    expiry = int(time.time()) + 15
+    rune3 = l1.rpc.createrune(restrictions=[["time<{}".format(expiry)]])
+
+    successes = ((rune1, "listpeers", {}),
+                 (rune2, "listpeers", {}),
+                 (rune2, "getinfo", {}),
+                 (rune2, "getinfo", {}),
+                 (rune3, "getinfo", {}),
+                 (rune7, "listpeers", []),
+                 (rune7, "getinfo", {}))
+
+    failures = ((rune2, "withdraw", {}),
+                (rune2, "plugin", {'subcommand': 'list'}),
+                (rune3, "getinfo", {}),
+                (rune4, "listnodes", {}),
+                (rune5, "listpeers", {'id': l1.info['id'], 'level': 'io'}),
+                (rune6, "listpeers", [l1.info['id'], 'io']),
+                (rune7, "listpeers", [l1.info['id']]),
+                (rune7, "listpeers", {'id': l1.info['id']}),
+                # These are derived from rune7, so they have been recently used
+                (rune8, "getinfo", {}),
+                (rune9, "getinfo", {}))
+
+    for rune, cmd, params in successes:
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune['rune'],
+                         method=cmd,
+                         params=params)['valid'] is True
+
+    while time.time() < expiry:
+        time.sleep(1)
+
+    for rune, cmd, params in failures:
+        print("{} {}".format(cmd, params))
+        with pytest.raises(RpcError, match='Not permitted:') as exc_info:
+            l1.rpc.checkrune(nodeid=l1.info['id'],
+                             rune=rune['rune'],
+                             method=cmd,
+                             params=params)
+        assert exc_info.value.error['code'] == 0x5de
+
+    # Rune 7 succeeded, so we need to wait for 20 seconds
+    time.sleep(21)
+    l1.rpc.checkrune(nodeid=l1.info['id'],
+                     rune=rune8['rune'],
+                     method='getinfo')['valid'] is True
+
+    # This fails immediately, since we've done one.
+    with pytest.raises(RpcError, match='Not permitted:') as exc_info:
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune9['rune'],
+                         method='getinfo',
+                         params={})
+    assert exc_info.value.error['code'] == 0x5de
+
+    # rune5 can only be used by l2:
+    with pytest.raises(RpcError, match='Not permitted:') as exc_info:
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune5['rune'],
+                         method="listpeers",
+                         params={})
+    assert exc_info.value.error['code'] == 0x5de
+
+    # Rune8 has rate 3 per minute (20 seconds) and rune9 has rate 1 per minute (60 seconds)
+    time.sleep(21)
+    with pytest.raises(RpcError, match='Not permitted: too soon'):
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune9['rune'],
+                         method="getinfo")
+
+    assert l1.rpc.checkrune(nodeid=l1.info['id'],
+                            rune=rune8['rune'],
+                            method="getinfo")['valid'] is True
+
+    # Rune8 uses the same unique_id as rune9, so we need to wait for full 1 minute
+    time.sleep(61)
+    assert l1.rpc.checkrune(nodeid=l1.info['id'],
+                            rune=rune9['rune'],
+                            method="getinfo")['valid'] is True
+
+
+def do_test_rune_per_restriction(l1, rune_to_test, per_sec):
+    assert 'last_used' not in l1.rpc.showrunes(rune=rune_to_test)['runes'][0]
+
+    before = time.time()
+    checkrune_result_1 = l1.rpc.checkrune(nodeid=l1.info['id'],
+                                          rune=rune_to_test,
+                                          method='getinfo',
+                                          params={})
+
+    show_rune = l1.rpc.showrunes(rune=rune_to_test)['runes'][0]
+    after = time.time()
+
+    assert checkrune_result_1['valid'] is True
+    assert before < show_rune['last_used'] < after
+
+    # cannot use same rune till 'per_sec' seconds
+    with pytest.raises(RpcError, match='Not permitted:') as exc_info:
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune_to_test,
+                         method='listpeers',
+                         params={})
+
+    assert exc_info.value.error['code'] == 0x5de
+    assert exc_info.value.error['message'] == 'Not permitted: too soon'
+    assert l1.rpc.showrunes(rune=rune_to_test)['runes'][0]['last_used'] == show_rune['last_used']
+
+    print(f'PER SEC VALUE: {per_sec}')
+    print(show_rune['last_used'])
+    print(time.time())
+    time.sleep(per_sec + 1)
+    print(time.time())
+
+    # rune should again be valid after 'per_sec' seconds
+    checkrune_result_3 = l1.rpc.checkrune(nodeid=l1.info['id'],
+                                          rune=rune_to_test,
+                                          method='listinvoices',
+                                          params={})
+
+    assert checkrune_result_3['valid'] is True
+    assert show_rune['last_used'] <= l1.rpc.showrunes(rune=rune_to_test)['runes'][0]['last_used'] <= time.time()
+
+
+def test_createrune_per_restriction(node_factory):
+    l1 = node_factory.get_node()
+
+    # 1 sec = 1,000,000,000 nanoseconds (nsec)
+    rune_per_nano_sec = l1.rpc.createrune(restrictions=[["per=2000000000nsec"]])['rune']
+    assert rune_per_nano_sec == 'IUhHCEYyQOTSbBjJ09MNiPZMrV_tHFX0JG2U5yCUmIU9MCZwZXI9MjAwMDAwMDAwMG5zZWM='
+    do_test_rune_per_restriction(l1, rune_per_nano_sec, 2)
+
+    # 1 sec = 1,000,000 microseconds (usec)
+    rune_per_micro_sec = l1.rpc.createrune(restrictions=[["per=2000000usec"]])['rune']
+    assert rune_per_micro_sec == '7ugvfMdjxoW6rKq__8d2gB7me5PL2KZOttq83mGuPvU9MSZwZXI9MjAwMDAwMHVzZWM='
+    do_test_rune_per_restriction(l1, rune_per_micro_sec, 2)
+
+    # 1 sec = 1,000 milliseconds (msec)
+    rune_per_milli_sec = l1.rpc.createrune(restrictions=[["per=2000msec"]])['rune']
+    assert rune_per_milli_sec == 'uC5mTQfEmhbcFiUDMYIErTJcmaKZYMCUogncByZhMbk9MiZwZXI9MjAwMG1zZWM='
+    do_test_rune_per_restriction(l1, rune_per_milli_sec, 2)
+
+    # 1 sec
+    rune_per_sec = l1.rpc.createrune(restrictions=[["per=2sec"]])['rune']
+    assert rune_per_sec == 'jjk21GQ-MeO2FWD0uo6lYplwadKHe3q9q38FP_ol3_M9MyZwZXI9MnNlYw=='
+    do_test_rune_per_restriction(l1, rune_per_sec, 2)
+
+    # default (sec)
+    rune_per_default = l1.rpc.createrune(restrictions=[["per=2"]])['rune']
+    assert rune_per_default == 'RQwZdN5OeWxIR2zPJ55mOkJ8s0SPmdFmwuNAp8TATlI9NCZwZXI9Mg=='
+    do_test_rune_per_restriction(l1, rune_per_default, 2)
+
+    # 1 minute
+    rune_per_min = l1.rpc.createrune(restrictions=[["per=1min"]])['rune']
+    assert rune_per_min == 'gDyB_VRT5IKmpmjr4GnplGMlp-7_g8VVCR2KCjcC0Gk9NSZwZXI9MW1pbg=='
+    do_test_rune_per_restriction(l1, rune_per_min, 60)
+
+
+@pytest.mark.parametrize("old_hsmsecret", [True, False])
+def test_showrunes(node_factory, old_hsmsecret):
+    l1 = node_factory.get_node(old_hsmsecret=old_hsmsecret)
+    rune1 = l1.rpc.createrune()
+
+    if old_hsmsecret:
+        first_rune = 'OSqc7ixY6F-gjcigBfxtzKUI54uzgFSA6YfBQoWGDV89MA=='
+        second_rune = 'geZmO6U7yqpHn-moaX93FVMVWrDRfSNY4AXx9ypLcqg9MQ=='
+        ninth_rune = 'lI6iPwM1R9OkcRW25SH0a06PscPDinTfLFAjzSGFGE09OQ=='
+    else:
+        first_rune = 'I9TZsYEWiAwThQye-gYhpWIe1h15szWEN_qNyMSBOdE9MA=='
+        second_rune = 'uJXLfjDwNvh3KLkiCHc-wE2eBM7-AT7IT9oprKL1EtY9MQ=='
+        ninth_rune = 'j6bX7Q4L3jcVnMp56cRKRROWQevIVyIHExNKsL9iqCg9OQ=='
+
+    assert rune1 == {
+        'rune': first_rune,
+        'unique_id': '0',
+        'warning_unrestricted_rune': 'WARNING: This rune has no restrictions! Anyone who has access to this rune could drain funds from your node. Be careful when giving this to apps that you don\'t trust. Consider using the restrictions parameter to only allow access to specific rpc methods.'
+    }
+    showrunes = l1.rpc.showrunes()
+    assert len(l1.rpc.showrunes()) == 1
+    l1.rpc.createrune()
+    showrunes = l1.rpc.showrunes()
+    assert len(showrunes['runes']) == 2
+    assert showrunes == {
+        'runes': [
+            {
+                'rune': first_rune,
+                'unique_id': '0',
+                'restrictions': [],
+                'restrictions_as_english': ''
+            },
+            {
+                'rune': second_rune,
+                'unique_id': '1',
+                'restrictions': [],
+                'restrictions_as_english': ''
+            }
+        ]
+    }
+
+    our_unstored_rune = l1.rpc.showrunes(rune=ninth_rune)['runes'][0]
+    assert our_unstored_rune['unique_id'] == '9'
+    assert our_unstored_rune['stored'] is False
+    # This is only present if False, which is unusual.
+    assert 'our_rune' not in our_unstored_rune
+
+    not_our_rune = l1.rpc.showrunes(rune='oNJAqigqDrHBGzsm7gV3z87oGpzq-KqFlOxx2O9iEQk9MA==')['runes'][0]
+    assert not_our_rune['stored'] is False
+    assert not_our_rune['our_rune'] is False
+
+    # test that we don't set timestamp if rune fails
+    new_rune = l1.rpc.createrune(restrictions=[["method=getinfo"]])['rune']
+    assert "last_used" not in l1.rpc.showrunes(rune=new_rune)['runes'][0]
+
+    with pytest.raises(RpcError, match='Not permitted:'):
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=new_rune,
+                         method='listchannels',
+                         params={})
+    assert "last_used" not in l1.rpc.showrunes(rune=new_rune)['runes'][0]
+
+    before = time.time()
+    l1.rpc.checkrune(nodeid=l1.info['id'],
+                     rune=new_rune,
+                     method='getinfo',
+                     params={})
+    after = time.time()
+
+    assert before <= l1.rpc.showrunes(rune=new_rune)['runes'][0]['last_used'] <= after
+
+
+def test_blacklistrune(node_factory):
+    l1 = node_factory.get_node()
+
+    rune0 = l1.rpc.createrune()
+    assert rune0['unique_id'] == '0'
+    rune1 = l1.rpc.createrune()
+    assert rune1['unique_id'] == '1'
+
+    # Make sure runes work!
+    assert l1.rpc.call(method='checkrune',
+                       payload={'nodeid': l1.info['id'],
+                                'rune': rune0['rune'],
+                                'method': 'getinfo'})['valid'] is True
+
+    assert l1.rpc.call(method='checkrune',
+                       payload={'nodeid': l1.info['id'],
+                                'rune': rune1['rune'],
+                                'method': 'getinfo'})['valid'] is True
+
+    blacklist = l1.rpc.blacklistrune(start=1)
+    assert blacklist == {'blacklist': [{'start': 1, 'end': 1}]}
+
+    # Make sure rune id 1 does not work!
+    with pytest.raises(RpcError, match='Not authorized: Blacklisted rune') as exc_info:
+        l1.rpc.call(method='checkrune',
+                    payload={'nodeid': l1.info['id'],
+                             'rune': rune1['rune'],
+                             'method': 'getinfo'})
+    assert exc_info.value.error['code'] == 0x5df
+
+    # But, other rune still works!
+    assert l1.rpc.call(method='checkrune',
+                       payload={'nodeid': l1.info['id'],
+                                'rune': rune0['rune'],
+                                'method': 'getinfo'})['valid'] is True
+
+    blacklist = l1.rpc.blacklistrune(start=2)
+    assert blacklist == {'blacklist': [{'start': 1, 'end': 2}]}
+
+    blacklist = l1.rpc.blacklistrune(start=6)
+    assert blacklist == {'blacklist': [{'start': 1, 'end': 2},
+                                       {'start': 6, 'end': 6}]}
+
+    blacklist = l1.rpc.blacklistrune(start=3, end=5)
+    assert blacklist == {'blacklist': [{'start': 1, 'end': 6}]}
+
+    blacklist = l1.rpc.blacklistrune(start=9)
+    assert blacklist == {'blacklist': [{'start': 1, 'end': 6},
+                                       {'start': 9, 'end': 9}]}
+
+    blacklist = l1.rpc.blacklistrune(start=0)
+    assert blacklist == {'blacklist': [{'start': 0, 'end': 6},
+                                       {'start': 9, 'end': 9}]}
+
+    # # Now both runes fail!
+    with pytest.raises(RpcError, match='Not authorized: Blacklisted rune') as exc_info:
+        l1.rpc.call(method='checkrune',
+                    payload={'nodeid': l1.info['id'],
+                             'rune': rune0['rune'],
+                             'method': 'getinfo'})
+    assert exc_info.value.error['code'] == 0x5df
+
+    with pytest.raises(RpcError, match='Not authorized: Blacklisted rune') as exc_info:
+        l1.rpc.call(method='checkrune',
+                    payload={'nodeid': l1.info['id'],
+                             'rune': rune1['rune'],
+                             'method': 'getinfo'})
+    assert exc_info.value.error['code'] == 0x5df
+
+    blacklist = l1.rpc.blacklistrune()
+    assert blacklist == {'blacklist': [{'start': 0, 'end': 6},
+                                       {'start': 9, 'end': 9}]}
+
+    blacklisted_rune = l1.rpc.showrunes(rune='geZmO6U7yqpHn-moaX93FVMVWrDRfSNY4AXx9ypLcqg9MQ==')['runes'][0]['blacklisted']
+    assert blacklisted_rune is True
+
+    # Sigh.  Someone blacklisted too much, so we added this!
+    blacklist = l1.rpc.blacklistrune(start=10, relist=True)
+    assert blacklist == {'blacklist': [{'start': 0, 'end': 6},
+                                       {'start': 9, 'end': 9}]}
+
+    with pytest.raises(RpcError, match='Cannot blacklist beyond'):
+        l1.rpc.blacklistrune(start=100_000_000, relist=True)
+
+    blacklist = l1.rpc.blacklistrune(start=9, end=9, relist=True)
+    assert blacklist == {'blacklist': [{'start': 0, 'end': 6}]}
+
+    blacklist = l1.rpc.blacklistrune(start=1, end=2, relist=True)
+    assert blacklist == {'blacklist': [{'start': 0, 'end': 0},
+                                       {'start': 3, 'end': 6}]}
+
+    blacklist = l1.rpc.blacklistrune(start=4, relist=True)
+    assert blacklist == {'blacklist': [{'start': 0, 'end': 0},
+                                       {'start': 3, 'end': 3},
+                                       {'start': 5, 'end': 6}]}
+
+    blacklist = l1.rpc.blacklistrune(start=0, end=3, relist=True)
+    assert blacklist == {'blacklist': [{'start': 5, 'end': 6}]}
+
+    # Database should be persistent
+    l1.restart()
+
+    blacklist = l1.rpc.blacklistrune()
+    assert blacklist == {'blacklist': [{'start': 5, 'end': 6}]}
+
+    # Last deletion.
+    blacklist = l1.rpc.blacklistrune(start=0, end=99_999_999, relist=True)
+    assert blacklist == {'blacklist': []}
+
+
+def test_badrune(node_factory):
+    """Test invalid UTF-8 encodings in rune: used to make us kill the offers plugin which implements decode, as it gave bad utf8!"""
+    l1 = node_factory.get_node()
+    l1.rpc.decode('5zi6-ugA6hC4_XZ0R7snl5IuiQX4ugL4gm9BQKYaKUU9gCZtZXRob2RebGlzdHxtZXRob2ReZ2V0fG1ldGhvZD1zdW1tYXJ5Jm1ldGhvZC9saXN0ZGF0YXN0b3Jl')
+    rune = l1.rpc.createrune(restrictions="readonly")
+
+    binrune = base64.urlsafe_b64decode(rune['rune'])
+    # Mangle each part, try decode. Skip most of the boring chars
+    # (just '|', '&', '#').
+    for i in range(32, len(binrune)):
+        for span in (range(0, 32), (124, 38, 35), range(127, 256)):
+            for c in span:
+                modrune = binrune[:i] + bytes([c]) + binrune[i + 1:]
+                try:
+                    l1.rpc.decode(base64.urlsafe_b64encode(modrune).decode('utf8'))
+                except RpcError:
+                    pass
+
+
+def test_checkrune(node_factory):
+    l1 = node_factory.get_node()
+    rune1 = l1.rpc.createrune()
+    rune2 = l1.rpc.createrune(restrictions="readonly")
+
+    res1 = l1.rpc.checkrune(nodeid=l1.info['id'],
+                            rune=rune1['rune'],
+                            method='invoice',
+                            params={'amount_msat': '10000'})
+
+    assert res1['valid'] is True
+
+    with pytest.raises(RpcError, match='Not permitted:') as exc_info:
+        l1.rpc.call(method='checkrune',
+                    payload={'nodeid': l1.info['id'],
+                             'rune': rune2['rune'],
+                             'method': 'invoice',
+                             'params': {"amount_msat": "1000", "label": "lbl", "description": "tipjar"}})
+    assert exc_info.value.error['code'] == 0x5de
+
+
+def test_rune_pay_amount(node_factory):
+    l1, l2 = node_factory.line_graph(2)
+
+    # This doesn't really work, since amount_msat is illegal if invoice
+    # includes an amount, and runes aren't smart enough to decode bolt11!
+    rune = l1.rpc.createrune(restrictions=[['method=pay'],
+                                           ['pnameamount_msat<10000']])['rune']
+
+    inv1 = l2.rpc.invoice(amount_msat=12300, label='inv1', description='description1')['bolt11']
+    inv2 = l2.rpc.invoice(amount_msat='any', label='inv2', description='description2')['bolt11']
+
+    # Rune requires amount_msat < 10,000!
+    with pytest.raises(RpcError, match='Not permitted: parameter amount_msat not present') as exc_info:
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune,
+                         method='pay',
+                         params={'bolt11': inv1})
+    assert exc_info.value.error['code'] == 0x5de
+
+    # As a named parameter!
+    with pytest.raises(RpcError, match='Not permitted: parameter amount_msat not present') as exc_info:
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune,
+                         method='pay',
+                         params=[inv1])
+    assert exc_info.value.error['code'] == 0x5de
+
+    # Can't get around it this way!
+    with pytest.raises(RpcError, match='Not permitted: parameter amount_msat not present') as exc_info:
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune,
+                         method='pay',
+                         params=[inv2, 12000])
+    assert exc_info.value.error['code'] == 0x5de
+
+    # Nor this way, using a string!
+    with pytest.raises(RpcError, match='Not permitted: parameter amount_msat is not an integer') as exc_info:
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune,
+                         method='pay',
+                         params={'bolt11': inv2, 'amount_msat': '10000sat'})
+    assert exc_info.value.error['code'] == 0x5de
+
+    # Too much!
+    with pytest.raises(RpcError, match='Not permitted: parameter amount_msat is greater or equal to 10000') as exc_info:
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune,
+                         method='pay',
+                         params={'bolt11': inv2, 'amount_msat': 12000})
+    assert exc_info.value.error['code'] == 0x5de
+
+    # This works
+    res = l1.rpc.checkrune(nodeid=l1.info['id'],
+                           rune=rune,
+                           method='pay',
+                           params={'bolt11': inv2, 'amount_msat': 9999})
+    assert res['valid'] is True
+
+
+def test_missing_method_or_nodeid(node_factory):
+    """For v23.11 we realized that nodeid should not be required for checkrune, which means method (which followed it) could not be require either"""
+    l1 = node_factory.get_node()
+    rune1 = l1.rpc.createrune(restrictions=[["method=getinfo"]])['rune']
+    rune2 = l1.rpc.createrune(restrictions=[["id={}".format(l1.info['id'])]])['rune']
+    rune3 = l1.rpc.createrune(restrictions=[["method!"]])['rune']
+    rune4 = l1.rpc.createrune(restrictions=[["id!"]])['rune']
+
+    # Simple cases with nodeid and method
+    assert l1.rpc.checkrune(rune=rune1,
+                            nodeid=l1.info['id'],
+                            method='getinfo')['valid'] is True
+    assert l1.rpc.checkrune(rune=rune2,
+                            nodeid=l1.info['id'],
+                            method='getinfo')['valid'] is True
+    # No nodeid works for rune1
+    assert l1.rpc.checkrune(rune=rune1,
+                            method='getinfo')['valid'] is True
+    # No method works for rune2
+    assert l1.rpc.checkrune(rune=rune2,
+                            nodeid=l1.info['id'])['valid'] is True
+
+    # No method works for rune3
+    assert l1.rpc.checkrune(rune=rune3,
+                            nodeid=l1.info['id'])['valid'] is True
+    # No id works for rune4
+    assert l1.rpc.checkrune(rune=rune4,
+                            method='getinfo')['valid'] is True
+
+    # This fails, as method is missing
+    with pytest.raises(RpcError, match='Not permitted: method not present'):
+        l1.rpc.checkrune(rune=rune1)
+    # This fails, as id is missing
+    with pytest.raises(RpcError, match='Not permitted: id not present'):
+        l1.rpc.checkrune(rune=rune2)
+    # This fails, as method is present
+    with pytest.raises(RpcError, match='Not permitted: method is present'):
+        l1.rpc.checkrune(rune=rune3, method='getinfo')
+    # This fails, as id is present
+    with pytest.raises(RpcError, match='Not permitted: id is present'):
+        l1.rpc.checkrune(rune=rune4, nodeid=l1.info['id'])
+
+
+def test_rune_method_missing(node_factory):
+    """Test `checkrune` when `method` parameter not set `method` is negated in the rune."""
+    l1 = node_factory.get_node()
+    rune = l1.rpc.createrune(restrictions=[["method/getinfo"]])['rune']
+
+    with pytest.raises(RpcError, match='Not permitted: method is equal to getinfo'):
+        l1.rpc.checkrune(rune=rune, method='getinfo')
+    assert l1.rpc.checkrune(rune=rune, method='invoice')['valid'] is True
+    with pytest.raises(RpcError, match='Not permitted: method not present'):
+        l1.rpc.checkrune(rune=rune, method=None)
+
+    rune2 = l1.rpc.createrune(restrictions=[["method!"]])['rune']
+    with pytest.raises(RpcError, match='Not permitted: method is present'):
+        l1.rpc.checkrune(rune=rune2, method='getinfo')
+
+    with pytest.raises(RpcError, match='Not permitted: method is present'):
+        l1.rpc.checkrune(rune=rune2, method='')
+
+    # These two are equivalent (our Python wrapper removes None params)
+    l1.rpc.checkrune(rune=rune2)
+    l1.rpc.checkrune(rune=rune2, method=None)
+
+
+def test_invalid_restrictions(node_factory):
+    # I meant "method!" not "!method"!
+    l1 = node_factory.get_node()
+    for cond in "!=/^$~<>{}#,":
+        with pytest.raises(RpcError, match='not a valid restriction'):
+            print(l1.rpc.createrune(restrictions=[[f"{cond}method"]]))
+
+
+def test_nonnumeric_uniqueid(node_factory):
+    """We always use numeric uniqueids, don't allow other forms"""
+    l1 = node_factory.get_node()
+
+    # "zero"
+    with pytest.raises(RpcError, match='should have valid numeric unique_id'):
+        l1.rpc.showrunes('pX1h8z05kg0WZqe0ogo_8MHOa7-8gVZNXTckyyLKuLk9emVybw==')
+
+    # "0andstr"
+    with pytest.raises(RpcError, match='should have valid numeric unique_id'):
+        l1.rpc.showrunes('1dYYAIxmjRDHbXUIpztpwDA0q7RrHKbXJd9Yhj50Dfc9MGFuZHN0cmluZw==')
+
+    # "9223372036854775809"
+    with pytest.raises(RpcError, match='should have valid numeric unique_id'):
+        l1.rpc.showrunes('cr7eQmdhPVqH3-M2g67JymP2zVKyZ_n5hhFk3IMSg5o9OTIyMzM3MjAzNjg1NDc3NTgwOQ==')
+
+    # No unique id!
+    with pytest.raises(RpcError, match='should have valid numeric unique_id'):
+        l1.rpc.showrunes('SaQlgbzu6SGAhANReucs7P8GLuVbSlPg30QG78UzNcY=')
+
+
+def test_showrune_id(node_factory):
+    l1 = node_factory.get_node()
+
+    rune = l1.rpc.createrune()['rune']
+
+    # Won't have stored: false
+    assert 'stored' not in only_one(l1.rpc.showrunes(rune)['runes'])
+
+
+@unittest.skipIf(os.getenv('TEST_DB_PROVIDER', 'sqlite3') != 'sqlite3', "This test is based on a sqlite3 snapshot")
+@unittest.skipIf(TEST_NETWORK != 'regtest', "The DB migration is network specific due to the chain var.")
+def test_id_migration(node_factory):
+    """Database was taken from test_createrune"""
+    l1 = node_factory.get_node(dbfile='runes_bad_id.sqlite3.xz',
+                               options={'database-upgrade': True},
+                               old_hsmsecret=True)
+
+    for rune in ('OSqc7ixY6F-gjcigBfxtzKUI54uzgFSA6YfBQoWGDV89MA==',
+                 'zm0x_eLgHexaTvZn3Cz7gb_YlvrlYGDo_w4BYlR9SS09MSZtZXRob2RebGlzdHxtZXRob2ReZ2V0fG1ldGhvZD1zdW1tYXJ5Jm1ldGhvZC9saXN0ZGF0YXN0b3Jl',
+                 'mxHwVsC_W-PH7r79wXQWqxBNHaHncIqIjEPyP_vGOsE9MiZ0aW1lPjE2NTY2NzUyMTE=',
+                 'YPojv9qgHPa3im0eiqRb-g8aRq76OasyfltGGqdFUOU9MyZpZF4wMjJkMjIzNjIwYTM1OWE0N2ZmNyZtZXRob2Q9bGlzdHBlZXJz',
+                 'enX0sTpHB8y1ktyTAF80CnEvGetG340Ne3AGItudBS49NCZwbnVtPTA='):
+        assert 'stored' not in only_one(l1.rpc.showrunes(rune)['runes'])
+
+    # Our migration should have removed this row now
+    assert l1.db_query("SELECT * FROM vars WHERE name = 'runes_uniqueid';") == []
+
+
+def test_rune_error_messages(node_factory):
+    l1 = node_factory.get_node()
+
+    rune1 = l1.rpc.createrune(restrictions=[['method=pay'],
+                                            ['pnum=1']])['rune']
+    with pytest.raises(RpcError, match='Not permitted: number of parameters is not equal to 1'):
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune1,
+                         method='pay',
+                         params=['xxx', 12000])
+    with pytest.raises(RpcError, match='Not permitted: number of parameters is not equal to 1'):
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune1,
+                         method='pay',
+                         params={'bolt11': 'xxx', 'amount_msat': 17})
+
+    rune2 = l1.rpc.createrune(restrictions=[['method=pay'],
+                                            ['parr1=17']])['rune']
+
+    with pytest.raises(RpcError, match='Not permitted: parameter #1 is not equal to 17'):
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune2,
+                         method='pay',
+                         params=['xxx', 12000])
+
+    with pytest.raises(RpcError, match='Not permitted: parameter #1 not present'):
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune2,
+                         method='pay',
+                         params={'bolt11': 'xxx', 'amount_msat': 12000})
+
+    rune3 = l1.rpc.createrune(restrictions=[['method=pay'],
+                                            ['pnamebolt11=xxx']])['rune']
+
+    with pytest.raises(RpcError, match='Not permitted: parameter bolt11 is not equal to xxx'):
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune3,
+                         method='pay',
+                         params={'bolt11': 'yyy', 'amount_msat': 12000})
+    with pytest.raises(RpcError, match='Not permitted: parameter bolt11 not present'):
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune3,
+                         method='pay',
+                         params=['xxx', 12000])
+
+
+def test_rune_bolt11_parse(node_factory):
+    l1 = node_factory.get_node()
+    # Simple
+    inv = l1.rpc.invoice(1, "inv", "inv")['bolt11']
+    # No amount
+    inv_no_amount = l1.rpc.invoice("any", "inv_no_amount", "inv_no_amount")['bolt11']
+    # No description
+    inv_no_description = l1.rpc.invoice(2, "inv_no_description", "inv_no_description", deschashonly=True)['bolt11']
+
+    rune_amount_1 = l1.rpc.createrune(restrictions=[['pinvbolt11_amount=1']])['rune']
+    rune_no_amount = l1.rpc.createrune(restrictions=[['pinvbolt11_amount!']])['rune']
+    rune_desc_inv = l1.rpc.createrune(restrictions=[['pinvbolt11_description=inv']])['rune']
+    rune_no_desc = l1.rpc.createrune(restrictions=[['pinvbolt11_description!']])['rune']
+    rune_node_l1 = l1.rpc.createrune(restrictions=[['pinvbolt11_node=' + l1.info['id']]])['rune']
+
+    # parameter (bolt11) must exist
+    for r in [rune_amount_1, rune_no_amount, rune_desc_inv, rune_no_desc, rune_node_l1]:
+        with pytest.raises(RpcError, match='Not permitted: Unknown invoice parameter bolt11'):
+            l1.rpc.checkrune(nodeid=l1.info['id'],
+                             rune=r,
+                             method='pay',
+                             params={'bolt11x': inv})
+
+    # parameter must be valid invoice
+    for r in [rune_amount_1, rune_no_amount, rune_desc_inv, rune_no_desc, rune_node_l1]:
+        with pytest.raises(RpcError, match='Not permitted: Invalid invoice: '):
+            l1.rpc.checkrune(nodeid=l1.info['id'],
+                             rune=r,
+                             method='pay',
+                             params={'bolt11': 'xxx'})
+
+    # Rune amount_1 success:
+    l1.rpc.checkrune(nodeid=l1.info['id'],
+                     rune=rune_amount_1,
+                     method='pay',
+                     params={'bolt11': inv})
+
+    # Also with lightning: prefix (both cases)
+    l1.rpc.checkrune(nodeid=l1.info['id'],
+                     rune=rune_amount_1,
+                     method='pay',
+                     params={'bolt11': 'lightning:' + inv})
+
+    l1.rpc.checkrune(nodeid=l1.info['id'],
+                     rune=rune_amount_1,
+                     method='pay',
+                     params={'bolt11': 'LIGHTNING:' + inv})
+
+    # Rune amount_1 fail (no amount)
+    with pytest.raises(RpcError, match='Not permitted: invoice parameter bolt11_amount not present'):
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune_amount_1,
+                         method='pay',
+                         params={'bolt11': inv_no_amount})
+
+    # Rune amount_1 fail (wrong amount)
+    with pytest.raises(RpcError, match='Not permitted: invoice parameter bolt11_amount is not equal to 1'):
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune_amount_1,
+                         method='pay',
+                         params={'bolt11': inv_no_description})
+
+    # rune no_amount success:
+    l1.rpc.checkrune(nodeid=l1.info['id'],
+                     rune=rune_no_amount,
+                     method='pay',
+                     params={'bolt11': inv_no_amount})
+
+    # Rune no_amount fail (has amount)
+    with pytest.raises(RpcError, match='Not permitted: invoice parameter bolt11_amount is present'):
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune_no_amount,
+                         method='pay',
+                         params={'bolt11': inv})
+
+    # Rune desc success:
+    l1.rpc.checkrune(nodeid=l1.info['id'],
+                     rune=rune_desc_inv,
+                     method='pay',
+                     params={'bolt11': inv})
+    # Rune desc fail (no description)
+    with pytest.raises(RpcError, match='Not permitted: invoice parameter bolt11_description not present'):
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune_desc_inv,
+                         method='pay',
+                         params={'bolt11': inv_no_description})
+
+    # Rune desc fail (wrong description)
+    with pytest.raises(RpcError, match='Not permitted: invoice parameter bolt11_description is not equal to inv'):
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune_desc_inv,
+                         method='pay',
+                         params={'bolt11': inv_no_amount})
+
+    # Rune no_desc success:
+    l1.rpc.checkrune(nodeid=l1.info['id'],
+                     rune=rune_no_desc,
+                     method='pay',
+                     params={'bolt11': inv_no_description})
+    # Rune no_desc fail (has description)
+    with pytest.raises(RpcError, match='Not permitted: invoice parameter bolt11_description is present'):
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune_no_desc,
+                         method='pay',
+                         params={'bolt11': inv})
+
+    # Node comparison success.
+    l1.rpc.checkrune(nodeid=l1.info['id'],
+                     rune=rune_node_l1,
+                     method='pay',
+                     params={'bolt11': inv})
+    # Node comparison failure
+    other_inv = 'lnbcrt1u1pwuedm6pp5ve584t0cv27hwmy0cx9ca8uwyqyfw9y9dm3r8vus9fv36r2l9yjsdqaw3jhxazlwpshjhmwda0hxetrwfjhgxq8pmnt9qqcqp9sp52au0npwmw4xxv2rfrat04kh9p3jlmklgavhfxqukx0l05pw5tccs9qypqsqa286dmt2xh3jy8cd8ndeyr845q8a7nhgjkerdqjns76jraux6j25ddx9f5k5r2ey0kk942x3uhaff66794kyjxxcd48uevf7p6ja53gqjj5ur7'
+    with pytest.raises(RpcError, match='Not permitted: invoice parameter bolt11_node is not equal to ' + l1.info['id']):
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune_node_l1,
+                         method='pay',
+                         params={'bolt11': other_inv})
+
+
+def test_rune_bolt12_parse(node_factory):
+    l1, l2 = node_factory.line_graph(2)
+
+    # Two invoices.
+    l1inv_1msat = l2.rpc.fetchinvoice(l1.rpc.offer(1, "inv_1msat")['bolt12'])['invoice']
+    l1inv_2msat = l2.rpc.fetchinvoice(l1.rpc.offer(2, "inv_2msat")['bolt12'])['invoice']
+
+    rune_amount_1 = l1.rpc.createrune(restrictions=[['pinvbolt11_amount=1']])['rune']
+    rune_no_amount = l1.rpc.createrune(restrictions=[['pinvbolt11_amount!']])['rune']
+    rune_desc_inv = l1.rpc.createrune(restrictions=[['pinvbolt11_description=inv_1msat']])['rune']
+    rune_no_desc = l1.rpc.createrune(restrictions=[['pinvbolt11_description!']])['rune']
+    rune_node_l1 = l1.rpc.createrune(restrictions=[['pinvbolt11_node=' + l1.info['id']]])['rune']
+
+    # parameter must be valid invoice
+    for r in [rune_amount_1, rune_no_amount, rune_desc_inv, rune_no_desc, rune_node_l1]:
+        with pytest.raises(RpcError, match='Not permitted: Invalid invoice: '):
+            l1.rpc.checkrune(nodeid=l1.info['id'],
+                             rune=r,
+                             method='pay',
+                             params={'bolt11': 'lnixxx'})
+
+    # Rune amount_1 success:
+    l1.rpc.checkrune(nodeid=l1.info['id'],
+                     rune=rune_amount_1,
+                     method='pay',
+                     params={'bolt11': l1inv_1msat})
+
+    # Rune amount_1 fail (wrong amount)
+    with pytest.raises(RpcError, match='Not permitted: invoice parameter bolt11_amount is not equal to 1'):
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune_amount_1,
+                         method='pay',
+                         params={'bolt11': l1inv_2msat})
+
+    # Rune no_amount fail (bolt12 invoice always has amount)
+    with pytest.raises(RpcError, match='Not permitted: invoice parameter bolt11_amount is present'):
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune_no_amount,
+                         method='pay',
+                         params={'bolt11': l1inv_1msat})
+
+    # Rune desc success:
+    l1.rpc.checkrune(nodeid=l1.info['id'],
+                     rune=rune_desc_inv,
+                     method='pay',
+                     params={'bolt11': l1inv_1msat})
+
+    # Rune desc fail (wrong description)
+    with pytest.raises(RpcError, match='Not permitted: invoice parameter bolt11_description is not equal to inv_1msat'):
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune_desc_inv,
+                         method='pay',
+                         params={'bolt11': l1inv_2msat})
+
+    # Rune no_desc fail (has description)
+    with pytest.raises(RpcError, match='Not permitted: invoice parameter bolt11_description is present'):
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune_no_desc,
+                         method='pay',
+                         params={'bolt11': l1inv_1msat})
+
+    # Node comparison success.
+    l1.rpc.checkrune(nodeid=l1.info['id'],
+                     rune=rune_node_l1,
+                     method='pay',
+                     params={'bolt11': l1inv_1msat})
+    # Node comparison failure
+    l2inv = l1.rpc.fetchinvoice(l2.rpc.offer(1, "inv_1msat")['bolt12'])['invoice']
+    with pytest.raises(RpcError, match='Not permitted: invoice parameter bolt11_node is not equal to ' + l1.info['id']):
+        l1.rpc.checkrune(nodeid=l1.info['id'],
+                         rune=rune_node_l1,
+                         method='pay',
+                         params={'bolt11': l2inv})

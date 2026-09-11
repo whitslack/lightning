@@ -1,0 +1,303 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "fundchannel",
+  "title": "Command for establishing a lightning channel",
+  "description": [
+    "The **fundchannel** RPC command opens a payment channel with a peer by committing a funding transaction to the blockchain as defined in BOLT #2.",
+    "",
+    "If not already connected, **fundchannel** will automatically attempt to connect if Core Lightning knows a way to contact the node (either from normal gossip, or from a previous **connect** call).",
+    "",
+    "This auto-connection can fail if Core Lightning does not know how to contact the target node; see lightning-connect(7).",
+    "",
+    "Once the transaction is confirmed, normal channel operations may begin. Readiness is indicated by **listpeers** reporting a *state* of `CHANNELD_NORMAL` for the channel."
+  ],
+  "request": {
+    "required": [
+      "id",
+      "amount"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "type": "pubkey",
+        "description": [
+          "Id is the peer id obtained from connect."
+        ]
+      },
+      "amount": {
+        "type": "sat_or_all",
+        "description": [
+          "The amount in satoshis taken from the internal wallet to fund the channel (but if we have any anchor channels, this will always leave at least `min-emergency- msat` as change). The string *all* can be used to specify all available funds (may be restricted by the `utxos` parameter, and limited to 16777215 satoshi if large channels were not negotiated with the peer). Otherwise, it is in satoshi precision; it can be a whole number, a whole number ending in *sat*, a whole number ending in *000msat*, or a number with 1 to 8 decimal places ending in *btc*. The value cannot be less than the dust limit, currently set to 546, nor more than 16777215 satoshi (unless large channels were negotiated with the peer)."
+        ]
+      },
+      "feerate": {
+        "type": "feerate",
+        "description": [
+          "Used for the opening transaction and (unless *option_anchors* is negotiated), as initial feerate for commitment and HTLC transactions (see NOTES in lightning-feerates(7))."
+        ],
+        "default": "*normal*"
+      },
+      "announce": {
+        "type": "boolean",
+        "description": [
+          "Whether to announce this channel or not. An unannounced channel is considered private."
+        ],
+        "default": "True"
+      },
+      "minconf": {
+        "type": "u32",
+        "description": [
+          "The minimum number of confirmations that used outputs should have."
+        ],
+        "default": "1"
+      },
+      "push_msat": {
+        "type": "msat",
+        "description": [
+          "The amount of millisatoshis to push to the channel peer at open. Note that this is a gift to the peer -- these satoshis are added to the initial balance of the peer at channel start and are largely unrecoverable once pushed."
+        ]
+      },
+      "close_to": {
+        "type": "string",
+        "description": [
+          "A Bitcoin address to which the channel funds should be sent to on close. Only valid if both peers have negotiated `option_upfront_shutdown_script`. Returns `close_to` set to closing script iff is negotiated."
+        ]
+      },
+      "request_amt": {
+        "type": "sat",
+        "description": [
+          "An amount of liquidity you'd like to lease from the peer. If peer supports `option_will_fund`, indicates to them to include this much liquidity into the channel. Must also pass in *compact_lease*."
+        ]
+      },
+      "compact_lease": {
+        "type": "string",
+        "description": [
+          "A compact representation of the peer's expected channel lease terms. If the peer's terms don't match this set, we will fail to open the channel."
+        ]
+      },
+      "utxos": {
+        "type": "array",
+        "description": [
+          "The utxos to be used to fund the channel, as an array of `txid:vout`."
+        ],
+        "items": {
+          "type": "outpoint"
+        }
+      },
+      "mindepth": {
+        "description": [
+          "Number of confirmations required before we consider the channel active."
+        ],
+        "type": "u32"
+      },
+      "reserve": {
+        "type": "sat",
+        "description": [
+          "The amount we want the peer to maintain on its side of the channel. It can be a whole number, a whole number ending in *sat*, a whole number ending in *000msat*, or a number with 1 to 8 decimal places ending in *btc*."
+        ],
+        "default": "1% of the funding amount"
+      },
+      "channel_type": {
+        "added": "v24.02",
+        "type": "array",
+        "items": {
+          "type": "u32",
+          "description": [
+            "Represents the explicit channel type to request. There is currently no sanity checking on this value so if you use strange values and your channel breaks, you get to keep both pieces. BOLT 2 defines the following value types:",
+            "```",
+            "The currently defined basic types are:",
+            "  - `option_static_remotekey` (bit 12).",
+            "  - `option_anchors` and `option_static_remotekey` (bits 22 and 12).",
+            "",
+            "Each basic type has the following variations allowed:",
+            "  - `option_scid_alias` (bit 46).",
+            "  - `option_zeroconf` (bit 50).",
+            "```"
+          ]
+        }
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "tx",
+      "txid",
+      "outnum",
+      "channel_type",
+      "channel_id"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "tx": {
+        "type": "hex",
+        "description": [
+          "The raw transaction which funded the channel."
+        ]
+      },
+      "txid": {
+        "type": "txid",
+        "description": [
+          "The txid of the transaction which funded the channel."
+        ]
+      },
+      "outnum": {
+        "type": "u32",
+        "description": [
+          "The 0-based output index showing which output funded the channel."
+        ]
+      },
+      "channel_id": {
+        "type": "hash",
+        "description": [
+          "The channel_id of the resulting channel."
+        ]
+      },
+      "channel_type": {
+        "type": "object",
+        "description": [
+          "Channel_type as negotiated with peer."
+        ],
+        "added": "v24.02",
+        "additionalProperties": false,
+        "required": [
+          "bits",
+          "names"
+        ],
+        "properties": {
+          "bits": {
+            "type": "array",
+            "description": [
+              "Each bit set in this channel_type."
+            ],
+            "added": "v24.02",
+            "items": {
+              "type": "u32",
+              "description": [
+                "Bit number."
+              ]
+            }
+          },
+          "names": {
+            "type": "array",
+            "description": [
+              "Feature name for each bit set in this channel_type. Note that *anchors_zero_fee_htlc_tx* is a deprecated synonym for *anchors*."
+            ],
+            "added": "v24.02",
+            "items": {
+              "type": "string",
+              "enum": [
+                "static_remotekey/even",
+                "anchor_outputs/even",
+                "anchors_zero_fee_htlc_tx/even",
+                "anchors/even",
+                "scid_alias/even",
+                "zeroconf/even"
+              ],
+              "description": [
+                "Name of feature bit."
+              ]
+            }
+          }
+        }
+      },
+      "close_to": {
+        "type": "hex",
+        "description": [
+          "The raw scriptPubkey which mutual close will go to; only present if *close_to* parameter was specified and peer supports `option_upfront_shutdown_script`."
+        ]
+      },
+      "mindepth": {
+        "type": "u32",
+        "description": [
+          "Number of confirmations before we consider the channel active."
+        ]
+      }
+    }
+  },
+  "errors": [
+    "The following error codes may occur:",
+    "",
+    "- -1: Catchall nonspecific error.",
+    "- 300: The maximum allowed funding amount is exceeded.",
+    "- 301: There are not enough funds in the internal wallet (including fees) to create the transaction.",
+    "- 302: The output amount is too small, and would be considered dust.",
+    "- 303: Broadcasting of the funding transaction failed, the internal call to bitcoin-cli returned with an error.",
+    "- 313: The `min-emergency-msat` reserve could not be preserved (and we have or are opening anchor channels).",
+    "",
+    "Failure may also occur if **lightningd** and the peer cannot agree on channel parameters (funding limits, channel reserves, fees, etc.)."
+  ],
+  "see_also": [
+    "lightning-connect(7)",
+    "lightning-listfunds()",
+    "lightning-listpeers(7)",
+    "lightning-feerates(7)",
+    "lightning-multifundchannel(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:fundchannel#1",
+        "method": "fundchannel",
+        "params": {
+          "id": "0258f3ff3e0853ccc09f6fe89823056d7c0c55c95fab97674df5e1ad97a72f6265",
+          "amount": 1000000,
+          "announce": true
+        }
+      },
+      "response": {
+        "tx": "02000000000101b8b4d0e0e51fdf02fa8ca958a3a44d2a2d38fcd405637d1ad8d00c118b0f08cb0100000000fdffffff0240420f00000000002200202bdf62cf77ca8d331ee03e40d1eb7fa14bb8078c3427d7714f271e37468645e866dad40b000000002251205f5ccf17471f681b995a3eadb89503818769d6be3f30c72584b60200a525ac3001409125e6c73c236127175f78daecea1dde07bd51f700a546b09cae1fe4c2ba0e7be798f1ba74d03bce5fb771ba6365b928743c3bd6a36a40ae0632c1d571569831a2000000",
+        "txid": "eaa3e5f498b0d3de22f2e3b1dd5cad96952bdcb4da2cdac4f152ffad049ab062",
+        "channel_id": "3526c26311c7cd921e4f81137dac45e1f18ae0e7ae3982e9b9189691eb00f706",
+        "channel_type": {
+          "bits": [
+            12,
+            22
+          ],
+          "names": [
+            "static_remotekey/even",
+            "anchors/even"
+          ]
+        },
+        "outnum": 0
+      }
+    },
+    {
+      "description": [
+        "This example shows how to to open new channel with peer 1 from one whole utxo (you can use **listfunds** command to get txid and vout):"
+      ],
+      "request": {
+        "id": "example:fundchannel#2",
+        "method": "fundchannel",
+        "params": {
+          "id": "038194b5f32bdf0aa59812c86c4ef7ad2f294104fa027d1ace9b469bb6f88cf37b",
+          "amount": "all",
+          "feerate": "normal",
+          "push_msat": 100000,
+          "utxos": [
+            "dc40d6b9b940b76b26a9c4463239926b745cd7a9383291299972a4f9b3a21868:1"
+          ]
+        }
+      },
+      "response": {
+        "tx": "02000000000101fe42843e56bcbaa0b6c0180d60bf6d06a8b2e83ce8c6960fb7b3f68956a80a250100000000fdffffff01cbb3eb0b00000000220020c895be991f0db9ca781fca2b5d2b141e9320f1d559bc950df5c613a1f3f266490247304402201833d557338fbcf25bdb5c4be8e1b46a9ca1754fbfa52e31a54f67df725e99d0022048160e4384af6cd905759b2f4ef6836c4cf53edf4d1bb83df7e62ff04f0fa2b201210287eb973cfdd54b2e639261f95bf06a57318d1272961eccdb373853e33a591b72a2000000",
+        "txid": "bc2d63e50c4715cd46f2d1b0785aed3bca65666a81618a070efac4216b15238d",
+        "channel_id": "6aaff9e10dbf14d2d76bb3c259fc39f2472098afa7fdd9cf3d0dc93ee9d99c04",
+        "channel_type": {
+          "bits": [
+            12,
+            22
+          ],
+          "names": [
+            "static_remotekey/even",
+            "anchors/even"
+          ]
+        },
+        "outnum": 0
+      }
+    }
+  ]
+}

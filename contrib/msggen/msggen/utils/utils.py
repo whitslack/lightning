@@ -1,0 +1,405 @@
+import functools
+import json
+from collections import OrderedDict
+from importlib import resources
+from pathlib import Path
+
+from msggen.model import CompositeField, Method, Notification, Hook, Service, TypeName
+
+grpc_method_names = [
+    "Getinfo",
+    "ListPeers",
+    "ListFunds",
+    "SendPay",
+    "ListChannels",
+    "AddGossip",
+    "AddPsbtOutput",
+    "AutoClean-Once",
+    "AutoClean-Status",
+    "CheckMessage",
+    "Close",
+    "Connect",
+    "CreateInvoice",
+    "Datastore",
+    "DatastoreUsage",
+    "CreateOnion",
+    "DelDatastore",
+    "DelInvoice",
+    "Dev-Forget-Channel",
+    "EmergencyRecover",
+    "GetEmergencyRecoverData",
+    "ExposeSecret",
+    "Recover",
+    "RecoverChannel",
+    "Invoice",
+    "InvoiceRequest",
+    "DisableInvoiceRequest",
+    "ListInvoiceRequests",
+    "ListDatastore",
+    "ListInvoices",
+    "SendOnion",
+    "ListSendPays",
+    "ListTransactions",
+    "MakeSecret",
+    "Pay",
+    "ListNodes",
+    "WaitAnyInvoice",
+    "WaitInvoice",
+    "WaitSendPay",
+    "NewAddr",
+    "Withdraw",
+    "KeySend",
+    "FundPsbt",
+    "SendPsbt",
+    "SignPsbt",
+    "UtxoPsbt",
+    "TxDiscard",
+    "TxPrepare",
+    "TxSend",
+    "ListPeerChannels",
+    "ListClosedChannels",
+    "Decode",
+    "DelPay",
+    "DelForward",
+    "DisableOffer",
+    "EnableOffer",
+    "Disconnect",
+    "Feerates",
+    "FetchBip353",
+    "FetchInvoice",
+    "CancelRecurringInvoice",
+    "FundChannel_Cancel",
+    "FundChannel_Complete",
+    "FundChannel",
+    "FundChannel_Start",
+    "GetLog",
+    "FunderUpdate",
+    "GetRoute",
+    "ListAddresses",
+    "ListForwards",
+    "ListOffers",
+    "ListPays",
+    "ListHtlcs",
+    "MultiFundChannel",
+    "MultiWithdraw",
+    "Offer",
+    "OpenChannel_Abort",
+    "OpenChannel_Bump",
+    "OpenChannel_Init",
+    "OpenChannel_Signed",
+    "OpenChannel_Update",
+    # "parsefeerate",
+    "Ping",
+    "Plugin",
+    "RenePayStatus",
+    "RenePay",
+    "ReserveInputs",
+    "SendCustomMsg",
+    "SendInvoice",
+    "SetChannel",
+    "SetConfig",
+    "SetPsbtVersion",
+    "SignInvoice",
+    "SignMessage",
+    "Splice_Init",
+    "Splice_Signed",
+    "Splice_Update",
+    "SpliceIn",
+    "SpliceOut",
+    "Dev-Splice",
+    "UnreserveInputs",
+    "UpgradeWallet",
+    "WaitBlockHeight",
+    "Wait",
+    "ListConfigs",
+    # "check",  # No point in mapping this one
+    "Stop",
+    # "notifications",  # No point in mapping this
+    "Help",
+    "PreApproveKeysend",
+    "PreApproveInvoice",
+    "StaticBackup",
+    "Bkpr-ChannelsApy",
+    "Bkpr-DumpIncomeCsv",
+    "Bkpr-Inspect",
+    "Bkpr-ListAccountEvents",
+    "Bkpr-ListBalances",
+    "Bkpr-ListIncome",
+    "Bkpr-EditDescriptionByPaymentId",
+    "Bkpr-EditDescriptionByOutpoint",
+    "Bkpr-Report",
+    "BlacklistRune",
+    "CheckRune",
+    "CreateRune",
+    "ShowRunes",
+    "AskRene-Unreserve",
+    "AskRene-ListLayers",
+    "AskRene-Create-Layer",
+    "AskRene-Remove-Layer",
+    "AskRene-Remove-Channel-Update",
+    "AskRene-Reserve",
+    "AskRene-Age",
+    "GetRoutes",
+    "AskRene-Disable-Node",
+    "AskRene-Inform-Channel",
+    "AskRene-Create-Channel",
+    "AskRene-Update-Channel",
+    "AskRene-Bias-Channel",
+    "Askrene-Bias-Node",
+    "AskRene-ListReservations",
+    "InjectPaymentOnion",
+    "InjectOnionMessage",
+    "Xpay",
+    "SignMessageWithKey",
+    "ListChannelMoves",
+    "ListChainMoves",
+    "ListNetworkEvents",
+    "DelNetworkEvent",
+    "Clnrest-Register-Path",
+    "ListCurrencyRates",
+    "CurrencyConvert",
+    "CurrencyRate",
+    "SendAmount",
+    "CreateProof",
+    "Xkeysend",
+    "Graceful",
+]
+
+grpc_notification_names = [
+    {"name": "balance_snapshot", "typename": "BalanceSnapshot"},
+    {"name": "block_added", "typename": "BlockAdded"},
+    {"name": "channel_open_failed", "typename": "ChannelOpenFailed"},
+    {"name": "channel_opened", "typename": "ChannelOpened"},
+    {"name": "channel_state_changed", "typename": "ChannelStateChanged"},
+    {"name": "connect", "typename": "Connect"},
+    {"name": "coin_movement", "typename": "CoinMovement"},
+    {"name": "custommsg", "typename": "CustomMsg"},
+    {"name": "deprecated_oneshot", "typename": "DeprecatedOneshot"},
+    {"name": "disconnect", "typename": "Disconnect"},
+    {"name": "forward_event", "typename": "ForwardEvent"},
+    {"name": "invoice_creation", "typename": "InvoiceCreation"},
+    {"name": "invoice_payment", "typename": "InvoicePayment"},
+    {"name": "log", "typename": "Log"},
+    {"name": "onionmessage_forward_fail", "typename": "OnionMessageForwardFail"},
+    {"name": "openchannel_peer_sigs", "typename": "OpenChannelPeerSigs"},
+    {"name": "plugin_started", "typename": "PluginStarted"},
+    {"name": "plugin_stopped", "typename": "PluginStopped"},
+    {"name": "sendpay_failure", "typename": "SendPayFailure"},
+    {"name": "sendpay_success", "typename": "SendPaySuccess"},
+    {"name": "shutdown", "typename": "Shutdown"},
+    {"name": "warning", "typename": "Warning"},
+    {
+        "name": "pay_part_end",
+        "schema_name": "xpay_pay_part_end",
+        "typename": "PayPartEnd",
+    },
+    {
+        "name": "pay_part_start",
+        "schema_name": "xpay_pay_part_start",
+        "typename": "PayPartStart",
+    },
+]
+
+hook_names = [
+    {"name": "peer_connected", "typename": "PeerConnected"},
+    {"name": "recover_hook", "schema_name": "recover", "typename": "RecoverHook"},
+    {"name": "commitment_revocation", "typename": "CommitmentRevocation"},
+    {"name": "db_write", "typename": "DbWrite"},
+    {"name": "invoice_payment_hook", "schema_name": "invoice_payment", "typename": "InvoicePaymentHook"},
+    {"name": "openchannel", "typename": "Openchannel"},
+    {"name": "openchannel2", "typename": "Openchannel2"},
+    {"name": "openchannel2_changed", "typename": "Openchannel2Changed"},
+    {"name": "openchannel2_sign", "typename": "Openchannel2Sign"},
+    {"name": "rbf_channel", "typename": "RbfChannel"},
+    {"name": "htlc_accepted", "typename": "HtlcAccepted"},
+    {"name": "rpc_command", "typename": "RpcCommand"},
+    {"name": "custommsg_hook", "schema_name": "custommsg", "typename": "CustommsgHook"},
+    {"name": "onion_message_recv", "typename": "OnionMessageRecv"},
+    {"name": "onion_message_recv_secret", "typename": "OnionMessageRecvSecret"},
+
+]
+
+
+def combine_schemas(schema_dir: Path, dest: Path):
+    """Enumerate all schema files, and combine it into a single JSON file."""
+    bundle = OrderedDict()
+    methods = OrderedDict()
+    notifications = OrderedDict()
+    hooks = OrderedDict()
+
+    # Parse methods
+    files = sorted(list(schema_dir.iterdir()))
+    for f in files:
+        # Ignore sql.json because it will be auto generated by sql plugin and sql-template.json
+        if not f.name.endswith(".json") or f.name == "sql.json":
+            continue
+        methods[f.name] = json.load(f.open())
+
+    # Parse notifications
+    notifications_dir = schema_dir / "notification"
+    files = sorted(list(notifications_dir.iterdir()))
+    for f in files:
+        if not f.name.endswith("json"):
+            continue
+        notifications[f.name] = json.load(f.open())
+
+    # Parse hooks
+    hooks_dir = schema_dir / "hook"
+    files = sorted(list(hooks_dir.iterdir()))
+    for f in files:
+        if not f.name.endswith("json"):
+            continue
+        hooks[f.name] = json.load(f.open())
+
+    bundle["methods"] = methods
+    bundle["notifications"] = notifications
+    bundle["hooks"] = hooks
+
+    with dest.open(mode="w") as f:
+        json.dump(
+            bundle,
+            f,
+            indent=2,
+        )
+    return bundle
+
+
+@functools.lru_cache(maxsize=1)
+def get_schema_bundle():
+    """Load the schema bundle from the combined schema file.
+
+    The combined schema is generated by `combine_schemas`.
+    """
+    p = resources.open_text("msggen", "schema.json")
+    return json.load(p)
+
+
+def check_missing():
+    """Check for missing gRPC commands in the schema."""
+    schema = get_schema_bundle()
+    command_names = set(
+        full_name.replace(".json", "") for full_name in schema["methods"].keys()
+    )
+    lower_method_names = set(name.lower() for name in grpc_method_names)
+    return command_names - lower_method_names
+
+
+def load_jsonrpc_method(name):
+    """Load a method based on the file naming conventions for the JSON-RPC."""
+    schema = get_schema_bundle()
+    rpc_name = f"{name.lower()}.json"
+
+    root_added = schema["methods"][rpc_name].get("added", None)
+    root_deprecated = schema["methods"][rpc_name].get("deprecated", None)
+
+    request = CompositeField.from_js(schema["methods"][rpc_name]["request"], path=name)
+    response = CompositeField.from_js(
+        schema["methods"][rpc_name]["response"], path=name
+    )
+
+    if request.added is None:
+        request.added = root_added
+    if request.deprecated is None:
+        request.deprecated = root_deprecated
+    if response.added is None:
+        response.added = root_added
+    if response.deprecated is None:
+        response.deprecated = root_deprecated
+
+    # Normalize the method request and response typename so they no
+    # longer conflict.
+    request.typename += "Request"
+    response.typename += "Response"
+
+    return Method(
+        name,
+        request=request,
+        response=response,
+    )
+
+
+def load_notification(name, typename: TypeName, schema_name=None):
+    """Load a notification that can be received by a plug-in"""
+    typename = str(typename)
+
+    notifications = get_schema_bundle()["notifications"]
+    if schema_name is None:
+        schema_name = name
+    notif_name = f"{schema_name.lower()}.json"
+
+    root_added = notifications[notif_name].get("added", None)
+    root_deprecated = notifications[notif_name].get("deprecated", None)
+
+    request = CompositeField.from_js(notifications[notif_name]["request"], path=name)
+    response = CompositeField.from_js(notifications[notif_name]["response"], path=name)
+
+    if request.added is None:
+        request.added = root_added
+    if request.deprecated is None:
+        request.deprecated = root_deprecated
+    if response.added is None:
+        response.added = root_added
+    if response.deprecated is None:
+        response.deprecated = root_deprecated
+
+    request.typename = TypeName(f"Stream{typename}Request")
+    response.typename = TypeName(f"{typename}Notification")
+
+    return Notification(name, TypeName(typename), request, response)
+
+
+def load_hook(name, typename: TypeName, schema_name=None):
+    """Load a hook that can be used by a plug-in"""
+    typename = str(typename)
+
+    hooks = get_schema_bundle()["hooks"]
+    if schema_name is None:
+        schema_name = name
+    hook_name = f"{schema_name.lower()}.json"
+
+    root_added = hooks[hook_name].get("added", None)
+    root_deprecated = hooks[hook_name].get("deprecated", None)
+
+    request = CompositeField.from_js(hooks[hook_name]["request"], path=name)
+    response = CompositeField.from_js(hooks[hook_name]["response"], path=name)
+
+    if request.added is None:
+        request.added = root_added
+    if request.deprecated is None:
+        request.deprecated = root_deprecated
+    if response.added is None:
+        response.added = root_added
+    if response.deprecated is None:
+        response.deprecated = root_deprecated
+
+    request.typename += "Event"
+    response.typename += "Action"
+
+    return Hook(name, TypeName(typename), request, response)
+
+
+def load_jsonrpc_service():
+    methods = [load_jsonrpc_method(name) for name in grpc_method_names]
+    notifications = [
+        load_notification(
+            name=names["name"],
+            typename=names["typename"],
+            schema_name=names.get("schema_name"),
+        )
+        for names in grpc_notification_names
+    ]
+    hooks = [
+        load_hook(
+            name=names["name"],
+            typename=names["typename"],
+            schema_name=names.get("schema_name"),
+        )
+        for names in hook_names
+    ]
+    service = Service(
+        name="Node", methods=methods, notifications=notifications, hooks=hooks
+    )
+    service.includes = [
+        "primitives.proto"
+    ]  # Make sure we have the primitives included.
+    return service

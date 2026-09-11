@@ -1,0 +1,41 @@
+name: ReadMe Sync
+
+on:
+  push:
+    branches:
+      - 'master'
+    paths:
+      - 'doc/**'
+  workflow_dispatch:
+
+jobs:
+  rdme-docs-sync:  
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repo 📚
+        uses: actions/checkout@v6
+
+      - name: Sync doc/getting-started/ 🚀
+        uses: readmeio/rdme@v10
+        with:
+          rdme: docs upload ./doc/getting-started --key=${{ secrets.README_API_KEY }} --branch=stable
+            
+      - name: Sync doc/beginners-guide/ 🚀
+        uses: readmeio/rdme@v10
+        with:
+          rdme: docs upload ./doc/beginners-guide --key=${{ secrets.README_API_KEY }} --branch=stable
+      
+      - name: Sync doc/node-operators-guide/ 🚀
+        uses: readmeio/rdme@v10
+        with:
+          rdme: docs upload ./doc/node-operators-guide --key=${{ secrets.README_API_KEY }} --branch=stable
+      
+      - name: Sync doc/developers-guide/ 🚀
+        uses: readmeio/rdme@v10
+        with:
+          rdme: docs upload ./doc/developers-guide --key=${{ secrets.README_API_KEY }} --branch=stable
+      
+      - name: Sync doc/contributing-to-core-lightning/ 🚀
+        uses: readmeio/rdme@v10
+        with:
+          rdme: docs upload ./doc/contribute-to-core-lightning --key=${{ secrets.README_API_KEY }} --branch=stable

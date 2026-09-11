@@ -1,0 +1,287 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "getlog",
+  "title": "Command to show recent logs.",
+  "description": [
+    "The **getlog** the RPC command to show logs, with optional log *level*."
+  ],
+  "categories": [
+    "readonly"
+  ],
+  "request": {
+    "required": [],
+    "additionalProperties": false,
+    "properties": {
+      "level": {
+        "type": "string",
+        "enum": [
+          "broken",
+          "unusual",
+          "info",
+          "debug",
+          "trace",
+          "io"
+        ],
+        "description": [
+          "A string that represents the log level."
+        ],
+        "default": "*info*"
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "created_at",
+      "bytes_used",
+      "bytes_max",
+      "log"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "created_at": {
+        "type": "string",
+        "description": [
+          "UNIX timestamp with 9 decimal places, when logging was initialized."
+        ]
+      },
+      "bytes_used": {
+        "type": "u32",
+        "description": [
+          "The number of bytes used by logging records."
+        ]
+      },
+      "bytes_max": {
+        "type": "u32",
+        "description": [
+          "The bytes_used values at which records will be trimmed ."
+        ]
+      },
+      "log": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "type"
+          ],
+          "additionalProperties": true,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "SKIPPED",
+                "BROKEN",
+                "UNUSUAL",
+                "INFO",
+                "DEBUG",
+                "TRACE",
+                "IO_IN",
+                "IO_OUT"
+              ]
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "additionalProperties": true,
+                "properties": {
+                  "type": {
+                    "enum": [
+                      "SKIPPED"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "additionalProperties": false,
+                "required": [
+                  "num_skipped"
+                ],
+                "properties": {
+                  "type": {},
+                  "num_skipped": {
+                    "type": "u32",
+                    "description": [
+                      "Number of unprinted log entries (deleted or below *level* parameter)."
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "additionalProperties": true,
+                "properties": {
+                  "type": {
+                    "enum": [
+                      "BROKEN",
+                      "UNUSUAL",
+                      "INFO",
+                      "DEBUG",
+                      "TRACE"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "additionalProperties": false,
+                "required": [
+                  "time",
+                  "source",
+                  "log"
+                ],
+                "properties": {
+                  "type": {},
+                  "time": {
+                    "type": "string",
+                    "description": [
+                      "UNIX timestamp with 9 decimal places after **created_at**."
+                    ]
+                  },
+                  "source": {
+                    "type": "string",
+                    "description": [
+                      "The particular logbook this was found in."
+                    ]
+                  },
+                  "log": {
+                    "type": "string",
+                    "description": [
+                      "The actual log message."
+                    ]
+                  },
+                  "node_id": {
+                    "type": "pubkey",
+                    "description": [
+                      "The peer this is associated with."
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "additionalProperties": true,
+                "properties": {
+                  "type": {
+                    "enum": [
+                      "IO_IN",
+                      "IO_OUT"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "additionalProperties": false,
+                "required": [
+                  "time",
+                  "source",
+                  "log"
+                ],
+                "properties": {
+                  "type": {},
+                  "time": {
+                    "type": "string",
+                    "description": [
+                      "Seconds after **created_at**, with 9 decimal places."
+                    ]
+                  },
+                  "source": {
+                    "type": "string",
+                    "description": [
+                      "The particular logbook this was found in."
+                    ]
+                  },
+                  "log": {
+                    "type": "string",
+                    "description": [
+                      "The associated log message."
+                    ]
+                  },
+                  "node_id": {
+                    "type": "pubkey",
+                    "description": [
+                      "The peer this is associated with."
+                    ]
+                  },
+                  "data": {
+                    "type": "hex",
+                    "description": [
+                      "The IO which occurred."
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "errors": [
+    "On failure, one of the following error codes may be returned:",
+    "",
+    "- -32602: Error in given parameters."
+  ],
+  "author": [
+    "Vincenzo Palazzo [vincenzo.palazzo@protonmail.com](mailto:vincenzo.palazzo@protonmail.com) wrote the initial version of this man page,",
+    "but many others did the hard work of actually implementing this rpc command."
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:getlog#1",
+        "method": "getlog",
+        "params": {
+          "level": "unusual"
+        }
+      },
+      "response": {
+        "created_at": "1738000000.000000000",
+        "bytes_used": 3271748,
+        "bytes_max": 16777216,
+        "log": [
+          {
+            "type": "UNUSUAL",
+            "time": "0.000000000",
+            "source": "plugin-bookkeeper",
+            "log": "topic 'utxo_deposit' is not a known notification topic",
+            "num_skipped": 177
+          },
+          {
+            "type": "UNUSUAL",
+            "time": "0.000000000",
+            "source": "plugin-bookkeeper",
+            "log": "topic 'utxo_spend' is not a known notification topic"
+          },
+          {
+            "type": "UNUSUAL",
+            "time": "0.000000000",
+            "node_id": "038194b5f32bdf0aa59812c86c4ef7ad2f294104fa027d1ace9b469bb6f88cf37b",
+            "source": "chan#1",
+            "log": "No peer channel with scid=7984345x7385111x15166",
+            "num_skipped": 4562
+          },
+          {
+            "type": "UNUSUAL",
+            "time": "0.000000000",
+            "node_id": "03cecbfdc68544cc596223b68ce0710c9e5d2c9cb317ee07822d95079acc703d31",
+            "source": "chan#2",
+            "log": "Peer permanent failure in CLOSINGD_COMPLETE: Funding transaction spent: onchain txid dc446777a9b3d6d5962f502f5d22f66b01452389c1bbe8460491e7376f44a1eb (reason=unknown)",
+            "num_skipped": 4554
+          },
+          {
+            "type": "UNUSUAL",
+            "time": "0.000000000",
+            "node_id": "03cecbfdc68544cc596223b68ce0710c9e5d2c9cb317ee07822d95079acc703d31",
+            "source": "chan#2",
+            "log": "Not dropping our unilateral close onchain since we already saw dc446777a9b3d6d5962f502f5d22f66b01452389c1bbe8460491e7376f44a1eb confirm."
+          }
+        ]
+      }
+    }
+  ]
+}

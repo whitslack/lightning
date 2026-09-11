@@ -1,0 +1,152 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "reserveinputs",
+  "title": "Construct a transaction and reserve the UTXOs it spends",
+  "description": [
+    "The **reserveinputs** RPC command places (or increases) reservations on any inputs specified in *psbt* which are known to lightningd. It will fail with an error if any of the inputs are known to be spent, and ignore inputs which are unknown.",
+    "",
+    "Normally the command will fail (with no reservations made) if an input is already reserved."
+  ],
+  "request": {
+    "required": [
+      "psbt"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "psbt": {
+        "type": "string",
+        "description": [
+          "The PSBT to reserve inputs from."
+        ]
+      },
+      "exclusive": {
+        "type": "boolean",
+        "description": [
+          "If set to *False*, existing reservations are simply extended, rather than causing failure."
+        ]
+      },
+      "reserve": {
+        "type": "u32",
+        "description": [
+          "The number of blocks to reserve. By default, reservations are for the next 72 blocks (approximately 6 hours)."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "reservations"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "reservations": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "txid",
+            "vout",
+            "was_reserved",
+            "reserved",
+            "reserved_to_block"
+          ],
+          "properties": {
+            "txid": {
+              "type": "txid",
+              "description": [
+                "The input transaction id."
+              ]
+            },
+            "vout": {
+              "type": "u32",
+              "description": [
+                "The input index output number which was reserved."
+              ]
+            },
+            "was_reserved": {
+              "type": "boolean",
+              "description": [
+                "Whether the input was already reserved."
+              ]
+            },
+            "reserved": {
+              "type": "boolean",
+              "enum": [
+                true
+              ],
+              "description": [
+                "Whether the input is now reserved."
+              ]
+            },
+            "reserved_to_block": {
+              "type": "u32",
+              "description": [
+                "What blockheight the reservation will expire."
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "errors": [
+    "On failure, an error is reported and no UTXOs are reserved.",
+    "",
+    "- -32602: Invalid parameter, such as specifying a spent/reserved input in *psbt*."
+  ],
+  "author": [
+    "Lisa Neigut [niftynei@gmail.com](mailto:niftynei@gmail.com) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-unreserveinputs(7)",
+    "lightning-signpsbt(7)",
+    "lightning-sendpsbt(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:reserveinputs#1",
+        "method": "reserveinputs",
+        "params": {
+          "psbt": "cHNidP8BADMCAAAAARHhxRMpaHbL03bWlbsiZX+880W1ROG7W7z9WmN5QL0iAAAAAAD9////AAAAAAAAAA=="
+        }
+      },
+      "response": {
+        "reservations": [
+          {
+            "txid": "22bd4079635afdbc5bbbe144b545f3bc7f6522bb95d676d3cb76682913c5e111",
+            "vout": 0,
+            "was_reserved": false,
+            "reserved": true,
+            "reserved_to_block": 235
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "id": "example:reserveinputs#2",
+        "method": "reserveinputs",
+        "params": {
+          "psbt": "cHNidP8BADMCAAAAAYWKIynYi2mSbzAc0yZw1I7aB7EPwd7IIIWwArz48iMRAAAAAAD9////AAAAAAAAAA=="
+        }
+      },
+      "response": {
+        "reservations": [
+          {
+            "txid": "1123f2f8bc02b08520c8dec10fb107da8ed47026d31c306f92698bd829238a85",
+            "vout": 0,
+            "was_reserved": false,
+            "reserved": true,
+            "reserved_to_block": 235
+          }
+        ]
+      }
+    }
+  ]
+}

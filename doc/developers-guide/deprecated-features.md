@@ -1,0 +1,58 @@
+---
+title: Deprecated Features
+slug: deprecated-features
+content:
+  excerpt: Deprecated features and timeline for old feature removals.
+privacy:
+  view: public
+---
+
+| Name                                               | Type               | First Deprecated | Last Supported | Description                                                                                                               |
+|----------------------------------------------------|--------------------|------------------|----------------|---------------------------------------------------------------------------------------------------------------------------|
+| wait.details                                       | Field              | v25.05           | v26.06         | Use subsystem-specific object instead                                                                                     |
+| coin_movement.tags                                 | Notification Field | v25.09           | v26.09         | Use `primary_tag` (first tag) and `extra_tags` instead                                                                    |
+| coin_movement.utxo_txid                            | Notification Field | v25.09           | v26.09         | Use `utxo` instead of `utxo_txid` & `vout`                                                                                |
+| coin_movement.txid                                 | Notification Field | v25.09           | v26.09         | Use `spending_txid` instead                                                                                               |
+| channel_state_changed.null_scid                    | Notification Field | v25.09           | v26.09         | In channel_state_changed notification, `short_channel_id` will be missing instead of `null`                               |
+| notification.payload                               | Notification Field | v25.09           | v26.09         | Notifications from plugins used to have fields in `payload` sub-object, now they are not (just like normal notifications) |
+| pay_notifications.raw_fields                       | Field              | v25.09           | v26.09         | `channel_hint_update`, `pay_failure` and `pay_success` notifications now wrap members in an object of the same name       |
+| encrypted_hsm                                      | Config             | v25.12           | v26.12         | `hsm-passphrase` is a name which also makes sense for modern hsm_secrets which use BIP 39                                 |
+| newaddr.addresstype.defaultbech32                  | Parameter          | v25.12           | v26.12         | Use `p2tr` in the response (present since v23.08 if `addresstype` is `p2tr`,  and always present since v24.12).           |
+| channel_state_changed.null_message                 | Notification Field | v25.12           | v26.12         | In channel_state_changed notification, `message` will be missing instead of `null`                                        |
+| hsmtool.getcodexsecret                             | Command            | v25.12.1         | v26.12         | Doesn't work on nodes using mnemonic secrets (v25.12 or later).  Use `getsecret` instead.                                 |
+| experimental_splicing                              | Config             | v26.04           | v27.04         | Splicing is now enabled by default                                                                                       |
+| getroutes.layers.auto.no_mpp_support               | Parameter          | v26.06           | v27.03         | Use `maxparts=1` instead (since v25.09)                                                                                   |
+| getroutes.next_node_id                             | Field              | v26.06           | v27.06         | Use `node_id_out` instead (since v26.06)                                                                                  |
+| getroutes.amount_msat                              | Field              | v26.06           | v27.06         | Use `amount_in_msat` instead (since v26.06)                                                                               |
+| getroutes.delay                                    | Field              | v26.06           | v27.06         | Use `cltv_in` instead (since v26.06)                                                                                      |
+| pay                                                | Command            | v26.06           | v27.03         | Use the more sophisticated and effective "xpay" command instead (since v24.11).                                           |
+| paystatus                                          | Command            | v26.06           | v27.03         | Uses internal pay structures, doesn't work with xpay, doesn't work across restarts.                                       |
+| getroute                                           | Command            | v26.06           | v27.03         | Less flexible than `getroutes` which takes an actual fee budget and can do multiple paths at once.                        |
+| keysend                                            | Command            | v26.06           | v27.03         | Replaced by more powerful `xkeysend`.                                                                                     |
+| renepay                                            | Command            | v26.06           | v27.03         | Use `xpay` instead.                                                                                                       |
+| renepaystatus                                      | Command            | v26.06           | v27.03         | Use `xpay` notifications and `listpays` or `listsendpays` instead.                                                        |
+
+Inevitably there are features which need to change: either to be generalized, or removed when they can no longer be supported.
+
+Types of deprecation:
+* Command: an entire command is removed.  Usually replaced by a more generic or better-named one.
+* Config: a commandline/configuration option is removed.  Usually made the default, or replaced by generalized or better-named.
+* Field(s): a JSON field output.  We cannot detect if you are using these, of course.
+* Parameter(s): a JSON RPC input.
+* Getmanifest Reply: a field in the JSON reply which plugins give to `getmanifest`.
+* Hook Return: a field/value in the JSON reply which plugins give to a plugin hook.
+* Notification/Hook Field: a field in the JSON notification/hook to a plugin.
+
+For each deprecation:
+1. The deprecation is listed here, and in the CHANGELOG.md file.
+2. We try to give at least 2 versions before removal.
+3. Then one version where we issue a warning message if we detect a deprecated feature being used (not possible for deprecatred `Field` types).
+4. At least one version where the deprecated feature can be explicit re-enabled using `i-promise-to-fix-broken-api-user=FEATURENAME`.
+
+
+This is designed to minimize the chance that anyone will be surprised by a change!
+
+You can also test earlier.  Deprecated features can be disabled in three ways:
+1. `developer` mode changes the default deprecations to disabled globally.
+2. `allow-deprecated-apis=` lets you disable (`false`) or re-enable (`true`) globally.
+3. The `deprecations` JSON API can disable/re-enable deprecations for a specific client (added in *v24.02*).

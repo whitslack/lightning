@@ -1,0 +1,233 @@
+#include <common/channel_id.h>
+#include <common/features.h>
+#include <common/node_id.h>
+#include <common/wireaddr.h>
+#include <wire/onion_wiregen.h>
+
+msgtype,connectd_init,2000
+msgdata,connectd_init,chainparams,chainparams,
+msgdata,connectd_init,our_features,feature_set,
+msgdata,connectd_init,id,node_id,
+msgdata,connectd_init,num_wireaddrs,u16,
+msgdata,connectd_init,wireaddrs,wireaddr_internal,num_wireaddrs
+msgdata,connectd_init,listen_announce,enum addr_listen_announce,num_wireaddrs
+msgdata,connectd_init,tor_proxyaddr,?wireaddr,
+msgdata,connectd_init,use_tor_proxy_always,bool,
+msgdata,connectd_init,dev_allow_localhost,bool,
+msgdata,connectd_init,use_dns,bool,
+msgdata,connectd_init,tor_password,wirestring,
+msgdata,connectd_init,timeout_secs,u32,
+msgdata,connectd_init,websocket_helper,wirestring,
+msgdata,connectd_init,message_padding,bool,
+msgdata,connectd_init,dev_fast_gossip,bool,
+# If this is set, then fd 5 is dev_disconnect_fd.
+msgdata,connectd_init,dev_disconnect,bool,
+msgdata,connectd_init,dev_no_ping_timer,bool,
+# Allow incoming connections, but don't talk.
+msgdata,connectd_init,dev_noreply,bool,
+msgdata,connectd_init,dev_throttle_gossip,bool,
+msgdata,connectd_init,dev_no_reconnect,bool,
+msgdata,connectd_init,dev_fast_reconnect,bool,
+msgdata,connectd_init,dev_limit_connections_inflight,bool,
+msgdata,connectd_init,dev_keep_nagle,bool,
+
+# Connectd->master, here are the addresses I bound, can announce.
+msgtype,connectd_init_reply,2100
+msgdata,connectd_init_reply,num_bindings,u16,
+msgdata,connectd_init_reply,bindings,wireaddr_internal,num_bindings
+msgdata,connectd_init_reply,num_announceable,u16,
+msgdata,connectd_init_reply,announceable,wireaddr,num_announceable
+msgdata,connectd_init_reply,failmsg,?wirestring,
+
+# Activate the connect daemon, so others can connect.
+msgtype,connectd_activate,2025
+# Do we listen?
+msgdata,connectd_activate,listen,bool,
+
+# Set the allowed (i.e. don't hang up on!) unknown messages.
+msgtype,connectd_set_custommsgs,2007
+msgdata,connectd_set_custommsgs,len,u32,
+msgdata,connectd_set_custommsgs,msgnums,u16,len
+
+# Connectd->master, I am ready.
+msgtype,connectd_activate_reply,2125
+msgdata,connectd_activate_reply,failmsg,?wirestring,
+
+# lightningd -> connectd: here's an SCID->peer mapping for onion messages
+msgtype,connectd_scid_map,2024
+msgdata,connectd_scid_map,scid,short_channel_id,
+msgdata,connectd_scid_map,node_id,node_id,
+
+# Master -> connectd: connect to a peer.
+# If !transient, we will keep trying to connect.
+msgtype,connectd_connect_to_peer,2001
+msgdata,connectd_connect_to_peer,id,node_id,
+msgdata,connectd_connect_to_peer,len,u32,
+msgdata,connectd_connect_to_peer,addrs,wireaddr_internal,len
+msgdata,connectd_connect_to_peer,transient,bool,
+msgdata,connectd_connect_to_peer,reason,wirestring,
+
+# Connectd->master: connect failed.
+msgtype,connectd_connect_failed,2020
+msgdata,connectd_connect_failed,id,node_id,
+msgdata,connectd_connect_failed,connect_reason,wirestring,
+msgdata,connectd_connect_failed,connect_nsec,u64,
+msgdata,connectd_connect_failed,failcode,enum jsonrpc_errcode,
+msgdata,connectd_connect_failed,failreason,wirestring,
+msgdata,connectd_connect_failed,connect_attempted,bool,
+
+# Connectd -> master: we got a peer.
+msgtype,connectd_peer_connected,2002
+msgdata,connectd_peer_connected,id,node_id,
+msgdata,connectd_peer_connected,counter,u64,
+msgdata,connectd_peer_connected,addr,wireaddr_internal,
+msgdata,connectd_peer_connected,remote_addr,?wireaddr,
+msgdata,connectd_peer_connected,incoming,bool,
+msgdata,connectd_peer_connected,flen,u16,
+msgdata,connectd_peer_connected,features,u8,flen
+msgdata,connectd_peer_connected,connect_reason,wirestring,
+msgdata,connectd_peer_connected,connect_nsec,u64,
+
+# connectd -> master: peer disconnected.
+msgtype,connectd_peer_disconnected,2006
+msgdata,connectd_peer_disconnected,id,node_id,
+msgdata,connectd_peer_disconnected,counter,u64,
+msgdata,connectd_peer_disconnected,connected_time_nsec,u64,
+
+# Connectd -> master: peer reconnected (disconnect & connect)
+msgtype,connectd_peer_reconnected,2010
+msgdata,connectd_peer_reconnected,id,node_id,
+msgdata,connectd_peer_reconnected,prev_counter,u64,
+msgdata,connectd_peer_reconnected,counter,u64,
+msgdata,connectd_peer_reconnected,addr,wireaddr_internal,
+msgdata,connectd_peer_reconnected,remote_addr,?wireaddr,
+msgdata,connectd_peer_reconnected,incoming,bool,
+msgdata,connectd_peer_reconnected,flen,u16,
+msgdata,connectd_peer_reconnected,features,u8,flen
+msgdata,connectd_peer_reconnected,connected_time_nsec,u64,
+
+# Master -> connectd: make peer active immediately (we want to talk) (+ fd to subd).
+msgtype,connectd_peer_connect_subd,2004
+msgdata,connectd_peer_connect_subd,id,node_id,
+msgdata,connectd_peer_connect_subd,counter,u64,
+msgdata,connectd_peer_connect_subd,channel_id,channel_id,
+
+# Connectd -> master: peer said something interesting
+msgtype,connectd_peer_spoke,2005
+msgdata,connectd_peer_spoke,id,node_id,
+msgdata,connectd_peer_spoke,counter,u64,
+msgdata,connectd_peer_spoke,msgtype,u16,
+msgdata,connectd_peer_spoke,channel_id,channel_id,
+# If msgtype == WIRE_ERROR, this is the string.
+msgdata,connectd_peer_spoke,error,?wirestring,
+
+# master -> connectd: peer no longer reqeuired, don't keep reconnecting.
+msgtype,connectd_downgrade_peer,2015
+msgdata,connectd_downgrade_peer,id,node_id,
+
+# master -> connectd: force disconnect of peer.
+msgtype,connectd_disconnect_peer,2016
+msgdata,connectd_disconnect_peer,id,node_id,
+msgdata,connectd_disconnect_peer,counter,u64,
+
+# master -> connectd: give message to peer.
+msgtype,connectd_peer_send_msg,2003
+msgdata,connectd_peer_send_msg,id,node_id,
+msgdata,connectd_peer_send_msg,counter,u64,
+msgdata,connectd_peer_send_msg,len,u16,
+msgdata,connectd_peer_send_msg,msg,u8,len
+
+# master -> connectd: do you have a memleak?
+msgtype,connectd_dev_memleak,2033
+
+msgtype,connectd_dev_memleak_reply,2133
+msgdata,connectd_dev_memleak_reply,leak,bool,
+
+# master -> connectd: dump status of your fds.
+msgtype,connectd_dev_report_fds,2034
+
+# Ping/pong test.  Waits for a reply if it expects one.
+msgtype,connectd_ping,2030
+msgdata,connectd_ping,reqid,u64,
+msgdata,connectd_ping,id,node_id,
+msgdata,connectd_ping,num_pong_bytes,u16,
+msgdata,connectd_ping,len,u16,
+
+msgtype,connectd_ping_done,2037
+msgdata,connectd_ping_done,reqid,u64,
+# False if we there was already a ping in progress.
+msgdata,connectd_ping_done,sent,bool,
+# 0 == no pong expected, otherwise length of pong.
+msgdata,connectd_ping_done,totlen,u16,
+
+# We give lightningd stats about ping latencies
+msgtype,connectd_ping_latency,2038
+msgdata,connectd_ping_latency,id,node_id,
+msgdata,connectd_ping_latency,ping_nsec,u64,
+
+# We tell lightningd we got an onionmsg
+msgtype,connectd_got_onionmsg_to_us,2145
+msgdata,connectd_got_onionmsg_to_us,path_secret,?secret,
+msgdata,connectd_got_onionmsg_to_us,reply,?blinded_path,
+msgdata,connectd_got_onionmsg_to_us,rawmsg_len,u16,
+msgdata,connectd_got_onionmsg_to_us,rawmsg,u8,rawmsg_len
+
+# Lightningd tells us to send an onion message.
+msgtype,connectd_send_onionmsg,2041
+msgdata,connectd_send_onionmsg,id,node_id,
+msgdata,connectd_send_onionmsg,onion_len,u16,
+msgdata,connectd_send_onionmsg,onion,u8,onion_len
+msgdata,connectd_send_onionmsg,path_key,pubkey,
+
+# Lightningd tells us to digest an onion message.
+msgtype,connectd_inject_onionmsg,2042
+msgdata,connectd_inject_onionmsg,path_key,pubkey,
+msgdata,connectd_inject_onionmsg,onion_len,u16,
+msgdata,connectd_inject_onionmsg,onion,u8,onion_len
+
+# Reply.  If error isn't empty, something went wrong.
+msgtype,connectd_inject_onionmsg_reply,2142
+msgdata,connectd_inject_onionmsg_reply,err,wirestring,
+
+# A custom message that we got from a peer and don't know how to handle, so we
+# forward it to the master for further handling.
+msgtype,connectd_custommsg_in,2110
+msgdata,connectd_custommsg_in,id,node_id,
+msgdata,connectd_custommsg_in,msg_len,u16,
+msgdata,connectd_custommsg_in,msg,u8,msg_len
+
+# We got that custommsg, thankyou, it was delightful.
+msgtype,connectd_custommsg_in_complete,2111
+msgdata,connectd_custommsg_in_complete,id,node_id,
+
+# A custom message that the lightningd tells us to send to the peer.
+msgtype,connectd_custommsg_out,2011
+msgdata,connectd_custommsg_out,id,node_id,
+msgdata,connectd_custommsg_out,msg_len,u16,
+msgdata,connectd_custommsg_out,msg,u8,msg_len
+
+# master -> connectd: we're shutting down, no new connections.
+msgtype,connectd_start_shutdown,2031
+
+# connect - >master: acknowledged.
+msgtype,connectd_start_shutdown_reply,2131
+
+# master -> connect: stop sending gossip.
+msgtype,connectd_dev_suppress_gossip,2032
+
+# master -> connect: waste all your fds.
+msgtype,connectd_dev_exhaust_fds,2036
+
+# master -> connect: set artificial maximum reply_channel_range size.
+msgtype,connectd_dev_set_max_scids_encode_size,2035
+msgdata,connectd_dev_set_max_scids_encode_size,max,u32,
+
+# connectd->master I couldn't forward this onionmessage
+msgtype,connectd_onionmsg_forward_fail,2012
+msgdata,connectd_onionmsg_forward_fail,source,node_id,
+msgdata,connectd_onionmsg_forward_fail,incoming_len,u16,
+msgdata,connectd_onionmsg_forward_fail,incoming,u8,incoming_len,
+msgdata,connectd_onionmsg_forward_fail,path_key,pubkey,
+msgdata,connectd_onionmsg_forward_fail,outgoing_len,u16,
+msgdata,connectd_onionmsg_forward_fail,outgoing,u8,outgoing_len,
+msgdata,connectd_onionmsg_forward_fail,next_node,?sciddir_or_pubkey,

@@ -1,0 +1,487 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "multifundchannel",
+  "title": "Command for establishing many lightning channels",
+  "description": [
+    "The **multifundchannel** RPC command opens multiple payment channels with nodes by committing a single funding transaction to the blockchain that is shared by all channels.",
+    "",
+    "If not already connected, **multifundchannel** will automatically attempt to connect; you may provide a *@host:port* hint appended to the node ID so that Core Lightning can learn how to connect to the node; see lightning-connect(7).",
+    "",
+    "Once the transaction is confirmed, normal channel operations may begin. Readiness is indicated by **listpeers** reporting a *state* of `CHANNELD_NORMAL` for the channel."
+  ],
+  "request": {
+    "required": [
+      "destinations"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "destinations": {
+        "type": "array",
+        "description": [
+          "There must be at least one entry in *destinations*; it cannot be an empty array."
+        ],
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "amount"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": [
+                "Node ID, with an optional *@host:port* appended to it in a manner understood by **connect**; see lightning-connect(7). Each entry in the *destinations* array must have a unique node *id*. If not already connected, **multifundchannel** will automatically attempt to connect to the node."
+              ]
+            },
+            "amount": {
+              "type": "sat_or_all",
+              "description": [
+                "Amount in satoshis taken from the internal wallet to fund the channel (but if we have any anchor channels, this will always leave at least `min-emergency-msat` as change). The string *all* can be used to specify all available funds (or 16,777,215 satoshi if more is available and large channels were not negotiated with the peer). Otherwise it is in satoshi precision; it can be a whole number, a whole number ending in *sat*, a whole number ending in *000msat*, or a number with 1 to 8 decimal places ending in *btc*. The value cannot be less than the dust limit, currently 546 satoshi as of this writing, nor more than 16,777,215 satoshi (unless large channels were negotiated with the peer)."
+              ]
+            },
+            "announce": {
+              "type": "boolean",
+              "description": [
+                "Flag that indicates whether to announce the channel with this. If set to `False`, the channel is unpublished."
+              ],
+              "default": "`True`"
+            },
+            "push_msat": {
+              "type": "msat",
+              "description": [
+                "Amount of millisatoshis to outright give to the node. This is a gift to the peer, and you do not get a proof-of-payment out of this."
+              ]
+            },
+            "close_to": {
+              "type": "string",
+              "description": [
+                "Bitcoin address to which the channel funds should be sent to on close. Only valid if both peers have negotiated `option_upfront_shutdown_script` Returns `close_to` set to closing script iff is negotiated."
+              ]
+            },
+            "request_amt": {
+              "type": "sat",
+              "description": [
+                "Amount of liquidity you'd like to lease from peer. If peer supports `option_will_fund`, indicates to them to include this much liquidity into the channel. Must also pass in *compact_lease*."
+              ]
+            },
+            "compact_lease": {
+              "type": "string",
+              "description": [
+                "Compact representation of the peer's expected channel lease terms. If the peer's terms don't match this set, we will fail to open the channel to this destination."
+              ]
+            },
+            "mindepth": {
+              "type": "u32",
+              "description": [
+                "Number of confirmations before we consider the channel active."
+              ]
+            },
+            "reserve": {
+              "type": "sat",
+              "description": [
+                "Amount we want the peer to maintain on its side of the channel. It can be a whole number, a whole number ending in *sat*, a whole number ending in *000msat*, or a number with 1 to 8 decimal places ending in *btc*."
+              ],
+              "default": "1% of the funding amount"
+            }
+          }
+        }
+      },
+      "feerate": {
+        "type": "feerate",
+        "description": [
+          "Feerate used for the opening transaction, and if *commitment_feerate* is not set, as initial feerate for commitment and HTLC transactions. See NOTES in lightning-feerates(7) for possible values."
+        ],
+        "default": "*normal*"
+      },
+      "minconf": {
+        "type": "integer",
+        "description": [
+          "Minimum number of confirmations that used outputs should have."
+        ],
+        "default": 1
+      },
+      "utxos": {
+        "type": "array",
+        "items": {
+          "type": "outpoint",
+          "description": [
+            "Utxos to be used to fund the channel, as an array of `txid:vout`."
+          ]
+        }
+      },
+      "minchannels": {
+        "type": "integer",
+        "description": [
+          "Re-attempt funding as long as at least this many peers remain (must not be zero). The **multifundchannel** command will only fail if too many peers fail the funding process."
+        ]
+      },
+      "commitment_feerate": {
+        "type": "feerate",
+        "description": [
+          "Initial feerate for commitment and HTLC transactions. See *feerate* for valid values."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "tx",
+      "txid",
+      "channel_ids",
+      "failed"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "tx": {
+        "type": "hex",
+        "description": [
+          "The raw transaction which funded the channel."
+        ]
+      },
+      "txid": {
+        "type": "txid",
+        "description": [
+          "The txid of the transaction which funded the channel."
+        ]
+      },
+      "channel_ids": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "channel_id",
+            "channel_type",
+            "outnum"
+          ],
+          "properties": {
+            "id": {
+              "type": "pubkey",
+              "description": [
+                "The peer we opened the channel with."
+              ]
+            },
+            "outnum": {
+              "type": "u32",
+              "description": [
+                "The 0-based output index showing which output funded the channel."
+              ]
+            },
+            "channel_id": {
+              "type": "hash",
+              "description": [
+                "The channel_id of the resulting channel."
+              ]
+            },
+            "channel_type": {
+              "type": "object",
+              "description": [
+                "Channel_type as negotiated with peer."
+              ],
+              "added": "v24.02",
+              "additionalProperties": false,
+              "required": [
+                "bits",
+                "names"
+              ],
+              "properties": {
+                "bits": {
+                  "type": "array",
+                  "description": [
+                    "Each bit set in this channel_type."
+                  ],
+                  "added": "v24.02",
+                  "items": {
+                    "type": "u32",
+                    "description": [
+                      "Bit number."
+                    ]
+                  }
+                },
+                "names": {
+                  "type": "array",
+                  "description": [
+                    "Feature name for each bit set in this channel_type. Note that *anchors_zero_fee_htlc_tx* is a deprecated synonym for *anchors*."
+                  ],
+                  "added": "v24.02",
+                  "items": {
+                    "type": "string",
+                    "enum": [
+                      "static_remotekey/even",
+                      "anchor_outputs/even",
+                      "anchors_zero_fee_htlc_tx/even",
+                      "anchors/even",
+                      "scid_alias/even",
+                      "zeroconf/even"
+                    ],
+                    "description": [
+                      "Name of feature bit."
+                    ]
+                  }
+                }
+              }
+            },
+            "close_to": {
+              "type": "hex",
+              "description": [
+                "The raw scriptPubkey which mutual close will go to; only present if *close_to* parameter was specified and peer supports `option_upfront_shutdown_script`."
+              ]
+            }
+          }
+        }
+      },
+      "failed": {
+        "type": "array",
+        "description": [
+          "Any peers we failed to open with (if *minchannels* was specified less than the number of destinations)."
+        ],
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "id",
+            "method",
+            "error"
+          ],
+          "properties": {
+            "id": {
+              "type": "pubkey",
+              "description": [
+                "The peer we failed to open the channel with."
+              ]
+            },
+            "method": {
+              "type": "string",
+              "enum": [
+                "connect",
+                "openchannel_init",
+                "fundchannel_start",
+                "fundchannel_complete"
+              ],
+              "description": [
+                "What stage we failed at."
+              ]
+            },
+            "error": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "code",
+                "message"
+              ],
+              "properties": {
+                "code": {
+                  "type": "integer",
+                  "description": [
+                    "JSON error code from failing stage."
+                  ]
+                },
+                "message": {
+                  "type": "string",
+                  "description": [
+                    "Message from stage."
+                  ]
+                },
+                "data": {
+                  "untyped": true,
+                  "description": [
+                    "Additional error data."
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "pre_return_value_notes": [
+      "This command opens multiple channels with a single large transaction, thus only one transaction is returned.",
+      "",
+      "If *minchannels* was specified and is less than the number of destinations, then it is possible that one or more of the destinations do not have a channel even if **multifundchannel** succeeded."
+    ],
+    "post_return_value_notes": [
+      "On failure, none of the channels are created."
+    ]
+  },
+  "errors": [
+    "The following error codes may occur:",
+    "",
+    "- -1: Catchall nonspecific error.",
+    "- 300: The maximum allowed funding amount is exceeded.",
+    "- 301: There are not enough funds in the internal wallet (including fees) to create the transaction.",
+    "- 302: The output amount is too small, and would be considered dust.",
+    "- 303: Broadcasting of the funding transaction failed, the internal call to bitcoin-cli returned with an error.",
+    "- 313: The `min-emergency-msat` reserve could not be preserved (and we have or are opening anchor channels).",
+    "",
+    "Failure may also occur if **lightningd** and the peer cannot agree on channel parameters (funding limits, channel reserves, fees, etc.). See lightning-fundchannel_start(7) and lightning-fundchannel_complete(7).",
+    "",
+    "There may be rare edge cases where a communications failure later in the channel funding process will cancel the funding locally, but the peer thinks the channel is already waiting for funding lockin. In that case, the next time we connect to the peer, our node will tell the peer to forget the channel, but some nodes (in particular, Core Lightning nodes) will disconnect when our node tells them to forget the channel. If you immediately **multifundchannel** with that peer, it could trigger this connect-forget-disconnect behavior, causing the second **multifundchannel** to fail as well due to disconnection. Doing a **connect** with the peers separately, and waiting for a few seconds, should help clear this hurdle; running **multifundchannel** a third time would also clear this."
+  ],
+  "author": [
+    "ZmnSCPxj [ZmnSCPxj@protonmail.com](mailto:ZmnSCPxj@protonmail.com) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-connect(7)",
+    "lightning-listfunds()",
+    "lightning-listpeers(7)",
+    "lightning-fundchannel(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "description": [
+        "This example opens three channels at once, with amounts 20,000 sats, 30,000 sats",
+        "and the final channel using all remaining funds (actually, capped at 16,777,215 sats",
+        "because large-channels is not enabled):"
+      ],
+      "request": {
+        "id": "example:multifundchannel#1",
+        "method": "multifundchannel",
+        "params": {
+          "destinations": [
+            {
+              "id": "03cecbfdc68544cc596223b68ce0710c9e5d2c9cb317ee07822d95079acc703d31@127.0.0.1:30005",
+              "amount": "20000sat"
+            },
+            {
+              "id": "02287bfac8b99b35477ebe9334eede1e32b189e24644eb701c079614712331cec0@127.0.0.1:30007",
+              "amount": "0.0003btc"
+            },
+            {
+              "id": "0258f3ff3e0853ccc09f6fe89823056d7c0c55c95fab97674df5e1ad97a72f6265@127.0.0.1:30009",
+              "amount": "all"
+            }
+          ],
+          "feerate": "10000perkw",
+          "commitment_feerate": "2000perkw"
+        }
+      },
+      "response": {
+        "tx": "0200000000010214b6b3434f0c37b7f508280af9232bc59cdcb9ef69e53e830cef095800f624cd0100000000fdffffff5834ab154c90a83fbb52bfcc460b048653da5568ba0342a98076f5dd5a0f575e0000000000fdffffff04204e000000000000220020c78f7612091014be627511d7759daf13553b15fcda2b8fb4a9d878afb3496c579aedf4050000000022002006addd4c05131a5d7bb40d0ffc74d00e648d908d5765b7498762348042eb66bf307500000000000022002089df8e73118830cb1f909727e62db20c179bc683b1412179416a9c7fd3b0f078a8610000000000002251207df7b21b2b0653344bc7d240d4e70295002696c14150f8fad6e3bd88c0d8520b01402a63bc0089c5eedecc2a4bdbdd2093815a99141358cd83f7893e8cd6e63680f96f4c1cbe79f35b4e1dda4efb31ec88b5435150958e5c4604c76906d58c20f87902473044022022e30ba9e6196fb6d0d17757e8edc5ea8516fcf4460cbe8a25bd0d583b7e61b802202926ac73a850875861b468d3359f63246ce00b70eefa5767a45b5da718fd4a39012102123549c9707591f8c1668a788ad2505dcbb5b216409c216e77a46122588bfa6088000000",
+        "txid": "7eeb916159bcdd09f3eff8411b91c85fed06f6e620d50bb91beaa102aba3ec97",
+        "channel_ids": [
+          {
+            "id": "03cecbfdc68544cc596223b68ce0710c9e5d2c9cb317ee07822d95079acc703d31",
+            "channel_id": "3b1fa1dc588baa09806e690eb912329e34384c56d95908315a12e92c26dbef89",
+            "channel_type": {
+              "bits": [
+                12,
+                22
+              ],
+              "names": [
+                "static_remotekey/even",
+                "anchors/even"
+              ]
+            },
+            "outnum": 0
+          },
+          {
+            "id": "02287bfac8b99b35477ebe9334eede1e32b189e24644eb701c079614712331cec0",
+            "channel_id": "7288d06cc98fe191dff931a68c116f0137d9d5d1bb7946813c6be8d99c45b73b",
+            "channel_type": {
+              "bits": [
+                12,
+                22
+              ],
+              "names": [
+                "static_remotekey/even",
+                "anchors/even"
+              ]
+            },
+            "outnum": 2
+          },
+          {
+            "id": "0258f3ff3e0853ccc09f6fe89823056d7c0c55c95fab97674df5e1ad97a72f6265",
+            "channel_id": "e5c39fd22da8ae30759367bd860a0cd86c798d088307a4f157a13fdcf68b11a4",
+            "channel_type": {
+              "bits": [
+                12,
+                22
+              ],
+              "names": [
+                "static_remotekey/even",
+                "anchors/even"
+              ]
+            },
+            "outnum": 1
+          }
+        ],
+        "failed": []
+      }
+    },
+    {
+      "request": {
+        "id": "example:multifundchannel#2",
+        "method": "multifundchannel",
+        "params": {
+          "destinations": [
+            {
+              "id": "03cecbfdc68544cc596223b68ce0710c9e5d2c9cb317ee07822d95079acc703d31@127.0.0.1:30005",
+              "amount": 50000
+            },
+            {
+              "id": "02287bfac8b99b35477ebe9334eede1e32b189e24644eb701c079614712331cec0@127.0.0.1:30007",
+              "amount": 50000
+            },
+            {
+              "id": "038194b5f32bdf0aa59812c86c4ef7ad2f294104fa027d1ace9b469bb6f88cf37b@127.0.0.1:30001",
+              "amount": 50000
+            }
+          ],
+          "minchannels": 1
+        }
+      },
+      "response": {
+        "tx": "020000000001014eceb34b03237c8ad57ad61ab54e38de29817b8b96ed9d4641a357ae83d3f4c10000000000fdffffff0350c30000000000002200206f1ae7f9f2000e2cdc3e13b2d546e13393b580a037cc5e3ed1e0b21894a1822250c3000000000000220020d08349edf1550657e6802e9c1d4d4a441c85500adb1dd00e14e359387f57b3331a47f30500000000225120bcabd0e0e9ba0888baf623ef4065bb6c43f2f54e09d99c38a83935c6b909f23401405f9a85e4b001c18d0fc42223aae7778539ce704221297f4b2ed563f6523826d7f0b238c8be1cec05f661d5e33ee6bf960b84ba3d4c850c8d70b1a0d8e712ff10a5000000",
+        "txid": "4ea72c1bf4b82495e070493d25888b04c5cf7260a7dc5fbd9025c7c983935640",
+        "channel_ids": [
+          {
+            "id": "03cecbfdc68544cc596223b68ce0710c9e5d2c9cb317ee07822d95079acc703d31",
+            "channel_id": "0f6194a4a68bccede6d4abd9f0916ba13b10f96d5f290f635824d6ccaac9304b",
+            "channel_type": {
+              "bits": [
+                12,
+                22
+              ],
+              "names": [
+                "static_remotekey/even",
+                "anchors/even"
+              ]
+            },
+            "outnum": 1
+          },
+          {
+            "id": "02287bfac8b99b35477ebe9334eede1e32b189e24644eb701c079614712331cec0",
+            "channel_id": "e393b256789f27a058b8a414b4e904f9d4ca7d5840f57e17e9e9a72c0021f429",
+            "channel_type": {
+              "bits": [
+                12,
+                22
+              ],
+              "names": [
+                "static_remotekey/even",
+                "anchors/even"
+              ]
+            },
+            "outnum": 0
+          }
+        ],
+        "failed": [
+          {
+            "id": "038194b5f32bdf0aa59812c86c4ef7ad2f294104fa027d1ace9b469bb6f88cf37b",
+            "method": "connect",
+            "error": {
+              "code": 402,
+              "message": "disconnected during connection"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

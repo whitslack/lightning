@@ -1,0 +1,262 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "fundchannel_start",
+  "title": "Command for initiating channel establishment for a lightning channel",
+  "description": [
+    "`fundchannel_start` is a lower level RPC command. It allows a user to initiate channel establishment with a connected peer.",
+    "",
+    "Note that the funding transaction MUST NOT be broadcast until after channel establishment has been successfully completed by running `fundchannel_complete`, as the commitment transactions for this channel are not secured until the complete command succeeds. Broadcasting transaction before that can lead to unrecoverable loss of funds."
+  ],
+  "request": {
+    "required": [
+      "id",
+      "amount"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "type": "pubkey",
+        "description": [
+          "The peer id obtained from connect."
+        ]
+      },
+      "amount": {
+        "type": "sat",
+        "description": [
+          "Satoshi value that the channel will be funded at. This value MUST be accurate, otherwise the negotiated commitment transactions will not encompass the correct channel value."
+        ]
+      },
+      "feerate": {
+        "type": "feerate",
+        "description": [
+          "Feerate for subsequent commitment transactions: see **fundchannel**. Note that this is ignored for channels with *option_anchors* (we always use a low commitment fee for these)."
+        ]
+      },
+      "announce": {
+        "type": "boolean",
+        "description": [
+          "Whether or not to announce this channel."
+        ]
+      },
+      "close_to": {
+        "type": "string",
+        "description": [
+          "Bitcoin address to which the channel funds should be sent to on close. Only valid if both peers have negotiated `option_upfront_shutdown_script`. Returns `close_to` set to closing script iff is negotiated."
+        ]
+      },
+      "push_msat": {
+        "type": "msat",
+        "description": [
+          "Amount of millisatoshis to push to the channel peer at open. Note that this is a gift to the peer -- these satoshis are added to the initial balance of the peer at channel start and are largely unrecoverable once pushed."
+        ]
+      },
+      "mindepth": {
+        "type": "u32",
+        "description": [
+          "Number of confirmations required before we consider the channel active."
+        ]
+      },
+      "reserve": {
+        "type": "sat",
+        "description": [
+          "The amount we want the peer to maintain on its side."
+        ]
+      },
+      "channel_type": {
+        "type": "array",
+        "description": [
+          "Each bit set in this channel_type."
+        ],
+        "items": {
+          "type": "u32",
+          "description": [
+            "Bit number."
+          ]
+        }
+      }
+    },
+    "pairedWith": [
+      [
+        "feerate",
+        "announce",
+        "close_to",
+        "push_msat",
+        "channel_type",
+        "mindepth",
+        "reserve"
+      ]
+    ]
+  },
+  "response": {
+    "required": [
+      "funding_address",
+      "scriptpubkey",
+      "channel_type",
+      "warning_usage"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "funding_address": {
+        "type": "string",
+        "description": [
+          "The address to send funding to for the channel. DO NOT SEND COINS TO THIS ADDRESS YET."
+        ]
+      },
+      "scriptpubkey": {
+        "type": "hex",
+        "description": [
+          "The raw scriptPubkey for the address."
+        ]
+      },
+      "channel_type": {
+        "type": "object",
+        "description": [
+          "Channel_type as negotiated with peer."
+        ],
+        "added": "v24.02",
+        "additionalProperties": false,
+        "required": [
+          "bits",
+          "names"
+        ],
+        "properties": {
+          "bits": {
+            "type": "array",
+            "added": "v24.02",
+            "description": [
+              "Each bit set in this channel_type."
+            ],
+            "items": {
+              "type": "u32",
+              "description": [
+                "Bit number."
+              ]
+            }
+          },
+          "names": {
+            "type": "array",
+            "description": [
+              "Feature name for each bit set in this channel_type. Note that *anchors_zero_fee_htlc_tx* is a deprecated synonym for *anchors*."
+            ],
+            "added": "v24.02",
+            "items": {
+              "type": "string",
+              "enum": [
+                "static_remotekey/even",
+                "anchor_outputs/even",
+                "anchors_zero_fee_htlc_tx/even",
+                "anchors/even",
+                "scid_alias/even",
+                "zeroconf/even"
+              ],
+              "description": [
+                "Name of feature bit."
+              ]
+            }
+          }
+        }
+      },
+      "close_to": {
+        "type": "hex",
+        "description": [
+          "The raw scriptPubkey which mutual close will go to; only present if *close_to* parameter was specified and peer supports `option_upfront_shutdown_script`."
+        ]
+      },
+      "warning_usage": {
+        "type": "string",
+        "description": [
+          "A warning not to prematurely broadcast the funding transaction (always present!)."
+        ]
+      },
+      "mindepth": {
+        "type": "u32",
+        "description": [
+          "Number of confirmations before we consider the channel active."
+        ]
+      }
+    }
+  },
+  "errors": [
+    "On error the returned object will contain `code` and `message` properties, with `code` being one of the following:",
+    "",
+    "- -32602: If the given parameters are wrong.",
+    "- -1: Catchall nonspecific error.",
+    "- 300: The amount exceeded the maximum configured funding amount.",
+    "- 301: The provided `push_msat` is greater than the provided `amount`.",
+    "- 304: Still syncing with bitcoin network",
+    "- 305: Peer is not connected.",
+    "- 306: Unknown peer id.",
+    "- 312: Peer negotiated `option_dual_fund`, must use `openchannel_init` not `fundchannel_start`. (Only if ``experimental-dual-fund` is enabled)"
+  ],
+  "author": [
+    "Lisa Neigut [niftynei@gmail.com](mailto:niftynei@gmail.com) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-connect(7)",
+    "lightning-fundchannel(7)",
+    "lightning-multifundchannel(7)",
+    "lightning-fundchannel_complete(7)",
+    "lightning-fundchannel_cancel(7)",
+    "lightning-openchannel_init(7)",
+    "lightning-openchannel_update(7)",
+    "lightning-openchannel_signed(7)",
+    "lightning-openchannel_bump(7)",
+    "lightning-openchannel_abort(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:fundchannel_start#1",
+        "method": "fundchannel_start",
+        "params": [
+          "030c0906bee9e0af4cbeb29b436aa2c17ae2df3568bf9a8ec69cd508fee6af28d9",
+          16777216
+        ]
+      },
+      "response": {
+        "funding_address": "bcrt1qsxdxcrmq7rqp2e2l690k0rgc722yzkv49exkx2uwkkk6yevxlygq3lv4xs",
+        "scriptpubkey": "0020819a6c0f60f0c015655fd15f678d18f2944159952e4d632b8eb5ada26586f910",
+        "channel_type": {
+          "bits": [
+            12,
+            22
+          ],
+          "names": [
+            "static_remotekey/even",
+            "anchors/even"
+          ]
+        },
+        "warning_usage": "The funding transaction MUST NOT be broadcast until after channel establishment has been successfully completed by running `fundchannel_complete`"
+      }
+    },
+    {
+      "request": {
+        "id": "example:fundchannel_start#2",
+        "method": "fundchannel_start",
+        "params": {
+          "id": "030c0906bee9e0af4cbeb29b436aa2c17ae2df3568bf9a8ec69cd508fee6af28d9",
+          "amount": 16777216
+        }
+      },
+      "response": {
+        "funding_address": "bcrt1qr4pftsergepzf2jrkzvyw5evsspdl7kyxplp6chv7226xwnszjnsy0rzpl",
+        "scriptpubkey": "00201d4295c323464224aa43b09847532c8402dffac4307e1d62ecf295a33a7014a7",
+        "channel_type": {
+          "bits": [
+            12,
+            22
+          ],
+          "names": [
+            "static_remotekey/even",
+            "anchors/even"
+          ]
+        },
+        "warning_usage": "The funding transaction MUST NOT be broadcast until after channel establishment has been successfully completed by running `fundchannel_complete`"
+      }
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+#include "config.h"
+#include <tests/fuzz/libfuzz.h>
+#include <tests/fuzz/wire.h>
+#include <wire/peer_wire.h>
+
+struct fuzzsplice {
+	struct channel_id channel_id;
+	s64 funding_contribution_satoshis;
+	u32 funding_feerate_perkw;
+	u32 locktime;
+	struct pubkey funding_pubkey;
+};
+
+static void *encode(const tal_t *ctx, const struct fuzzsplice *s)
+{
+	return towire_splice_init(ctx, &s->channel_id,
+				  s->funding_contribution_satoshis, s->funding_feerate_perkw,
+				  s->locktime, &s->funding_pubkey, NULL);
+}
+
+static struct fuzzsplice *decode(const tal_t *ctx, const void *p)
+{
+	struct fuzzsplice *s = tal(ctx, struct fuzzsplice);
+	struct tlv_splice_init_tlvs *tlvs;
+
+	if (fromwire_splice_init(s, p, &s->channel_id,
+				 &s->funding_contribution_satoshis, &s->funding_feerate_perkw,
+				 &s->locktime, &s->funding_pubkey, &tlvs))
+		return s;
+	return tal_free(s);
+}
+
+static bool equal(const struct fuzzsplice *x, const struct fuzzsplice *y)
+{
+	return memcmp(x, y, sizeof(*x)) == 0;
+}
+
+void run(const u8 *data, size_t size)
+{
+	test_decode_encode(data, size, WIRE_SPLICE_INIT, struct fuzzsplice);
+}

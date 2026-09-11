@@ -1,0 +1,264 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "openchannel_bump",
+  "title": "Command to initiate a channel RBF",
+  "description": [
+    "`openchannel_bump` is a RPC command which initiates a channel RBF (Replace-By-Fee) for the specified channel. It uses the openchannel protocol which allows for interactive transaction construction.",
+    "",
+    "Warning: bumping a leased channel will lose the lease."
+  ],
+  "request": {
+    "required": [
+      "channel_id",
+      "amount",
+      "initialpsbt"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "channel_id": {
+        "type": "hash",
+        "description": [
+          "Id of the channel to RBF."
+        ]
+      },
+      "amount": {
+        "type": "sat",
+        "description": [
+          "Satoshi value that we will contribute to the channel. This value will be _added_ to the provided PSBT in the output which is encumbered by the 2-of-2 script for this channel."
+        ]
+      },
+      "initialpsbt": {
+        "type": "string",
+        "description": [
+          "The funded, incomplete PSBT that specifies the UTXOs and change output for our channel contribution. It can be updated, see `openchannel_update`; *initialpsbt* must have at least one input. Must have the Non-Witness UTXO (PSBT_IN_NON_WITNESS_UTXO) set for every input. An error (code 309) will be returned if this requirement is not met."
+        ]
+      },
+      "funding_feerate": {
+        "type": "feerate",
+        "description": [
+          "Feerate for the funding transaction."
+        ],
+        "default": "1/64th greater than the last feerate used for this channel"
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "channel_id",
+      "channel_type",
+      "psbt",
+      "commitments_secured",
+      "funding_serial",
+      "requires_confirmed_inputs"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "channel_id": {
+        "type": "hash",
+        "description": [
+          "The channel id of the channel."
+        ]
+      },
+      "channel_type": {
+        "type": "object",
+        "description": [
+          "Channel_type as negotiated with peer."
+        ],
+        "added": "v24.02",
+        "additionalProperties": false,
+        "required": [
+          "bits",
+          "names"
+        ],
+        "properties": {
+          "bits": {
+            "type": "array",
+            "description": [
+              "Each bit set in this channel_type."
+            ],
+            "added": "v24.02",
+            "items": {
+              "type": "u32",
+              "description": [
+                "Bit number."
+              ]
+            }
+          },
+          "names": {
+            "type": "array",
+            "description": [
+              "Feature name for each bit set in this channel_type. Note that *anchors_zero_fee_htlc_tx* is a deprecated synonym for *anchors*."
+            ],
+            "added": "v24.02",
+            "items": {
+              "type": "string",
+              "enum": [
+                "static_remotekey/even",
+                "anchor_outputs/even",
+                "anchors_zero_fee_htlc_tx/even",
+                "anchors/even",
+                "scid_alias/even",
+                "zeroconf/even"
+              ],
+              "description": [
+                "Name of feature bit."
+              ]
+            }
+          }
+        }
+      },
+      "psbt": {
+        "type": "string",
+        "description": [
+          "The (incomplete) PSBT of the RBF transaction."
+        ]
+      },
+      "commitments_secured": {
+        "type": "boolean",
+        "enum": [
+          false
+        ],
+        "description": [
+          "Whether the *psbt* is complete."
+        ]
+      },
+      "funding_serial": {
+        "type": "u64",
+        "description": [
+          "The serial_id of the funding output in the *psbt*."
+        ]
+      },
+      "requires_confirmed_inputs": {
+        "type": "boolean",
+        "description": [
+          "Does peer require confirmed inputs in psbt?"
+        ]
+      }
+    },
+    "post_return_value_notes": [
+      "If the peer does not support `option_dual_fund`, this command will return an error.",
+      "",
+      "If the channel is not in a state that is eligible for RBF, this command will return an error."
+    ]
+  },
+  "errors": [
+    "On error the returned object will contain `code` and `message` properties, with `code` being one of the following:",
+    "",
+    "- -32602: If the given parameters are wrong.",
+    "- -1: Catchall nonspecific error.",
+    "- 300: The amount exceeded the maximum configured funding amount.",
+    "- 301: The provided PSBT cannot afford the funding amount.",
+    "- 305: Peer is not connected.",
+    "- 309: PSBT missing required fields",
+    "- 311: Unknown channel id.",
+    "- 312: Channel in an invalid state"
+  ],
+  "author": [
+    "Lisa Neigut [niftynei@gmail.com](mailto:niftynei@gmail.com) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-openchannel_init(7)",
+    "lightning-openchannel_update(7)",
+    "lightning-openchannel_signed(7)",
+    "lightning-openchannel_abort(7)",
+    "lightning-fundchannel_start(7)",
+    "lightning-fundchannel_complete(7)",
+    "lightning-fundchannel(7)",
+    "lightning-fundpsbt(7)",
+    "lightning-utxopsbt(7)",
+    "lightning-multifundchannel(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:openchannel_bump#1",
+        "method": "openchannel_bump",
+        "params": [
+          "6ed0fa56ef2d9b805a6f7a389c3ac4eac30af9dfa9303508c75f077a75f23c79",
+          1000000,
+          "cHNidP8BAF4CAAAAAYsb3ULOUMbRMvbUNrl5Qwl4J4r8OFN6snLDF13hxp5JAQAAAAD9////AUFZ3AsAAAAAIlEgIUTHRS8sHUFkZ2nYexY713R8Z7x+A1TWPOC/eyDBQTqiAAAAAAEAcQIAAAABGmL8wATv05p7P+T4/i7vJqtHQU8G4F5+7CDoEJN2B44BAAAAAP3///8C5SH00gAAAAAWABTydpL7J0ly+MSDukoNe17+Ot85/gDC6wsAAAAAFgAUSt/wRXup3aztz8EsHEhFAisHGqahAAAAAQEfAMLrCwAAAAAWABRK3/BFe6ndrO3PwSwcSEUCKwcapgAA",
+          "15000perkw"
+        ]
+      },
+      "response": {
+        "channel_id": "6ed0fa56ef2d9b805a6f7a389c3ac4eac30af9dfa9303508c75f077a75f23c79",
+        "psbt": "cHNidP8BAgQCAAAAAQMEogAAAAEEAQEBBQECAQYBAwH7BAIAAAAAAQBxAgAAAAEaYvzABO/Tmns/5Pj+Lu8mq0dBTwbgXn7sIOgQk3YHjgEAAAAA/f///wLlIfTSAAAAABYAFPJ2kvsnSXL4xIO6Sg17Xv463zn+AMLrCwAAAAAWABRK3/BFe6ndrO3PwSwcSEUCKwcapqEAAAABAR8AwusLAAAAABYAFErf8EV7qd2s7c/BLBxIRQIrBxqmAQ4gixvdQs5QxtEy9tQ2uXlDCXgnivw4U3qycsMXXeHGnkkBDwQBAAAAARAE/f///wz8CWxpZ2h0bmluZwEIhjwf0yMGZhAAAQMIQVncCwAAAAABBCJRICFEx0UvLB1BZGdp2HsWO9d0fGe8fgNU1jzgv3sgwUE6DPwJbGlnaHRuaW5nAQiIPB/TIwZmEAABAwhAQg8AAAAAAAEEIgAgZ39EM2qkj2R6eylrL3yjvBuWGjwmoGk+btb3KO6w1zkM/AlsaWdodG5pbmcBCLrLLl4BRrzaAA==",
+        "channel_type": {
+          "bits": [
+            12,
+            22
+          ],
+          "names": [
+            "static_remotekey/even",
+            "anchors/even"
+          ]
+        },
+        "commitments_secured": false,
+        "funding_serial": 13459902892610075866,
+        "requires_confirmed_inputs": false
+      }
+    },
+    {
+      "request": {
+        "id": "example:openchannel_bump#2",
+        "method": "openchannel_bump",
+        "params": {
+          "channel_id": "6ed0fa56ef2d9b805a6f7a389c3ac4eac30af9dfa9303508c75f077a75f23c79",
+          "amount": 1000000,
+          "initialpsbt": "cHNidP8BAF4CAAAAAYsb3ULOUMbRMvbUNrl5Qwl4J4r8OFN6snLDF13hxp5JAQAAAAD9////AUFZ3AsAAAAAIlEgIUTHRS8sHUFkZ2nYexY713R8Z7x+A1TWPOC/eyDBQTqiAAAAAAEAcQIAAAABGmL8wATv05p7P+T4/i7vJqtHQU8G4F5+7CDoEJN2B44BAAAAAP3///8C5SH00gAAAAAWABTydpL7J0ly+MSDukoNe17+Ot85/gDC6wsAAAAAFgAUSt/wRXup3aztz8EsHEhFAisHGqahAAAAAQEfAMLrCwAAAAAWABRK3/BFe6ndrO3PwSwcSEUCKwcapgAA",
+          "funding_feerate": "15000perkw"
+        }
+      },
+      "response": {
+        "channel_id": "6ed0fa56ef2d9b805a6f7a389c3ac4eac30af9dfa9303508c75f077a75f23c79",
+        "psbt": "cHNidP8BAgQCAAAAAQMEogAAAAEEAQEBBQECAQYBAwH7BAIAAAAAAQBxAgAAAAEaYvzABO/Tmns/5Pj+Lu8mq0dBTwbgXn7sIOgQk3YHjgEAAAAA/f///wLlIfTSAAAAABYAFPJ2kvsnSXL4xIO6Sg17Xv463zn+AMLrCwAAAAAWABRK3/BFe6ndrO3PwSwcSEUCKwcapqEAAAABAR8AwusLAAAAABYAFErf8EV7qd2s7c/BLBxIRQIrBxqmAQ4gixvdQs5QxtEy9tQ2uXlDCXgnivw4U3qycsMXXeHGnkkBDwQBAAAAARAE/f///wz8CWxpZ2h0bmluZwEIjjwf0yMGZhAAAQMIQVncCwAAAAABBCJRICFEx0UvLB1BZGdp2HsWO9d0fGe8fgNU1jzgv3sgwUE6DPwJbGlnaHRuaW5nAQiQPB/TIwZmEAABAwhAQg8AAAAAAAEEIgAgZ39EM2qkj2R6eylrL3yjvBuWGjwmoGk+btb3KO6w1zkM/AlsaWdodG5pbmcBCL0EbgYVB9kiAA==",
+        "channel_type": {
+          "bits": [
+            12,
+            22
+          ],
+          "names": [
+            "static_remotekey/even",
+            "anchors/even"
+          ]
+        },
+        "commitments_secured": false,
+        "funding_serial": 13620132145476917538,
+        "requires_confirmed_inputs": false
+      }
+    },
+    {
+      "request": {
+        "id": "example:openchannel_bump#3",
+        "method": "openchannel_bump",
+        "params": [
+          "6ed0fa56ef2d9b805a6f7a389c3ac4eac30af9dfa9303508c75f077a75f23c79",
+          2000000,
+          "cHNidP8BAF4CAAAAAYsb3ULOUMbRMvbUNrl5Qwl4J4r8OFN6snLDF13hxp5JAQAAAAD9////AWINzQsAAAAAIlEgbgn90Nf9d7MPST7Ni5o1zjYL2MVuHHDM40qZHxV66shKAAAAAAEAcQIAAAABGmL8wATv05p7P+T4/i7vJqtHQU8G4F5+7CDoEJN2B44BAAAAAP3///8C5SH00gAAAAAWABTydpL7J0ly+MSDukoNe17+Ot85/gDC6wsAAAAAFgAUSt/wRXup3aztz8EsHEhFAisHGqahAAAAAQEfAMLrCwAAAAAWABRK3/BFe6ndrO3PwSwcSEUCKwcapgAA",
+          "18750perkw"
+        ]
+      },
+      "response": {
+        "channel_id": "6ed0fa56ef2d9b805a6f7a389c3ac4eac30af9dfa9303508c75f077a75f23c79",
+        "psbt": "cHNidP8BAgQCAAAAAQMESgAAAAEEAQEBBQECAQYBAwH7BAIAAAAAAQBxAgAAAAEaYvzABO/Tmns/5Pj+Lu8mq0dBTwbgXn7sIOgQk3YHjgEAAAAA/f///wLlIfTSAAAAABYAFPJ2kvsnSXL4xIO6Sg17Xv463zn+AMLrCwAAAAAWABRK3/BFe6ndrO3PwSwcSEUCKwcapqEAAAABAR8AwusLAAAAABYAFErf8EV7qd2s7c/BLBxIRQIrBxqmAQ4gixvdQs5QxtEy9tQ2uXlDCXgnivw4U3qycsMXXeHGnkkBDwQBAAAAARAE/f///wz8CWxpZ2h0bmluZwEIljwf0yMGZhAAAQMIYg3NCwAAAAABBCJRIG4J/dDX/XezD0k+zYuaNc42C9jFbhxwzONKmR8VeurIDPwJbGlnaHRuaW5nAQiYPB/TIwZmEAABAwiAhB4AAAAAAAEEIgAgZ39EM2qkj2R6eylrL3yjvBuWGjwmoGk+btb3KO6w1zkM/AlsaWdodG5pbmcBCL8EbgYVB9kiAA==",
+        "channel_type": {
+          "bits": [
+            12,
+            22
+          ],
+          "names": [
+            "static_remotekey/even",
+            "anchors/even"
+          ]
+        },
+        "commitments_secured": false,
+        "funding_serial": 13764247333552773410,
+        "requires_confirmed_inputs": false
+      }
+    }
+  ]
+}

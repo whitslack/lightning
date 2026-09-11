@@ -1,0 +1,125 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "disableoffer",
+  "title": "Command for removing an offer",
+  "description": [
+    "The **disableoffer** RPC command disables an offer, so that no further invoices will be given out.",
+    "",
+    "We currently don't support deletion of offers, so offers are not forgotten entirely (there may be invoices which refer to this offer)."
+  ],
+  "request": {
+    "required": [
+      "offer_id"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "offer_id": {
+        "type": "hash",
+        "description": [
+          "The id we use to identify this offer."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "offer_id",
+      "active",
+      "single_use",
+      "force_paths",
+      "bolt12",
+      "used"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "offer_id": {
+        "type": "hash",
+        "description": [
+          "The merkle hash of the offer."
+        ]
+      },
+      "active": {
+        "type": "boolean",
+        "enum": [
+          false
+        ],
+        "description": [
+          "Whether the offer can produce invoices/payments."
+        ]
+      },
+      "single_use": {
+        "type": "boolean",
+        "description": [
+          "Whether the offer is disabled after first successful use."
+        ]
+      },
+      "force_paths": {
+        "type": "boolean",
+        "added": "v26.04",
+        "description": [
+          "True if `fronting_nodes` (or the `payment-fronting-node` configuration entry) is set: implies any invoice issued for this offer must use a subset of the same blinded paths."
+        ]
+      },
+      "bolt12": {
+        "type": "string",
+        "description": [
+          "The bolt12 string representing this offer."
+        ]
+      },
+      "description": {
+        "added": "v26.04",
+        "type": "string",
+        "description": [
+          "The user-specified bolt 12 description."
+        ]
+      },
+      "used": {
+        "type": "boolean",
+        "description": [
+          "Whether the offer has had an invoice paid / payment made."
+        ]
+      },
+      "label": {
+        "type": "string",
+        "description": [
+          "The label provided when offer was created."
+        ]
+      }
+    },
+    "pre_return_value_notes": [
+      "Note: the returned object is the same format as **listoffers**."
+    ]
+  },
+  "author": [
+    "Rusty Russell [rusty@rustcorp.com.au](mailto:rusty@rustcorp.com.au) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-enableoffer(7)",
+    "lightning-offer(7)",
+    "lightning-listoffers(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:disableoffer#1",
+        "method": "disableoffer",
+        "params": {
+          "offer_id": "f26c3b52dc94122dbbff0051ea6bf9a3f99cf127781ea6fc8923ef8428b5fe99"
+        }
+      },
+      "response": {
+        "offer_id": "f26c3b52dc94122dbbff0051ea6bf9a3f99cf127781ea6fc8923ef8428b5fe99",
+        "active": false,
+        "single_use": false,
+        "bolt12": "lno1qgsqvgnwgcg35z6ee2h3yczraddm72xrfua9uve2rlrm9deu7xyfzrcgqv0gfqq2zp8kven9wgs8gmeqg35hxctzd3j3vggr8pzcqtf9kns8fn8a0nvtxwdyrhr4h7vh3gp5sqzyfdgag2c80xdq",
+        "force_paths": false,
+        "used": false,
+        "description": "Offer to Disable"
+      }
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+#include "config.h"
+#include <bitcoin/chainparams.h>
+#include <common/peer_failed.h>
+#include <common/read_peer_msg.h>
+#include <common/status.h>
+#include <common/utils.h>
+#include <common/wire_error.h>
+
+bool handle_peer_error_or_warning(struct per_peer_state *pps,
+				  const u8 *msg TAKES)
+{
+	const char *err;
+
+	err = is_peer_error(tmpctx, msg);
+	if (err)
+		peer_failed_received_errmsg(pps, true, err);
+
+	/* Simply log incoming warnings */
+	err = is_peer_warning(tmpctx, msg);
+	if (err) {
+		tal_free_if_taken(msg);
+		status_info("Received %s", err);
+		return true;
+	}
+
+	return false;
+}

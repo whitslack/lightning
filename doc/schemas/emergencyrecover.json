@@ -1,0 +1,68 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "emergencyrecover",
+  "title": "Command for recovering channels from the emergency.recovery file in the lightning directory",
+  "description": [
+    "The **emergencyrecover** RPC command fetches data from the emergency.recover file and tries to reconnect to the peer and force him to close the channel. The data in this file has enough information to reconnect and sweep the funds.",
+    "",
+    "This recovery method is not spontaneous and it depends on the peer, so it should be used as a last resort to recover the funds stored in a channel in case of severe data loss."
+  ],
+  "request": {
+    "required": [],
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "response": {
+    "required": [
+      "stubs"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "stubs": {
+        "type": "array",
+        "items": {
+          "type": "hash",
+          "description": [
+            "Channel IDs of channels successfully inserted."
+          ]
+        }
+      }
+    }
+  },
+  "author": [
+    "Aditya [aditya.sharma20111@gmail.com](mailto:aditya.sharma20111@gmail.com) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-getsharedsecret(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:emergencyrecover#1",
+        "method": "emergencyrecover",
+        "params": {}
+      },
+      "response": {
+        "stubs": []
+      }
+    },
+    {
+      "request": {
+        "id": "example:emergencyrecover#2",
+        "method": "emergencyrecover",
+        "params": {}
+      },
+      "response": {
+        "stubs": [
+          "3526c26311c7cd921e4f81137dac45e1f18ae0e7ae3982e9b9189691eb00f706",
+          "58073dac0d6d0e06d167ce2cfa1e134fe8d76ac2689567b5415ca8fef8e8a998",
+          "e5c39fd22da8ae30759367bd860a0cd86c798d088307a4f157a13fdcf68b11a4"
+        ]
+      }
+    }
+  ]
+}
