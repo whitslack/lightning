@@ -1,0 +1,127 @@
+#include "config.h"
+#include <common/json_channel_type.h>
+#include <lightningd/channel.h>
+#include <lightningd/closed_channel.h>
+#include <lightningd/jsonrpc.h>
+#include <lightningd/lightningd.h>
+
+size_t hash_cid(const struct channel_id *cid)
+{
+	return siphash24(siphash_seed(), cid->id, sizeof(cid->id));
+}
+
+static void json_add_closed_channel(struct json_stream *response,
+				    const char *fieldname,
+				    const struct closed_channel *channel)
+{
+	json_object_start(response, fieldname);
+	if (channel->peer_id)
+		json_add_node_id(response, "peer_id", channel->peer_id);
+	json_add_channel_id(response, "channel_id", &channel->cid);
+	if (channel->scid)
+		json_add_short_channel_id(response, "short_channel_id",
+					  *channel->scid);
+	if (channel->alias[LOCAL] || channel->alias[REMOTE]) {
+		json_object_start(response, "alias");
+		if (channel->alias[LOCAL])
+			json_add_short_channel_id(response, "local",
+						  *channel->alias[LOCAL]);
+		if (channel->alias[REMOTE])
+			json_add_short_channel_id(response, "remote",
+						  *channel->alias[REMOTE]);
+		json_object_end(response);
+	}
+	json_add_string(response, "opener",
+			channel->opener == LOCAL ? "local" : "remote");
+	if (channel->closer != NUM_SIDES)
+		json_add_string(response, "closer", channel->closer == LOCAL ?
+						    "local" : "remote");
+
+	json_add_bool(response, "private",
+		      !(channel->channel_flags & CHANNEL_FLAGS_ANNOUNCE_CHANNEL));
+
+	json_add_channel_type(response, "channel_type", channel->type);
+	json_add_u64(response, "total_local_commitments",
+		     channel->next_index[LOCAL] - 1);
+	json_add_u64(response, "total_remote_commitments",
+		     channel->next_index[REMOTE] - 1);
+	json_add_u64(response, "total_htlcs_sent", channel->next_htlc_id);
+	json_add_txid(response, "funding_txid", &channel->funding.txid);
+	json_add_num(response, "funding_outnum", channel->funding.n);
+	json_add_bool(response, "leased", channel->leased);
+	if (channel->leased) {
+		if (channel->opener == LOCAL)
+			json_add_amount_msat(response, "funding_fee_paid_msat",
+					     channel->push);
+		else
+			json_add_amount_msat(response, "funding_fee_rcvd_msat",
+					     channel->push);
+	} else if (!amount_msat_is_zero(channel->push))
+		json_add_amount_msat(response, "funding_pushed_msat",
+				     channel->push);
+	if (channel->funding_psbt)
+		json_add_psbt(response, "funding_psbt", channel->funding_psbt);
+	json_add_bool(response, "funding_withheld", channel->withheld);
+
+	json_add_amount_sat_msat(response, "total_msat", channel->funding_sats);
+	json_add_amount_msat(response, "final_to_us_msat", channel->our_msat);
+	json_add_amount_msat(response, "min_to_us_msat",
+			     channel->msat_to_us_min);
+	json_add_amount_msat(response, "max_to_us_msat",
+			     channel->msat_to_us_max);
+	if (channel->last_tx && !invalid_last_tx(channel->last_tx)) {
+		struct bitcoin_txid txid;
+		bitcoin_txid(channel->last_tx, &txid);
+
+		json_add_txid(response, "last_commitment_txid", &txid);
+		json_add_amount_sat_msat(response, "last_commitment_fee_msat",
+					 bitcoin_tx_compute_fee(channel->last_tx));
+	}
+	json_add_string(response, "close_cause",
+			channel_change_state_reason_str(channel->state_change_cause));
+	if (channel->last_stable_connection != 0) {
+		json_add_u64(response, "last_stable_connection",
+			     channel->last_stable_connection);
+	}
+	json_object_end(response);
+}
+
+static struct command_result *json_listclosedchannels(struct command *cmd,
+						      const char *buffer,
+						      const jsmntok_t *obj UNNEEDED,
+						      const jsmntok_t *params)
+{
+	struct node_id *peer_id;
+	struct json_stream *response;
+	struct closed_channel *cc;
+	struct closed_channel_map_iter it;
+
+	if (!param(cmd, buffer, params,
+		   p_opt("id", param_node_id, &peer_id),
+		   NULL))
+		return command_param_failed();
+
+	response = json_stream_success(cmd);
+	json_array_start(response, "closedchannels");
+
+	for (cc = closed_channel_map_first(cmd->ld->closed_channels, &it);
+	     cc;
+	     cc = closed_channel_map_next(cmd->ld->closed_channels, &it)) {
+		if (peer_id) {
+			if (!cc->peer_id)
+				continue;
+			if (!node_id_eq(cc->peer_id, peer_id))
+				continue;
+		}
+		json_add_closed_channel(response, NULL, cc);
+	}
+	json_array_end(response);
+
+	return command_success(cmd, response);
+}
+
+static const struct json_command listclosedchannels_command = {
+	"listclosedchannels",
+	json_listclosedchannels,
+};
+AUTODATA(json_command, &listclosedchannels_command);

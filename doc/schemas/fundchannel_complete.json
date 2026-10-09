@@ -1,0 +1,120 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "fundchannel_complete",
+  "title": "Command for completing channel establishment",
+  "description": [
+    "`fundchannel_complete` is a lower level RPC command. It allows a user to complete an initiated channel establishment with a connected peer.",
+    "",
+    "Note that the funding transaction MUST NOT be broadcast until after channel establishment has been successfully completed, as the commitment transactions for this channel are not secured until this command successfully completes. Broadcasting transaction before can lead to unrecoverable loss of funds."
+  ],
+  "request": {
+    "required": [
+      "id",
+      "psbt"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "type": "pubkey",
+        "description": [
+          "Node id of the remote peer."
+        ]
+      },
+      "psbt": {
+        "type": "string",
+        "description": [
+          "Transaction to use for funding (does not need to be signed but must be otherwise complete)."
+        ]
+      },
+      "withhold": {
+        "type": "boolean",
+        "added": "v25.12",
+        "description": [
+          "Mark this channel 'withheld' so we know we haven't broadcast the funding transaction.  If the channel is closed before we call `sendpsbt` on this psbt, it will simply be closed immediately."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "channel_id",
+      "commitments_secured"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "channel_id": {
+        "type": "hash",
+        "description": [
+          "The channel_id of the resulting channel."
+        ]
+      },
+      "commitments_secured": {
+        "type": "boolean",
+        "enum": [
+          true
+        ],
+        "description": [
+          "Indication that channel is safe to use."
+        ]
+      }
+    }
+  },
+  "errors": [
+    "On error the returned object will contain `code` and `message` properties, with `code` being one of the following:",
+    "",
+    "- -32602: If the given parameters are wrong.",
+    "- -1: Catchall nonspecific error.",
+    "- 305: Peer is not connected.",
+    "- 306: Unknown peer id.",
+    "- 309: PSBT does not have a unique, correct output to fund the channel."
+  ],
+  "author": [
+    "Lisa Neigut [niftynei@gmail.com](mailto:niftynei@gmail.com) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-connect(7)",
+    "lightning-fundchannel(7)",
+    "lightning-multifundchannel(7)",
+    "lightning-fundchannel_start(7)",
+    "lightning-fundchannel_cancel(7)",
+    "lightning-openchannel_init(7)",
+    "lightning-openchannel_update(7)",
+    "lightning-openchannel_signed(7)",
+    "lightning-openchannel_bump(7)",
+    "lightning-openchannel_abort(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:fundchannel_complete#1",
+        "method": "fundchannel_complete",
+        "params": [
+          "030c0906bee9e0af4cbeb29b436aa2c17ae2df3568bf9a8ec69cd508fee6af28d9",
+          "cHNidP8BAgQCAAAAAQMEoAAAAAEEAQEBBQECAQYBAwH7BAIAAAAAAQBxAgAAAAHDjpQHQPf6mAZh/ns6aZymBuzVtXyWrp2tG77M1X0QEQEAAAAA/f///wKAlpgBAAAAABYAFJkMSjvNScHqrQtzMkKVGdoVpeeHNOzf3gAAAAAWABRVLs+4bKBt5A1bI6FZ91yQl+qQLXYAAAABAR+AlpgBAAAAABYAFJkMSjvNScHqrQtzMkKVGdoVpeeHAQ4gGmL8wATv05p7P+T4/i7vJqtHQU8G4F5+7CDoEJN2B44BDwQAAAAAARAE/f///wABAwgAAAABAAAAAAEEIgAgHUKVwyNGQiSqQ7CYR1MshALf+sQwfh1i7PKVozpwFKcAAQMIQYOYAAAAAAABBCJRIE1LDUW7BCPGpJ5lNUE+HuLlA/z3twfxb1PW6IXtnq1vAA=="
+        ]
+      },
+      "response": {
+        "channel_id": "9dd5eea1322eadd13bbe050f6627f2de1d4e8a7a710f8e7e2a417507cb68c6d1",
+        "commitments_secured": true
+      }
+    },
+    {
+      "request": {
+        "id": "example:fundchannel_complete#2",
+        "method": "fundchannel_complete",
+        "params": {
+          "id": "030c0906bee9e0af4cbeb29b436aa2c17ae2df3568bf9a8ec69cd508fee6af28d9",
+          "psbt": "cHNidP8BAgQCAAAAAQMEoQAAAAEEAQIBBQECAQYBAwH7BAIAAAAAAQBeAgAAAAGd1e6hMi6t0Tu+BQ9mJ/LeHU6KenEPjn4qQXUHy2jG0QAAAAAA/////wE29/8AAAAAACJRIFL23e7IWCYUbQBn9UXGg16zeFd+I0SRzToK1a6ec5tNAAAAAAEBKzb3/wAAAAAAIlEgUvbd7shYJhRtAGf1RcaDXrN4V34jRJHNOgrVrp5zm00BDiCdWXZFI6+UBBfULvW4M5lH/Mnh46GmA8QSsTBOprEujwEPBAAAAAABEAT9////AAEAiQIAAAABGmL8wATv05p7P+T4/i7vJqtHQU8G4F5+7CDoEJN2B44AAAAAAP3///8CAAAAAQAAAAAiACAdQpXDI0ZCJKpDsJhHUyyEAt/6xDB+HWLs8pWjOnAUp0GDmAAAAAAAIlEgTUsNRbsEI8aknmU1QT4e4uUD/Pe3B/FvU9bohe2erW+gAAAAAQErQYOYAAAAAAAiUSBNSw1FuwQjxqSeZTVBPh7i5QP897cH8W9T1uiF7Z6tbwEOIJ3V7qEyLq3RO74FD2Yn8t4dTop6cQ+OfipBdQfLaMbRAQ8EAQAAAAEQBP3///8AAQMIQEIPAAAAAAABBCIAIGZx2XRUTuZ/oM68UPi+MI8Mp6h3blNqxtoQNVRDNf45AAEDCG4fiQEAAAAAAQQiUSCW2Ah5tzTi4kWrJlR2vnUef3PtWG3pvuE/u745MhjFIwA="
+        }
+      },
+      "response": {
+        "channel_id": "d38dec6528d91bb52b0c8898a91906df27d40104abccca93a293dccd332dd86e",
+        "commitments_secured": true
+      }
+    }
+  ]
+}

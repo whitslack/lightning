@@ -1,0 +1,38 @@
+[package]
+name = "cln-currencyrate"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+description = "Fetches currency rates"
+homepage = "https://github.com/ElementsProject/lightning/tree/master/plugins"
+repository = "https://github.com/ElementsProject/lightning"
+rust-version.workspace = true
+
+[dependencies]
+anyhow = "1"
+bytes = "1"
+log = { version = "0.4", features = ['std'] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1" }
+
+log-panics = "2"
+
+reqwest = { version = "0.13", default-features = false, features = [
+    "rustls-no-provider",
+    "socks",
+    "json",
+    "http2",
+] }
+rustls = { version = "0.23", default-features = false, features = [
+    "logging",
+    "tls12",
+    "std",
+    "ring",
+] }
+webpki-roots = "1"
+
+futures = "0.3"
+
+cln-plugin = { workspace = true }
+cln-rpc = { workspace = true }

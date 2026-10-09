@@ -1,0 +1,11 @@
+config.vars
+.cargo/
+.vscode/
+.venv/
+dist/
+target/
+release/
+focal/
+jammy/
+noble/
+resolute/

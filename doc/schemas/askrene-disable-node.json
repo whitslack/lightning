@@ -1,0 +1,62 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "askrene-disable-node",
+  "title": "Command to disable all channels to/from a node in a layer",
+  "added": "v24.11",
+  "description": [
+    "The **askrene-disable-node** RPC command tells askrene to disable all channels connected to a node whenever the given layer is used.  This is mainly useful to force the use of alternate paths: while individual channels can be disabled using askrene-create-channel or askrene-inform-channel, that would be racy if new channels appeared."
+  ],
+  "request": {
+    "required": [
+      "layer",
+      "node"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "layer": {
+        "type": "string",
+        "description": [
+          "The name of the layer to apply this change to."
+        ]
+      },
+      "node": {
+        "type": "pubkey",
+        "description": [
+          "The node to disable.  It does not need to exist."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [],
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "see_also": [
+    "lightning-getroutes(7)",
+    "lightning-askrene-create-channel(7)",
+    "lightning-askrene-inform-channel(7)",
+    "lightning-askrene-listlayers(7)",
+    "lightning-askrene-age(7)"
+  ],
+  "author": [
+    "Rusty Russell [rusty@rustcorp.com.au](mailto:rusty@rustcorp.com.au) is mainly responsible."
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:askrene-disable-node#1",
+        "method": "askrene-disable-node",
+        "params": {
+          "layer": "test_layers",
+          "node": "038194b5f32bdf0aa59812c86c4ef7ad2f294104fa027d1ace9b469bb6f88cf37b"
+        }
+      },
+      "response": {}
+    }
+  ]
+}

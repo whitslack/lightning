@@ -1,0 +1,179 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "listoffers",
+  "title": "Command for listing offers",
+  "description": [
+    "The **listoffers** RPC command list all offers, or with `offer_id`, only the offer with that offer_id (if it exists)."
+  ],
+  "categories": [
+    "readonly"
+  ],
+  "request": {
+    "required": [],
+    "additionalProperties": false,
+    "properties": {
+      "offer_id": {
+        "type": "hash",
+        "description": [
+          "Offer_id to get details for (if it exists)."
+        ]
+      },
+      "active_only": {
+        "type": "boolean",
+        "description": [
+          "If set and is true, only offers with `active` true are returned."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "offers"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "offers": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "offer_id",
+            "active",
+            "single_use",
+            "force_paths",
+            "bolt12",
+            "used"
+          ],
+          "properties": {
+            "offer_id": {
+              "type": "hash",
+              "description": [
+                "The id of this offer (merkle hash of non-signature fields)."
+              ]
+            },
+            "active": {
+              "type": "boolean",
+              "description": [
+                "Whether this can still be used."
+              ]
+            },
+            "single_use": {
+              "type": "boolean",
+              "description": [
+                "Whether this expires as soon as it's paid."
+              ]
+            },
+            "force_paths": {
+              "type": "boolean",
+              "added": "v26.04",
+              "description": [
+                "Whether explicit blinded paths (i.e. fronting nodes) were adde when creating the offer (implying that they should be used when creating invoices)."
+              ]
+            },
+            "bolt12": {
+              "type": "string",
+              "description": [
+                "The bolt12 encoding of the offer."
+              ]
+            },
+            "description": {
+              "added": "v26.04",
+              "type": "string",
+              "description": [
+                "The user-specified bolt 12 description."
+              ]
+            },
+            "used": {
+              "type": "boolean",
+              "description": [
+                "True if an associated invoice has been paid."
+              ]
+            },
+            "label": {
+              "type": "string",
+              "description": [
+                "The (optional) user-specified label."
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "author": [
+    "Rusty Russell [rusty@rustcorp.com.au](mailto:rusty@rustcorp.com.au) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-offer(7)",
+    "lightning-listoffers(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:listoffers#1",
+        "method": "listoffers",
+        "params": {
+          "active_only": true
+        }
+      },
+      "response": {
+        "offers": [
+          {
+            "offer_id": "aea02a1d36d3f00c681656dd938d3431a44d932ff880e09197b55e966ed806e2",
+            "active": true,
+            "single_use": false,
+            "bolt12": "lno1qgsqvgnwgcg35z6ee2h3yczraddm72xrfua9uve2rlrm9deu7xyfzrcgqv85ysq2qepk7enxv4j3gqg2zcssxwz9sqkjtd8qwnx06lxckvu6g8w8t0ue0zsrfqqygj636s4sw7v6",
+            "force_paths": false,
+            "used": false,
+            "description": "Coffee"
+          },
+          {
+            "offer_id": "c5cde0292d56941940f8b10a4c9bdd1f8846d6041a61b3f7e0f87e105aa88121",
+            "active": true,
+            "single_use": false,
+            "bolt12": "lno1qgsqvgnwgcg35z6ee2h3yczraddm72xrfua9uve2rlrm9deu7xyfzrcgqgn3qzs2ge5hx6pqwdskcefpzcssxwz9sqkjtd8qwnx06lxckvu6g8w8t0ue0zsrfqqygj636s4sw7v6",
+            "force_paths": false,
+            "used": false,
+            "description": "Fish sale!"
+          },
+          {
+            "offer_id": "f26c3b52dc94122dbbff0051ea6bf9a3f99cf127781ea6fc8923ef8428b5fe99",
+            "active": true,
+            "single_use": false,
+            "bolt12": "lno1qgsqvgnwgcg35z6ee2h3yczraddm72xrfua9uve2rlrm9deu7xyfzrcgqv0gfqq2zp8kven9wgs8gmeqg35hxctzd3j3vggr8pzcqtf9kns8fn8a0nvtxwdyrhr4h7vh3gp5sqzyfdgag2c80xdq",
+            "force_paths": false,
+            "used": false,
+            "description": "Offer to Disable"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "id": "example:listoffers#2",
+        "method": "listoffers",
+        "params": [
+          "f26c3b52dc94122dbbff0051ea6bf9a3f99cf127781ea6fc8923ef8428b5fe99"
+        ]
+      },
+      "response": {
+        "offers": [
+          {
+            "offer_id": "f26c3b52dc94122dbbff0051ea6bf9a3f99cf127781ea6fc8923ef8428b5fe99",
+            "active": true,
+            "single_use": false,
+            "bolt12": "lno1qgsqvgnwgcg35z6ee2h3yczraddm72xrfua9uve2rlrm9deu7xyfzrcgqv0gfqq2zp8kven9wgs8gmeqg35hxctzd3j3vggr8pzcqtf9kns8fn8a0nvtxwdyrhr4h7vh3gp5sqzyfdgag2c80xdq",
+            "force_paths": false,
+            "used": false,
+            "description": "Offer to Disable"
+          }
+        ]
+      }
+    }
+  ]
+}

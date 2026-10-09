@@ -1,0 +1,121 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "added": "v23.08",
+  "rpc": "checkrune",
+  "title": "Command to Validate Rune",
+  "description": [
+    "The **checkrune** RPC command checks the validity/authorization rights of specified rune for the given nodeid, method, and params.",
+    "",
+    "If successful, the rune \"usage\" counter (used for ratelimiting) is incremented.",
+    "",
+    "See lightning-createrune(7) for the fields in the rune which are checked."
+  ],
+  "request": {
+    "required": [
+      "rune"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "rune": {
+        "type": "string",
+        "description": [
+          "Rune to check for authorization."
+        ]
+      },
+      "nodeid": {
+        "type": "string",
+        "description": [
+          "Node id of requesting node *(required until v23.11)*."
+        ]
+      },
+      "method": {
+        "type": "string",
+        "description": [
+          "Method for which rune needs to be validated *(required until v23.11)*."
+        ]
+      },
+      "params": {
+        "oneOf": [
+          {
+            "type": "array",
+            "description": [
+              "Array of positional parameters."
+            ]
+          },
+          {
+            "type": "object",
+            "description": [
+              "Parameters for method."
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "valid"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "valid": {
+        "type": "boolean",
+        "description": [
+          "True if the rune is valid."
+        ]
+      }
+    }
+  },
+  "errors": [
+    "The following error codes may occur:",
+    "",
+    "- 1501 (RUNE_NOT_AUTHORIZED): rune is not for this node (or perhaps completely invalid)",
+    "- 1502 (RUNE_NOT_PERMITTED): rune does not allow this usage (includes a detailed reason why)",
+    "- 1503 (RUNE_BLACKLISTED): rune has been explicitly blacklisted."
+  ],
+  "author": [
+    "Shahana Farooqui [sfarooqui@blockstream.com](mailto:sfarooqui@blockstream.com) is mainly responsible for consolidating logic from commando."
+  ],
+  "see_also": [
+    "lightning-createrune(7)",
+    "lightning-blacklistrune(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:checkrune#1",
+        "method": "checkrune",
+        "params": {
+          "nodeid": "033845802d25b4e074ccfd7cd8b339a41dc75bf9978a034800444b51d42b07799a",
+          "rune": "0VIVf0M4jMlGNIwNM3sTpBextINe4_VBGZnBMM82kR49MCZtZXRob2RebGlzdHxtZXRob2ReZ2V0fG1ldGhvZD1zdW1tYXJ5Jm1ldGhvZC9saXN0ZGF0YXN0b3Jl",
+          "method": "listpeers",
+          "params": {}
+        }
+      },
+      "response": {
+        "valid": true
+      }
+    },
+    {
+      "request": {
+        "id": "example:checkrune#2",
+        "method": "checkrune",
+        "params": {
+          "nodeid": "033845802d25b4e074ccfd7cd8b339a41dc75bf9978a034800444b51d42b07799a",
+          "rune": "a0noy2CAu8-s2xSgJuBW09hqB_YsqLkwIDy5qkftGMk9MiZtZXRob2Q9cGF5JnBuYW1lYW1vdW50bXNhdDwxMDAwMA==",
+          "method": "pay",
+          "params": {
+            "amount_msat": 9999
+          }
+        }
+      },
+      "response": {
+        "valid": true
+      }
+    }
+  ]
+}

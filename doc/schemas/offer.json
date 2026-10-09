@@ -1,0 +1,248 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "offer",
+  "title": "Command for accepting payments",
+  "description": [
+    "The **offer** RPC command creates an offer (or returns an existing one), which is a precursor to creating one or more invoices. It automatically enables the processing of an incoming invoice_request, and issuing of invoices.",
+    "",
+    "Note that for making an offer to *pay* someone else, see lightning- invoicerequest(7)."
+  ],
+  "request": {
+    "required": [
+      "amount"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "amount": {
+        "oneOf": [
+          {
+            "type": "msat_or_any"
+          },
+          {
+            "type": "currency"
+          }
+        ],
+        "description": [
+          "Can be the string `any`, which creates an offer that can be paid with any amount (e.g. a donation). Otherwise it can be a positive value in millisatoshi precision; it can be a whole number, or a whole number ending in *msat* or *sat*, or a number with three decimal places ending in *sat*, or a number with 1 to 11 decimal places ending in *btc*. It can also have an ISO 4217 postfix (e.g. USD), in which case currency conversion will need to be done for the invoice itself. A plugin is needed which provides the `currencyconvert` API for this currency, otherwise the offer creation will fail."
+        ]
+      },
+      "description": {
+        "type": "string",
+        "description": [
+          "A short description of purpose of the offer, e.g. *coffee*. This value is encoded into the resulting offer and is viewable by anyone you expose this offer to. It must be UTF-8, and cannot use *\\u* JSON escape codes."
+        ]
+      },
+      "issuer": {
+        "type": "string",
+        "description": [
+          "Who is issuing this offer (i.e. you) if appropriate."
+        ]
+      },
+      "label": {
+        "type": "string",
+        "description": [
+          "An internal-use name for the offer, which can be any UTF-8 string. This is *NOT* encoded in the offer not sent to the issuer."
+        ]
+      },
+      "quantity_max": {
+        "type": "u64",
+        "description": [
+          "Invoice can specify more than one of the items up (and including) this maximum: 0 is a special value meaning `no maximuim`. The *amount* for the invoice will need to be multiplied accordingly. This is encoded in the offer."
+        ]
+      },
+      "absolute_expiry": {
+        "type": "u64",
+        "description": [
+          "Time the offer is valid until,in seconds since the first day of 1970 UTC. If not set, the offer remains valid (though it can be deactivated by the issuer of course). This is encoded in the offer."
+        ]
+      },
+      "recurrence": {
+        "type": "string",
+        "description": [
+          "An invoice is expected at regular intervals. The argument is a positive number followed by one of `seconds`, `minutes`, `hours`, `days`, `weeks`, or `months` (variants without the trailing `s` are also permitted). This is encoded in the offer. The semantics of recurrence is fairly predictable, but fully documented in BOLT 12. e.g. `4weeks`."
+        ]
+      },
+      "recurrence_base": {
+        "type": "integer",
+        "description": [
+          "Time in seconds since the first day of 1970 UTC. This indicates when the first period begins; without this, the recurrence periods start from the first invoice."
+        ]
+      },
+      "recurrence_paywindow": {
+        "type": "string",
+        "description": [
+          "Argument of form `-time+time`. The first time is the number of seconds before the start of a period in which an invoice and payment is valid, the second time is the number of seconds after the start of the period. For example *-604800+86400* means you can fetch an pay the invoice 4 weeks before the given period starts, and up to 1 day afterwards. The optional *%* indicates that the amount of the invoice will be scaled by the time remaining in the period. This is encoded in the offer."
+        ],
+        "default": "that payment is allowed during the current and previous periods"
+      },
+      "recurrence_limit": {
+        "type": "u32",
+        "description": [
+          "To indicate the maximum period which exists. eg. `12` means there are 13 periods, from 0 to 12 inclusive. This is encoded in the offer."
+        ]
+      },
+      "single_use": {
+        "type": "boolean",
+        "description": [
+          "Indicates that the offer is only valid once; we may issue multiple invoices, but as soon as one is paid all other invoices will be expired (i.e. only one person can pay this offer)."
+        ],
+        "default": "False"
+      },
+      "proportional_amount": {
+        "added": "v25.09",
+        "type": "boolean",
+        "description": [
+          "Payment will be charged for the initial period proportional to the amount remaining (only makes sense if recurrence_base is specified)"
+        ]
+      },
+      "optional_recurrence": {
+        "added": "v25.09",
+        "type": "boolean",
+        "description": [
+          "Make recurrence optional, for backwards compatibility (older payers will only pay once)."
+        ]
+      },
+      "fronting_nodes": {
+        "added": "v26.04",
+        "type": "array",
+        "items": {
+          "type": "pubkey"
+        },
+        "description": [
+          "An optional array of peer nodes to create blinded paths from.  One of these blinded paths will also be used for the invoice, when they request it.  This overrides the `payment-fronting-node` configuration setting.  If set to the empty array, this means *no fronting nodes*."
+        ],
+        "default": "The `payment-fronting-node` configuration setting"
+      },
+      "dev_paths": {
+        "hidden": true
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "offer_id",
+      "active",
+      "single_use",
+      "bolt12",
+      "used",
+      "force_paths",
+      "created"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "offer_id": {
+        "type": "hash",
+        "description": [
+          "The id of this offer (merkle hash of non-signature fields)."
+        ]
+      },
+      "active": {
+        "type": "boolean",
+        "enum": [
+          true
+        ],
+        "description": [
+          "Whether this can still be used."
+        ]
+      },
+      "single_use": {
+        "type": "boolean",
+        "description": [
+          "Whether this expires as soon as it's paid (reflects the *single_use* parameter)."
+        ]
+      },
+      "bolt12": {
+        "type": "string",
+        "description": [
+          "The bolt12 encoding of the offer."
+        ]
+      },
+      "used": {
+        "type": "boolean",
+        "description": [
+          "True if an associated invoice has been paid."
+        ]
+      },
+      "force_paths": {
+        "type": "boolean",
+        "added": "v26.04",
+        "description": [
+          "True if `fronting_nodes` (or the `payment-fronting-node` configuration entry) is set: implies any invoice issued for this offer must use a subset of the same blinded paths."
+        ]
+      },
+      "created": {
+        "type": "boolean",
+        "description": [
+          "False if the offer already existed."
+        ]
+      },
+      "label": {
+        "type": "string",
+        "description": [
+          "The (optional) user-specified label."
+        ]
+      }
+    }
+  },
+  "errors": [
+    "On failure, an error is returned and no offer is created. If the lightning process fails before responding, the caller should use lightning-listoffers(7) to query whether this offer was created or not.",
+    "",
+    "If the offer already existed, and is still active, that is returned; if it's not active then this call fails.",
+    "",
+    "- -1: Catchall nonspecific error.",
+    "- 1000: Offer with this offer_id already exists (but is not active)."
+  ],
+  "author": [
+    "Rusty Russell [rusty@rustcorp.com.au](mailto:rusty@rustcorp.com.au) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-listoffers(7)",
+    "lightning-disableoffer(7)",
+    "lightning-invoicerequest(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:offer#1",
+        "method": "offer",
+        "params": {
+          "amount": "10000msat",
+          "description": "Fish sale!"
+        }
+      },
+      "response": {
+        "offer_id": "c5cde0292d56941940f8b10a4c9bdd1f8846d6041a61b3f7e0f87e105aa88121",
+        "active": true,
+        "single_use": false,
+        "bolt12": "lno1qgsqvgnwgcg35z6ee2h3yczraddm72xrfua9uve2rlrm9deu7xyfzrcgqgn3qzs2ge5hx6pqwdskcefpzcssxwz9sqkjtd8qwnx06lxckvu6g8w8t0ue0zsrfqqygj636s4sw7v6",
+        "force_paths": false,
+        "used": false,
+        "created": true
+      }
+    },
+    {
+      "request": {
+        "id": "example:offer#2",
+        "method": "offer",
+        "params": {
+          "amount": "1000sat",
+          "description": "Coffee",
+          "quantity_max": 10
+        }
+      },
+      "response": {
+        "offer_id": "aea02a1d36d3f00c681656dd938d3431a44d932ff880e09197b55e966ed806e2",
+        "active": true,
+        "single_use": false,
+        "bolt12": "lno1qgsqvgnwgcg35z6ee2h3yczraddm72xrfua9uve2rlrm9deu7xyfzrcgqv85ysq2qepk7enxv4j3gqg2zcssxwz9sqkjtd8qwnx06lxckvu6g8w8t0ue0zsrfqqygj636s4sw7v6",
+        "force_paths": false,
+        "used": false,
+        "created": true
+      }
+    }
+  ]
+}

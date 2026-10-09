@@ -1,0 +1,22 @@
+[project]
+name = "pyln-bolt1"
+version = "1.0.2.246"
+description = ""
+authors = [
+    {name = "Rusty Russell", email = "rusty@blockstream.com"}
+]
+license = {text = "MIT"}
+requires-python = ">=3.10,<4.0"
+dependencies = []
+
+[dependency-groups]
+dev = [
+  "pyln-proto>=0.10.2"
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["pyln"]
+
+[build-system]
+requires = ["hatchling>=1.0.0"]
+build-backend = "hatchling.build"

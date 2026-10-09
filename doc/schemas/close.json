@@ -1,0 +1,207 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "close",
+  "title": "Command for closing channels with direct peers",
+  "description": [
+    "The **close** RPC command attempts to close the channel cooperatively with the peer, or unilaterally after *unilateraltimeout*, and the to-local output will be sent to the address specified in *destination*.",
+    "",
+    "The peer needs to be live and connected in order to negotiate a mutual close. The default of unilaterally closing after 48 hours is usually a reasonable indication that you can no longer contact the peer."
+  ],
+  "request": {
+    "required": [
+      "id"
+    ],
+    "additionalProperties": true,
+    "properties": {
+      "id": {
+        "type": "string",
+        "description": [
+          "Peer id, channel id or short_channel_id. If the given *id* is a peer ID (66 hex digits as a string), then it applies to the active channel of the direct peer corresponding to the given peer ID. If the given *id* is a channel ID (64 hex digits as a string, or the short channel ID *blockheight:txindex:outindex* form), then it applies to that channel."
+        ]
+      },
+      "unilateraltimeout": {
+        "type": "u32",
+        "description": [
+          "If it is not zero, the command will unilaterally close the channel when that number of seconds is reached. If *unilateraltimeout* is zero, then the command will wait indefinitely until the peer is online and can negotiate a mutual close."
+        ],
+        "default": "2 days (172800 seconds)"
+      },
+      "destination": {
+        "type": "string",
+        "description": [
+          "Any Bitcoin bech32 type. If the peer hasn't offered the option_shutdown_anysegwit feature, then taproot addresses (or other v1+ segwit) are not allowed. Tell your friends to upgrade!"
+        ],
+        "default": "a Core Lightning wallet address"
+      },
+      "fee_negotiation_step": {
+        "type": "string",
+        "description": [
+          "It controls how closing fee negotiation is performed assuming the peer proposes a fee that is different than our estimate. (Note that modern peers use the quick-close protocol which does not allow negotiation: see *feerange* instead).",
+          "",
+          "On every negotiation step we must give up some amount from our proposal towards the peer's proposal. This parameter can be an integer in which case it is interpreted as number of satoshis to step at a time. Or it can be an integer followed by `%` to designate a percentage of the interval to give up. A few examples, assuming the peer proposes a closing fee of 3000 satoshi and our estimate shows it must be 4000:",
+          "    * `10`: our next proposal will be 4000-10=3990.",
+          "    * `10%`: our next proposal will be 4000-(10% of (4000-3000))=3900.",
+          "    * '1': our next proposal will be 3999. This is the most extreme case when we insist on our fee as much as possible.",
+          "    * `100%`: our next proposal will be 3000. This is the most relaxed case when we quickly accept the peer's proposal."
+        ],
+        "default": "`50%`"
+      },
+      "wrong_funding": {
+        "type": "outpoint",
+        "description": [
+          "It can only be specified if both sides have offered the `shutdown_wrong_funding` feature (enabled by the **experimental-shutdown-wrong-funding** option). It must be a transaction id followed by a colon then the output number. Instead of negotiating a shutdown to spend the expected funding transaction, the shutdown transaction will spend this output instead. This is only allowed if this peer opened the channel and the channel is unused: it can rescue openings which have been manually miscreated."
+        ]
+      },
+      "force_lease_closed": {
+        "type": "boolean",
+        "description": [
+          "If the channel has funds leased to the peer (option_will_fund), we prevent initiation of a mutual close unless this flag is passed in."
+        ],
+        "default": "False"
+      },
+      "feerange": {
+        "type": "array",
+        "items": {
+          "type": "feerate"
+        },
+        "description": [
+          "An optional array [ *min*, *max* ], indicating the minimum and maximum feerates to offer: the peer will obey these if it supports the quick-close protocol. *slow* and *unilateral_close* are the defaults. Note that the maximum fee will be capped at the final commitment transaction fee (unless the experimental anchor-outputs option is negotiated)."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "type"
+    ],
+    "additionalProperties": true,
+    "properties": {
+      "type": {
+        "type": "string",
+        "enum": [
+          "mutual",
+          "unilateral",
+          "unopened"
+        ],
+        "description": [
+          "Whether we successfully negotiated a mutual close, closed without them, or discarded not-yet-opened channel."
+        ]
+      }
+    },
+    "allOf": [
+      {
+        "if": {
+          "additionalProperties": true,
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "mutual",
+                "unilateral"
+              ]
+            }
+          }
+        },
+        "then": {
+          "additionalProperties": false,
+          "required": [
+            "txs",
+            "txids"
+          ],
+          "properties": {
+            "type": {},
+            "txs": {
+              "added": "v24.11",
+              "type": "array",
+              "items": {
+                "type": "hex"
+              },
+              "description": [
+                "The raw bitcoin transactions used to close the channel (if it was open)."
+              ]
+            },
+            "txids": {
+              "added": "v24.11",
+              "type": "array",
+              "items": {
+                "type": "txid"
+              },
+              "description": [
+                "The transaction ids of the *tx* field(s)."
+              ]
+            }
+          }
+        },
+        "else": {
+          "additionalProperties": false,
+          "properties": {
+            "type": {}
+          }
+        }
+      }
+    ],
+    "post_return_value_notes": [
+      "A unilateral close may still occur at any time if the peer did not behave correctly during the close negotiation.",
+      "",
+      "Unilateral closes will return your funds after a delay. The delay will vary based on the peer *to_self_delay* setting, not your own setting."
+    ]
+  },
+  "notes": [
+    "Prior to 0.7.2, **close** took two parameters: *force* and *timeout*. *timeout* was the number of seconds before *force* took effect (default, 30), and *force* determined whether the result was a unilateral close or an RPC error (default). Even after the timeout, the channel would be closed if the peer reconnected."
+  ],
+  "notifications": [
+    "Notifications may be returned indicating what is going on, especially if the peer is offline and we are waiting."
+  ],
+  "author": [
+    "ZmnSCPxj [ZmnSCPxj@protonmail.com](mailto:ZmnSCPxj@protonmail.com) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-disconnect(7)",
+    "lightning-fundchannel(7)",
+    "lightningd-config(5)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:close#1",
+        "method": "close",
+        "params": {
+          "id": "03cecbfdc68544cc596223b68ce0710c9e5d2c9cb317ee07822d95079acc703d31",
+          "unilateraltimeout": 1
+        }
+      },
+      "response": {
+        "txs": [
+          "020000000001013e462a6e09303d24ab3f8d2ad71543ece0841be59498a6e252e69fa05249ee310000000000ffffffff02026e0700000000002251200f45bc0d48f0a17bfd7fd8dd7dd4ced31589b86b36ea27bc4855bb3811c4aed2eec8070000000000225120eddfdc0684845dac712b1f1f3df32583ccaa449417cf4f3419017bcb03fe64f7040047304402204346e708c11cbd3ad2f59b8e9946eb1185627f6ce9e650ea235095f34249e11502203462eba26d13f5429fa96269c44df08c90aba58387a3eac2cd606ba699b8b141014730440220752424a3db6979c4c13a3aab31c152a4ef29543c70adefd50a9c98622b1a688d022079cd8e792b268fe02715423e30eee943ae18600e2b71be36920e84bb6742675d0147522102428a180ab8faac4ff429b8f3423a76e982891c03b79ca9c8a17c0aa076f5a34d210291d9e5ea60956c8c94ba8dec13c7cbd130d2efa3ebe1c2aff4f794011da7749652ae00000000"
+        ],
+        "txids": [
+          "dc446777a9b3d6d5962f502f5d22f66b01452389c1bbe8460491e7376f44a1eb"
+        ],
+        "type": "mutual"
+      }
+    },
+    {
+      "request": {
+        "id": "example:close#2",
+        "method": "close",
+        "params": {
+          "id": "02287bfac8b99b35477ebe9334eede1e32b189e24644eb701c079614712331cec0",
+          "destination": "bcrt1q8cmhkj93fh64ad8skuddv2kxn6n6sez2nesfhe"
+        }
+      },
+      "response": {
+        "txs": [
+          "02000000000101e2578f9ab35214221da56b0b2c19e1b1270003ca2404514eac0a80753f854d7e0000000000ffffffff026b6f0700000000001600143e377b48b14df55eb4f0b71ad62ac69ea7a8644a3ac807000000000022512048e0db1f36c9696aaec1b62416f106bfe8d556bf0792ff8f40e79ccc06d15a1a0400473044022039062fbed20497969577b7ca5326d742fed551e200b95b566aaf0f0036cd0d69022030eaedae9bbc8aa36e92f57e829fd48df89cc65c85579194de86e600cd5800cd0147304402203ba0768738de9adda250a0b803f7e8cc840f70462f442c55a2fa8c924d4da51a022029762c44a536535c250f669ba05b4311c40f0e08d341eeb9c2e230c891d0befe01475221020e55d5387c8b6e8c5fc7237fe8836c23a5946bede705b17a5139857a7b794d412103b17a20062f164e9aeaf7cdde40fe99c80f4fa261f59f709722814cda2135c54752ae00000000"
+        ],
+        "txids": [
+          "0d4d2be224a1db672e7698c8110a15142a34b9b16c9ce5af1609321c7894b556"
+        ],
+        "type": "mutual"
+      }
+    }
+  ]
+}

@@ -1,0 +1,193 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "added": "v24.11",
+  "additionalProperties": false,
+  "rpc": "xpay",
+  "title": "Command for sending a payment",
+  "description": [
+    "The **xpay** RPC command attempts to make the specified payment: it can look up BIP353 names (such as ₿rusty@blockstream.com), it can resolve simple offers (lno1...), and pay bolt11 (lnbc...) and bolt12 invoices (lni1...).",
+    "",
+    "This plugin is both simpler and more sophisticated than the older 'pay' plugin."
+  ],
+  "request": {
+    "required": [
+      "invstring"
+    ],
+    "properties": {
+      "invstring": {
+        "type": "string",
+        "description": [
+          "bolt11 or bolt12 invoice, a bolt12 (non-recursive) offer or a BIP353 name.  If it's a bip353 name, an offer is fetched with `fetchbip353` if available.  If it's an offer, the invoice is fetched using `fetchinvoice` automatically."
+        ]
+      },
+      "amount_msat": {
+        "type": "msat",
+        "description": [
+          "Only possible for a bolt11 invoice which does not have an amount (in which case, it's compulsory).  *amount_msat* is in millisatoshi precision; it can be a whole number, or a whole number with suffix *msat* or *sat*, or a three decimal point number with suffix *sat*, or an 1 to 11 decimal point number suffixed by *btc*."
+        ]
+      },
+      "maxfee": {
+        "type": "msat",
+        "description": [
+          "*maxfee* creates an absolute limit on what fee we will pay."
+        ],
+        "default": "5000msat, or 1% (whatever is greater)"
+      },
+      "layers": {
+        "type": "array",
+        "description": [
+          "These are askrene layers to apply in addition to xpay's own: these can alter the topology or provide additional information on the lightning network.  This lets you exclude particular nodes or channels, or bias against them: see askrene-create-layer."
+        ],
+        "items": {
+          "type": "string",
+          "description": [
+            "name of an existing layer"
+          ]
+        }
+      },
+      "retry_for": {
+        "type": "u32",
+        "description": [
+          "Until *retry_for* seconds passes, the command will keep finding routes and retrying the payment."
+        ],
+        "default": "60 seconds"
+      },
+      "partial_msat": {
+        "type": "msat",
+        "description": [
+          "Explicitly state that you are only paying some part of the invoice.  Presumably someone else is paying the rest (otherwise the payment will time out at the recipient)."
+        ]
+      },
+      "maxdelay": {
+        "type": "u32",
+        "added": "v25.02",
+        "description": [
+          "A payment may be delayed for up to `maxdelay` blocks by another node; clients should be prepared for this worst case."
+        ],
+        "default": "2016"
+      },
+      "payer_note": {
+        "type": "string",
+        "added": "v26.04",
+        "description": [
+          "A message that a payer is willing to send to a payee within an invoice request."
+        ]
+      },
+      "label": {
+        "type": "string",
+        "added": "v26.06",
+        "description": [
+          "Attach a label to payments for which is returned in `listpays` and `listsendpays`.  This is for your own use: it is not visible to the recipient."
+        ]
+      },
+      "localinvreqid": {
+        "type": "hex",
+        "added": "v26.06",
+        "description": [
+          "`localinvreqid` is used by offers to link a payment attempt to a local `invoice_request` offer created by lightningd-invoicerequest(7). This  ensures that we only make a single payment for an offer, and that the offer is marked `used` once paid."
+        ]
+      },
+      "dev_use_shadow": {
+        "hidden": true,
+        "type": "boolean",
+        "added": "v26.06"
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "payment_preimage",
+      "failed_parts",
+      "successful_parts",
+      "amount_msat",
+      "amount_sent_msat"
+    ],
+    "properties": {
+      "payment_preimage": {
+        "type": "secret",
+        "description": [
+          "The proof of payment: SHA256 of this **payment_hash**."
+        ]
+      },
+      "failed_parts": {
+        "type": "u64",
+        "description": [
+          "How many separate payment parts failed."
+        ]
+      },
+      "successful_parts": {
+        "type": "u64",
+        "description": [
+          "How many separate payment parts succeeded (or are anticipated to succeed).  This will be at least one."
+        ]
+      },
+      "amount_msat": {
+        "type": "msat",
+        "description": [
+          "Amount the recipient received."
+        ]
+      },
+      "amount_sent_msat": {
+        "type": "msat",
+        "description": [
+          "Total amount we sent (including fees)."
+        ]
+      }
+    }
+  },
+  "errors": [
+    "The following error codes may occur:",
+    "",
+    "- -1: Catchall nonspecific error.",
+    "- 203: Permanent failure from destination (e.g. it said it didn't recognize invoice)",
+    "- 205: Couldn't find, or find a way to, the destination.",
+    "- 207: Invoice has expired.",
+    "- 219: Invoice has already been paid.",
+    "- 209: Other payment error."
+  ],
+  "author": [
+    "Rusty Russell [rusty@rustcorp.com.au](mailto:rusty@rustcorp.com.au) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-listpays(7)",
+    "lightning-decode(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:xpay#1",
+        "method": "xpay",
+        "params": [
+          "lnbcrt100n1pne035qsp54v5a0x3w0r3mjdnhe8fz2cugz0pqanee8rdep0sszpg3zyxvvwxqpp5ulnc8tpdywe6dh23xh2l83j3qw3ghl2x7rytl5lvza58k42mkeesdp9w3jhxazl0pcxz72lwd5k6urvv5sxymmvwscnzxqyjw5qcqp9rzjq08vhlwxs4zvcktzywmgecr3pj096tyukvt7upuz9k2s0xkvwq7nzqqq0qqqqqgqqqqqqqqpqqqqqzsqqc9qxpqysgqtquasyh7spka4ayjvawr6awq0f47h4zmz9zgm75s6xd22vq5ngsy73gjqszr3leq7j9hr27fserwxh8w4hqfxk3qawhpxexgjhmwt9qpqkmhat"
+        ]
+      },
+      "response": {
+        "payment_preimage": "5dd460dcbf1508705dd460dcbf1508705dd460dcbf1508705dd460dcbf150870",
+        "amount_msat": 10000,
+        "amount_sent_msat": 10002,
+        "failed_parts": 0,
+        "successful_parts": 1
+      }
+    },
+    {
+      "request": {
+        "id": "example:xpay#2",
+        "method": "xpay",
+        "params": {
+          "invstring": "lni1qqgvzkzz5jrhmdd0c9vy9fy80k667q3qqc3xu3s3rg94nj40zfsy866mhu5vxne6tcej5878k2mneuvgjy83pmsr8pzcqtf9kns8fn8a0nvtxwdyrhr4h7vh3gp5sqzyfdgag2c80xdq9suvcgw0ak2nh6cfxctfaxlfqv2j6dxypj76nt4jqdxyxaghf60kqgp95yw73zw4mx4y9x5y8rgqklrrawg5wpgts0ds4d3zrer77dujk3cqxwl6p5xkg8gf52vy2krjk3qy0dhemyhaksl7um6twxj6z8jya95pqmw30ryplhasydxkuxk9nr8gf92e2rms9lvtz4xyrufjpf7pfkrscaffkr5pghzsxgqfq8d2vuwxy3ezxujgqqerr0780hu3rttqw9xw86q7cdazyx4lsv8er3kz04phkfnryecqhgg0r2sdsymull88w0dv9tux7a48tk8pvggrsx2ttuetmu92txqjepkyaaad9u55zp86qf734n5mg6dmd7yv7da4qgqxyfhyvyg6pdvu4tcjvpp7kkal9rp57wj7xv4pl3ajku70rzy3pafqyqlg2sq9sggrg4456065qg26pfm5leyrjuxu5afjhw8a22g3csgyml8pvqhh4xt6pxqrsx2ttuetmu92txqjepkyaaad9u55zp86qf734n5mg6dmd7yv7dasxy7wjuavm7474t7690qx5h5kzn5f9ywfvrqu02dg3kycneq8tatzqyptztevlxahrqt54dq0k9qe587yuuka27d5u00226p9xg3ksng5xngqxt68v6474rcnve4qdzd6264qsxspa9jvxrpud6djpz3mdtnm6qj6ske9w02t8ajsxvnya5edtukyxw4gdz3pcqqqqqqqqqqqqqqq2qqqqqqqqqqqqqwjfvkl43fqqqqqqzjqgeuhc6q2sgy6wttfekcsyx7v8ztcqqlzkzvs6qkhjl5suyw0n44tyg8vx9y6y64qyqlg4cpsyqqqkqss8qv5khejhhc25kvp9jrvfmm66tefgyz05qnart8fk35mkmugeumm7pqxu3dsad7ve5j37g30mkpcspnx90z5gq07kpm9ne5t92g9smua8z98j8lyyx4jtmr2q9379708sasd3vf60ue5ezyuka9x29jdxx6m5u"
+        }
+      },
+      "response": {
+        "payment_preimage": "c15842a4877dc166c15842a4877dc166c15842a4877dc166c15842a4877dc166",
+        "amount_msat": 1000,
+        "amount_sent_msat": 1000,
+        "failed_parts": 0,
+        "successful_parts": 1
+      }
+    }
+  ]
+}

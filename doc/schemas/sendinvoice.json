@@ -1,0 +1,234 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "sendinvoice",
+  "title": "Command for send an invoice for an offer",
+  "description": [
+    "The **sendinvoice** RPC command creates and sends an invoice to the issuer of an *invoice_request* for it to pay: lightning-invoicerequest(7).",
+    "",
+    "If **fetchinvoice-noconnect** is not specified in the configuation, it will connect to the destination in the (currently common!) case where it cannot find a route which supports `option_onion_messages`."
+  ],
+  "request": {
+    "required": [
+      "invreq",
+      "label"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "invreq": {
+        "type": "string",
+        "description": [
+          "The bolt12 invoice_request string beginning with `lnr1`."
+        ]
+      },
+      "label": {
+        "type": "string",
+        "description": [
+          "The unique label to use for this invoice."
+        ]
+      },
+      "amount_msat": {
+        "type": "msat",
+        "description": [
+          "Required if the *offer* does not specify an amount at all, or specifies it in a different currency. Otherwise you may set it (e.g. to provide a tip)."
+        ],
+        "default": "the amount contained in the offer (multiplied by *quantity* if any)"
+      },
+      "timeout": {
+        "type": "u32",
+        "description": [
+          "Seconds to wait for the offering node to pay the invoice or return an error. This will also be the timeout on the invoice that is sent."
+        ],
+        "default": "90 seconds"
+      },
+      "quantity": {
+        "type": "u64",
+        "description": [
+          "Quantity is is required if the offer specifies quantity_max, otherwise it is not allowed."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "label",
+      "payment_hash",
+      "status",
+      "created_index",
+      "expires_at"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "label": {
+        "type": "string",
+        "description": [
+          "Unique label supplied at invoice creation."
+        ]
+      },
+      "description": {
+        "type": "string",
+        "description": [
+          "Description used in the invoice."
+        ]
+      },
+      "payment_hash": {
+        "type": "hash",
+        "description": [
+          "The hash of the *payment_preimage* which will prove payment."
+        ]
+      },
+      "status": {
+        "type": "string",
+        "enum": [
+          "unpaid",
+          "paid",
+          "expired"
+        ],
+        "description": [
+          "Whether it's paid, unpaid or unpayable."
+        ]
+      },
+      "expires_at": {
+        "type": "u64",
+        "description": [
+          "UNIX timestamp of when it will become / became unpayable."
+        ]
+      },
+      "amount_msat": {
+        "type": "msat",
+        "description": [
+          "The amount required to pay this invoice."
+        ]
+      },
+      "bolt12": {
+        "type": "string",
+        "description": [
+          "The BOLT12 string."
+        ]
+      },
+      "created_index": {
+        "type": "u64",
+        "added": "v23.08",
+        "description": [
+          "1-based index indicating order this invoice was created in."
+        ]
+      },
+      "updated_index": {
+        "type": "u64",
+        "added": "v23.08",
+        "description": [
+          "1-based index indicating order this invoice was changed (only present if it has changed since creation)."
+        ]
+      },
+      "amount_received_msat": {},
+      "paid_at": {},
+      "pay_index": {},
+      "payment_preimage": {}
+    },
+    "allOf": [
+      {
+        "if": {
+          "additionalProperties": true,
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "paid"
+              ]
+            }
+          }
+        },
+        "then": {
+          "additionalProperties": false,
+          "required": [
+            "pay_index",
+            "amount_received_msat",
+            "paid_at",
+            "payment_preimage"
+          ],
+          "properties": {
+            "label": {},
+            "description": {},
+            "payment_hash": {},
+            "status": {},
+            "msatoshi": {},
+            "amount_msat": {},
+            "bolt12": {},
+            "expires_at": {},
+            "created_index": {},
+            "updated_index": {},
+            "pay_index": {
+              "type": "u64",
+              "description": [
+                "Unique incrementing index for this payment."
+              ]
+            },
+            "amount_received_msat": {
+              "type": "msat",
+              "description": [
+                "The amount actually received (could be slightly greater than *amount_msat*, since clients may overpay)."
+              ]
+            },
+            "paid_at": {
+              "type": "u64",
+              "description": [
+                "UNIX timestamp of when it was paid."
+              ]
+            },
+            "payment_preimage": {
+              "type": "secret",
+              "description": [
+                "Proof of payment."
+              ]
+            }
+          }
+        }
+      }
+    ]
+  },
+  "errors": [
+    "The following error codes may occur:",
+    "",
+    "- -1: Catchall nonspecific error.",
+    "- 1002: Offer has expired.",
+    "- 1003: Cannot find a route to the node making the offer.",
+    "- 1004: The node making the offer returned an error message.",
+    "- 1005: We timed out waiting for the invoice to be paid"
+  ],
+  "author": [
+    "Rusty Russell [rusty@rustcorp.com.au](mailto:rusty@rustcorp.com.au) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-fetchinvoice(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:sendinvoice#1",
+        "method": "sendinvoice",
+        "params": {
+          "invreq": "lnr1qqgv27pu76evyr7zc4urea4jcg8uyzst2d5k6urvv5s8getnw3gzqp3zderpzxstt8927ynqg044h0egcd8n5h3n9g0u0v4h8ncc3yg02gps7sjqtqssxwz9sqkjtd8qwnx06lxckvu6g8w8t0ue0zsrfqqygj636s4sw7v67pqwvcxd9ngrvwv4ccd2dc9vtyskuqpl6kskculsxsldq88hahcmyfp4mr3pqeeas9hsywx65c288qjcx5qj2lf73matnke66c2p32e67g",
+          "label": "test sendinvoice"
+        }
+      },
+      "response": {
+        "label": "test sendinvoice",
+        "bolt12": "lni1qqgv27pu76evyr7zc4urea4jcg8uyzst2d5k6urvv5s8getnw3gzqp3zderpzxstt8927ynqg044h0egcd8n5h3n9g0u0v4h8ncc3yg02gps7sjqtqssxwz9sqkjtd8qwnx06lxckvu6g8w8t0ue0zsrfqqygj636s4sw7v65zvq8qv5khejhhc25kvp9jrvfmm66tefgyz05qnart8fk35mkmugeummqd6ys5z0px8dya83rune8z8y4ymsxe5d4wggpps0p7jjdgz7phe4cqgryccmyz7ukg5e9glc6hpqh3uckf5x9y5hg2ups3k2gyvg4dy25m7sqvnf2jhedr6e42kyrpfuhxtq8raju3kx9f9h620wu93x6gc76xmze4qku3whg4vdqvj2lajjxguj5rrgxxazrsqqqqqqqqqqqqqqq5qqqqqqqqqqqqqayjedltzjqqqqqq9yq3ne035q5cq442pq5zqz737ktj0z0xny49tt4sjglxzgt89xec54t3fae763vjxdxqd65qc0gfq2uqczqqqtqggrsx2ttuetmu92txqjepkyaaad9u55zp86qf734n5mg6dmd7yv7dalqsqhstqkaw49qhs7ck9xekh4ltmxcu6gmu773y4yejrd7awetpmypx7q3n8p4m60n5e68nplmajahytn0k7frek2tf4lcjgyhpz02f23q",
+        "payment_hash": "a0802f47d65c9e279a64a956bac248f984859ca6ce2955c53dcfb51648cd301b",
+        "amount_msat": 1000000,
+        "status": "paid",
+        "pay_index": 2,
+        "amount_received_msat": 1000000,
+        "paid_at": 1738000000,
+        "payment_preimage": "c15842a4877dc54ec15842a4877dc54ec15842a4877dc54ec15842a4877dc54e",
+        "description": "Simple test",
+        "expires_at": 1738000090,
+        "created_index": 4,
+        "updated_index": 2
+      }
+    }
+  ]
+}

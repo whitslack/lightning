@@ -1,0 +1,390 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "listpeers",
+  "title": "Command returning data on connected lightning nodes",
+  "description": [
+    "The **listpeers** RPC command returns data on nodes that are connected or are not connected but have open channels with this node.",
+    "",
+    "Once a connection to another lightning node has been established, using the **connect** command, data on the node can be returned using **listpeers** and the *id* that was used with the **connect** command.",
+    "",
+    "If no *id* is supplied, then data on all lightning nodes that are connected, or not connected but have open channels with this node, are returned.",
+    "",
+    "If a channel is open with a node and the connection has been lost, then the node will still appear in the output of the command and the value of the *connected* attribute of the node will be \"false\".",
+    "",
+    "The channel will remain open for a set blocktime, after which if the connection has not been re-established, the channel will close and the node will no longer appear in the command output."
+  ],
+  "categories": [
+    "readonly"
+  ],
+  "request": {
+    "required": [],
+    "additionalProperties": false,
+    "properties": {
+      "id": {
+        "type": "pubkey",
+        "description": [
+          "If supplied, limits the result to just the peer with the given ID, if it exists."
+        ]
+      },
+      "level": {
+        "type": "string",
+        "description": [
+          "Supplying level will show log entries related to that peer at the given log level."
+        ],
+        "enum": [
+          "io",
+          "trace",
+          "debug",
+          "info",
+          "unusual"
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "peers"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "peers": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "id",
+            "connected",
+            "num_channels",
+            "features"
+          ],
+          "properties": {
+            "id": {
+              "type": "pubkey",
+              "description": [
+                "The unique id of the peer."
+              ]
+            },
+            "connected": {
+              "type": "boolean",
+              "description": [
+                "Value showing the connection status."
+              ]
+            },
+            "num_channels": {
+              "type": "u32",
+              "description": [
+                "The number of channels the peer has with this node."
+              ],
+              "added": "v23.02"
+            },
+            "log": {
+              "type": "array",
+              "description": [
+                "If *level* is specified, logs for this peer."
+              ],
+              "items": {
+                "type": "object",
+                "additionalProperties": true,
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "type": "string",
+                    "enum": [
+                      "SKIPPED",
+                      "BROKEN",
+                      "UNUSUAL",
+                      "INFO",
+                      "DEBUG",
+                      "TRACE",
+                      "IO_IN",
+                      "IO_OUT"
+                    ]
+                  }
+                },
+                "allOf": [
+                  {
+                    "if": {
+                      "additionalProperties": true,
+                      "properties": {
+                        "type": {
+                          "enum": [
+                            "SKIPPED"
+                          ]
+                        }
+                      }
+                    },
+                    "then": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "num_skipped"
+                      ],
+                      "properties": {
+                        "type": {},
+                        "num_skipped": {
+                          "type": "u32",
+                          "description": [
+                            "Number of deleted/omitted entries."
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "additionalProperties": true,
+                      "properties": {
+                        "type": {
+                          "enum": [
+                            "BROKEN",
+                            "UNUSUAL",
+                            "INFO",
+                            "DEBUG",
+                            "TRACE"
+                          ]
+                        }
+                      }
+                    },
+                    "then": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "time",
+                        "source",
+                        "log",
+                        "node_id"
+                      ],
+                      "properties": {
+                        "type": {},
+                        "time": {
+                          "type": "string",
+                          "description": [
+                            "UNIX timestamp with 9 decimal places."
+                          ]
+                        },
+                        "source": {
+                          "type": "string",
+                          "description": [
+                            "The particular logbook this was found in."
+                          ]
+                        },
+                        "log": {
+                          "type": "string",
+                          "description": [
+                            "The actual log message."
+                          ]
+                        },
+                        "node_id": {
+                          "type": "pubkey",
+                          "description": [
+                            "The peer this is associated with."
+                          ]
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "additionalProperties": true,
+                      "properties": {
+                        "type": {
+                          "enum": [
+                            "IO_IN",
+                            "IO_OUT"
+                          ]
+                        }
+                      }
+                    },
+                    "then": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "time",
+                        "source",
+                        "log",
+                        "node_id",
+                        "data"
+                      ],
+                      "properties": {
+                        "type": {},
+                        "time": {
+                          "type": "string",
+                          "description": [
+                            "UNIX timestamp with 9 decimal places."
+                          ]
+                        },
+                        "source": {
+                          "type": "string",
+                          "description": [
+                            "The particular logbook this was found in."
+                          ]
+                        },
+                        "log": {
+                          "type": "string",
+                          "description": [
+                            "The actual log message."
+                          ]
+                        },
+                        "node_id": {
+                          "type": "pubkey",
+                          "description": [
+                            "The peer this is associated with."
+                          ]
+                        },
+                        "data": {
+                          "type": "hex",
+                          "description": [
+                            "The IO which occurred."
+                          ]
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "allOf": [
+            {
+              "if": {
+                "additionalProperties": true,
+                "properties": {
+                  "connected": {
+                    "enum": [
+                      true
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "additionalProperties": false,
+                "required": [
+                  "netaddr",
+                  "features"
+                ],
+                "properties": {
+                  "id": {},
+                  "channels": {},
+                  "connected": {},
+                  "num_channels": {},
+                  "htlcs": {},
+                  "log": {},
+                  "netaddr": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 1,
+                    "description": [
+                      "A single entry array."
+                    ],
+                    "items": {
+                      "type": "string",
+                      "description": [
+                        "Address, e.g. 1.2.3.4:1234."
+                      ]
+                    }
+                  },
+                  "remote_addr": {
+                    "type": "string",
+                    "description": [
+                      "The public IPv4/6 address the peer sees us from, e.g. 1.2.3.4:1234."
+                    ]
+                  },
+                  "features": {
+                    "type": "hex",
+                    "description": [
+                      "Bitmap of BOLT #9 features from peer's INIT message."
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "errors": [
+    "On error the returned object will contain `code` and `message` properties, with `code` being one of the following:",
+    "",
+    "- -32602: If the given parameters are wrong."
+  ],
+  "author": [
+    "Michael Hawkins [michael.hawkins@protonmail.com](mailto:michael.hawkins@protonmail.com)."
+  ],
+  "see_also": [
+    "lightning-connect(7)",
+    "lightning-fundchannel_start(7)",
+    "lightning-setchannel(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)",
+    "Lightning RFC site (BOLT #9):",
+    "[https://github.com/lightning/bolts/blob/master/09-features.md](https://github.com/lightning/bolts/blob/master/09-features.md)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:listpeers#1",
+        "method": "listpeers",
+        "params": {
+          "id": "03cecbfdc68544cc596223b68ce0710c9e5d2c9cb317ee07822d95079acc703d31"
+        }
+      },
+      "response": {
+        "peers": [
+          {
+            "id": "03cecbfdc68544cc596223b68ce0710c9e5d2c9cb317ee07822d95079acc703d31",
+            "connected": true,
+            "num_channels": 1,
+            "netaddr": [
+              "127.0.0.1:30005"
+            ],
+            "features": "800898882a8a59a1"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "id": "example:listpeers#2",
+        "method": "listpeers",
+        "params": {}
+      },
+      "response": {
+        "peers": [
+          {
+            "id": "02287bfac8b99b35477ebe9334eede1e32b189e24644eb701c079614712331cec0",
+            "connected": false,
+            "num_channels": 1,
+            "features": "800898882a8a59a1",
+            "netaddr": [
+              "127.0.0.1:30007"
+            ]
+          },
+          {
+            "id": "038194b5f32bdf0aa59812c86c4ef7ad2f294104fa027d1ace9b469bb6f88cf37b",
+            "connected": true,
+            "num_channels": 1,
+            "netaddr": [
+              "127.0.0.1:30001"
+            ],
+            "features": "800898882a8a59a1"
+          },
+          {
+            "id": "03cecbfdc68544cc596223b68ce0710c9e5d2c9cb317ee07822d95079acc703d31",
+            "connected": true,
+            "num_channels": 1,
+            "netaddr": [
+              "127.0.0.1:30005"
+            ],
+            "features": "800898882a8a59a1"
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,109 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "askrene-listreservations",
+  "title": "Command to display information about reservations",
+  "added": "v24.11",
+  "description": [
+    "The **askrene-reservations** RPC command reports outstanding reservations made with `askrene-reserve`, mainly for debugging."
+  ],
+  "request": {
+    "required": [],
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "response": {
+    "required": [
+      "reservations"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "reservations": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "required": [
+            "short_channel_id_dir",
+            "amount_msat",
+            "age_in_seconds",
+            "command_id"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "short_channel_id_dir": {
+              "type": "short_channel_id_dir",
+              "description": [
+                "The channel and direction that is reserved."
+              ]
+            },
+            "amount_msat": {
+              "type": "msat",
+              "description": [
+                "The amount reserved."
+              ]
+            },
+            "age_in_seconds": {
+              "type": "u64",
+              "description": [
+                "The age of this reservation."
+              ]
+            },
+            "command_id": {
+              "type": "string",
+              "description": [
+                "The JSON id of the command used to make the reservation."
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "see_also": [
+    "lightning-askrene-reserve(7)",
+    "lightning-askrene-unreserve(7)"
+  ],
+  "author": [
+    "Rusty Russell [rusty@rustcorp.com.au](mailto:rusty@rustcorp.com.au) is mainly responsible."
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:askrene-listreservations#1",
+        "method": "askrene-listreservations",
+        "params": {}
+      },
+      "response": {
+        "reservations": [
+          {
+            "short_channel_id_dir": "116x1x1/1",
+            "amount_msat": 1250000,
+            "age_in_seconds": 2,
+            "command_id": "examples.py:askrene-reserve#1/cln:askrene-reserve#2"
+          },
+          {
+            "short_channel_id_dir": "130x1x0/0",
+            "amount_msat": 1250001,
+            "age_in_seconds": 2,
+            "command_id": "examples.py:askrene-reserve#2/cln:askrene-reserve#3"
+          },
+          {
+            "short_channel_id_dir": "116x1x1/1",
+            "amount_msat": 1250000000000,
+            "age_in_seconds": 2,
+            "command_id": "examples.py:askrene-reserve#3/cln:askrene-reserve#4"
+          },
+          {
+            "short_channel_id_dir": "130x1x0/0",
+            "amount_msat": 1250000000000,
+            "age_in_seconds": 2,
+            "command_id": "examples.py:askrene-reserve#4/cln:askrene-reserve#5"
+          }
+        ]
+      }
+    }
+  ]
+}

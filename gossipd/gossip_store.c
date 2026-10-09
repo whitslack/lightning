@@ -1,0 +1,675 @@
+#include "config.h"
+#include <ccan/crc32c/crc32c.h>
+#include <ccan/noerr/noerr.h>
+#include <ccan/read_write_all/read_write_all.h>
+#include <ccan/tal/str/str.h>
+#include <common/clock_time.h>
+#include <common/gossip_store.h>
+#include <common/gossip_store_wiregen.h>
+#include <common/status.h>
+#include <common/utils.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <gossipd/gossip_store.h>
+#include <gossipd/gossipd.h>
+#include <inttypes.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+/* Obsolete ZOMBIE bit */
+#define GOSSIP_STORE_ZOMBIE_BIT_V13 0x1000U
+
+#define GOSSIP_STORE_TEMP_FILENAME "gossip_store.tmp"
+/* We write it as major version 0, minor version 16 */
+#define GOSSIP_STORE_VER ((0 << 5) | 16)
+
+struct gossip_store {
+	/* Back pointer. */
+	struct daemon *daemon;
+
+	int fd;
+	u8 version;
+
+	/* Offset of current EOF */
+	u64 len;
+
+	/* Timestamp of store when we opened it (0 if we created it) */
+	u32 timestamp;
+
+	/* Last writes since previous sync, in case it messes up and
+	 * we need to force it. */
+	const u8 **last_writes;
+};
+
+static void gossip_store_destroy(struct gossip_store *gs)
+{
+	close(gs->fd);
+}
+
+static bool append_msg(int fd, const u8 *msg, u32 timestamp, u64 *len,
+		       const u8 ***msgs)
+{
+	struct gossip_hdr *hdr;
+	u32 msglen;
+
+	/* Don't ever overwrite the version header! */
+	assert(*len);
+
+	/* Never NULL */
+	assert(msg);
+	msglen = tal_count(msg);
+	/* All messages begin with a 16-bit type */
+	assert(msglen >= 2);
+
+	hdr = (struct gossip_hdr *)tal_arr(tmpctx, u8, sizeof(*hdr) + msglen);
+	hdr->len = cpu_to_be16(msglen);
+	hdr->flags = 0;
+	hdr->crc = cpu_to_be32(crc32c(timestamp, msg, msglen));
+	hdr->timestamp = cpu_to_be32(timestamp);
+	memcpy(hdr + 1, msg, msglen);
+
+	if (pwrite(fd, hdr, sizeof(*hdr) + msglen, *len) != sizeof(*hdr) + msglen)
+		return false;
+
+	/* Update the hdr with the complete bit as a single-byte write */
+	hdr->flags = CPU_TO_BE16(GOSSIP_STORE_COMPLETED_BIT);
+	if (pwrite(fd, &hdr->flags, 1, *len) != 1)
+		return false;
+
+	*len += sizeof(*hdr) + msglen;
+	if (msgs)
+		tal_arr_expand(msgs, (const u8 *)tal_steal(*msgs, hdr));
+	return true;
+}
+
+/* v9 added the GOSSIP_STORE_LEN_RATELIMIT_BIT.
+ * v10 removed any remaining non-htlc-max channel_update.
+ * v11 mandated channel_updates use the htlc_maximum_msat field
+ * v12 added the zombie flag for expired channel updates
+ * v13 removed private gossip entries
+ * v14 removed zombie and spam flags
+ * v15 added the complete flag
+ * v16 add uuid field, ended field uuid extension
+ */
+static bool can_upgrade(u8 oldversion)
+{
+	return oldversion >= 9 && oldversion <= 15;
+}
+
+/* On upgrade, do best effort on private channels: hand them to
+ * lightningd as if we just receive them, before removing from the
+ * store */
+static void give_lightningd_canned_private_update(struct daemon *daemon,
+						  const u8 *msg)
+{
+	u8 *update;
+	secp256k1_ecdsa_signature signature;
+	struct bitcoin_blkid chain_hash;
+	struct short_channel_id short_channel_id;
+	u32 timestamp;
+	u8 message_flags, channel_flags;
+	u16 cltv_expiry_delta;
+	struct amount_msat htlc_minimum_msat, htlc_maximum_msat;
+	u32 fee_base_msat, fee_proportional_millionths;
+
+	if (!fromwire_gossip_store_private_update_obs(tmpctx, msg, &update)) {
+		status_broken("Could not parse private update %s",
+			      tal_hex(tmpctx, msg));
+		return;
+	}
+	if (!fromwire_channel_update(update,
+				     &signature,
+				     &chain_hash,
+				     &short_channel_id,
+				     &timestamp,
+				     &message_flags,
+				     &channel_flags,
+				     &cltv_expiry_delta,
+				     &htlc_minimum_msat,
+				     &fee_base_msat,
+				     &fee_proportional_millionths,
+				     &htlc_maximum_msat)) {
+		status_broken("Could not parse inner private update %s",
+			      tal_hex(tmpctx, msg));
+		return;
+	}
+
+	/* From NULL source (i.e. trust us!) */
+	tell_lightningd_peer_update(daemon,
+				    NULL,
+				    short_channel_id,
+				    fee_base_msat,
+				    fee_proportional_millionths,
+				    cltv_expiry_delta,
+				    htlc_minimum_msat,
+				    htlc_maximum_msat);
+}
+
+static bool upgrade_field(u8 oldversion,
+			  struct daemon *daemon,
+			  be16 *hdr_flags,
+			  u8 **msg)
+{
+	int type = fromwire_peektype(*msg);
+	assert(can_upgrade(oldversion));
+
+	if (oldversion <= 10) {
+		/* Remove old channel_update with no htlc_maximum_msat */
+		if (type == WIRE_CHANNEL_UPDATE
+		    && tal_bytelen(*msg) == 130) {
+			*msg = tal_free(*msg);
+		}
+	}
+	if (oldversion <= 12) {
+		/* Remove private entries */
+		if (type == WIRE_GOSSIP_STORE_PRIVATE_CHANNEL_OBS) {
+			*msg = tal_free(*msg);
+		} else if (type == WIRE_GOSSIP_STORE_PRIVATE_UPDATE_OBS) {
+			give_lightningd_canned_private_update(daemon, *msg);
+			*msg = tal_free(*msg);
+		}
+	}
+	if (oldversion <= 13) {
+		/* Discard any zombies */
+		if (be16_to_cpu(*hdr_flags) & GOSSIP_STORE_ZOMBIE_BIT_V13) {
+			*msg = tal_free(*msg);
+		}
+	}
+	if (oldversion <= 14) {
+		/* Add completed field */
+		*hdr_flags |= CPU_TO_BE16(GOSSIP_STORE_COMPLETED_BIT);
+	}
+
+	return true;
+}
+
+static u8 *new_uuid_record(const tal_t *ctx, int fd, u64 *off)
+{
+	u8 *uuid = tal_arr(ctx, u8, 32);
+
+	for (size_t i = 0; i < tal_bytelen(uuid); i++)
+		uuid[i] = pseudorand(256);
+	if (!append_msg(fd, towire_gossip_store_uuid(tmpctx, uuid), 0, off, NULL))
+		return tal_free(uuid);
+	/* append_msg does not change file offset, so do that now. */
+	lseek(fd, 0, SEEK_END);
+	return uuid;
+}
+
+static int make_new_gossip_store(u64 *total_len)
+{
+	u8 version = GOSSIP_STORE_VER;
+	int new_fd = open(GOSSIP_STORE_TEMP_FILENAME, O_RDWR|O_TRUNC|O_CREAT, 0600);
+
+	*total_len = sizeof(version);
+
+	if (new_fd < 0
+	    || !write_all(new_fd, &version, sizeof(version))
+	    || !new_uuid_record(tmpctx, new_fd, total_len)) {
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Creating new gossip_store file: %s",
+			      strerror(errno));
+	}
+	if (rename(GOSSIP_STORE_TEMP_FILENAME, GOSSIP_STORE_FILENAME) != 0) {
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Renaming gossip_store failed: %s",
+			      strerror(errno));
+	}
+	return new_fd;
+}
+
+static int gossip_store_open(u64 *total_len, bool *recent)
+{
+	struct stat st;
+	int fd = open(GOSSIP_STORE_FILENAME, O_RDWR);
+	if (fd == -1)
+		return -1;
+
+	if (fstat(fd, &st) != 0) {
+		close_noerr(fd);
+		return -1;
+	}
+
+	if (recent)
+		*recent = (st.st_mtime > clock_time().ts.tv_sec - 3600);
+
+	*total_len = st.st_size;
+	return fd;
+}
+
+/* If this returns -1, we cannot upgrade. */
+static int gossip_store_upgrade(struct daemon *daemon,
+				u64 *total_len,
+				bool *populated)
+{
+	int old_fd, new_fd;
+	u64 old_len, cur_off;
+	struct gossip_hdr hdr;
+	u8 oldversion, version = GOSSIP_STORE_VER;
+	struct timemono start = time_mono();
+	const char *bad;
+	bool recent;
+	u8 *uuid;
+
+	old_fd = gossip_store_open(total_len, &recent);
+	if (old_fd == -1) {
+		if (errno == ENOENT) {
+			*populated = false;
+			return make_new_gossip_store(total_len);
+		}
+
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Reading gossip_store file: %s",
+			      strerror(errno));
+	}
+
+	if (!read_all(old_fd, &oldversion, sizeof(oldversion))) {
+		status_broken("Cannot read gossip_store version");
+		goto upgrade_failed;
+	}
+
+	/* If we have any contents (beyond uuid), and the file is less
+	 * than 1 hour old, say "seems good" */
+	*populated = recent && *total_len > 1 + sizeof(hdr) + 2 + 32;
+
+	/* No upgrade necessary?  We're done. */
+	if (oldversion == GOSSIP_STORE_VER)
+		return old_fd;
+
+	if (!can_upgrade(oldversion)) {
+		status_unusual("Cannot upgrade gossip_store version %u",
+			       oldversion);
+		goto upgrade_failed;
+	}
+
+	/* OK, create new gossip store to convert into */
+	new_fd = open(GOSSIP_STORE_TEMP_FILENAME, O_RDWR|O_TRUNC|O_CREAT, 0600);
+	if (new_fd < 0) {
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Opening new gossip_store file: %s",
+			      strerror(errno));
+	}
+
+	if (!write_all(new_fd, &version, sizeof(version))) {
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Writing new gossip_store file: %s",
+			      strerror(errno));
+	}
+
+	*total_len = sizeof(version);
+	cur_off = old_len = sizeof(oldversion);
+
+	/* Create a fresh uuid, make sure we're after it. */
+	uuid = new_uuid_record(tmpctx, new_fd, total_len);
+	if (!uuid) {
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Writing new gossip_store file: %s",
+			      strerror(errno));
+	}
+	assert(*total_len == lseek(new_fd, 0, SEEK_END));
+	/* Move to the end (new_uuid_record uses pwrite, not write) */
+	lseek(new_fd, *total_len, SEEK_SET);
+
+	/* Read everything, write non-deleted ones to new_fd.  If something goes wrong,
+	 * we end up with truncated store. */
+	while (read_all(old_fd, &hdr, sizeof(hdr))) {
+		size_t msglen;
+		u8 *msg;
+
+		/* Partial writes can happen, and we simply truncate */
+		msglen = be16_to_cpu(hdr.len);
+		msg = tal_arr(NULL, u8, msglen);
+		if (!read_all(old_fd, msg, msglen)) {
+			status_unusual("gossip_store_compact: store ends early at %"PRIu64,
+				       old_len);
+			tal_free(msg);
+			goto upgrade_failed_close_new;
+		}
+
+		cur_off = old_len;
+		old_len += sizeof(hdr) + msglen;
+
+		if (be16_to_cpu(hdr.flags) & GOSSIP_STORE_DELETED_BIT) {
+			tal_free(msg);
+			continue;
+		}
+
+		/* Check checksum (upgrade would overwrite, so do it now) */
+		if (be32_to_cpu(hdr.crc)
+		    != crc32c(be32_to_cpu(hdr.timestamp), msg, msglen)) {
+			bad = tal_fmt(tmpctx, "checksum verification failed? %08x should be %08x",
+				      be32_to_cpu(hdr.crc),
+				      crc32c(be32_to_cpu(hdr.timestamp), msg, msglen));
+			goto badmsg;
+		}
+
+		if (oldversion != version) {
+			if (!upgrade_field(oldversion, daemon,
+					   &hdr.flags, &msg)) {
+				tal_free(msg);
+				bad = "upgrade of store failed";
+				goto badmsg;
+			}
+
+			/* It can tell us to delete record entirely. */
+			if (msg == NULL)
+				continue;
+
+			/* Recalc msglen and header */
+			msglen = tal_bytelen(msg);
+			hdr.len = cpu_to_be16(msglen);
+			hdr.crc = cpu_to_be32(crc32c(be32_to_cpu(hdr.timestamp),
+						      msg, msglen));
+		}
+
+		/* Don't write out old tombstones */
+		if (fromwire_peektype(msg) == WIRE_GOSSIP_STORE_DELETE_CHAN) {
+			tal_free(msg);
+			continue;
+		}
+
+		/* Ignore uuid: fresh file will have fresh uuid */
+		if (fromwire_peektype(msg) == WIRE_GOSSIP_STORE_UUID) {
+			tal_free(msg);
+			continue;
+		}
+
+		if (!write_all(new_fd, &hdr, sizeof(hdr))
+		    || !write_all(new_fd, msg, msglen)) {
+			/* We fail hard here, since we're probably out of space. */
+			status_failed(STATUS_FAIL_INTERNAL_ERROR,
+				      "gossip_store_compact: writing msg len %zu to new store: %s",
+				      msglen, strerror(errno));
+		}
+		tal_free(msg);
+		*total_len += sizeof(hdr) + msglen;
+	}
+
+	assert(*total_len == lseek(new_fd, 0, SEEK_END));
+
+	if (rename(GOSSIP_STORE_TEMP_FILENAME, GOSSIP_STORE_FILENAME) != 0) {
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "gossip_store_compact: rename failed: %s",
+			      strerror(errno));
+	}
+
+	/* Create end marker now new file exists. */
+	append_msg(old_fd, towire_gossip_store_ended(tmpctx, *total_len, uuid), 0, &old_len, NULL);
+	close(old_fd);
+
+	status_debug("Time to convert version %u store: %"PRIu64" msec",
+		     oldversion,
+		     time_to_msec(timemono_between(time_mono(), start)));
+	return new_fd;
+
+badmsg:
+	status_broken("gossip_store: %s (offset %"PRIu64").", bad, cur_off);
+upgrade_failed_close_new:
+	close(new_fd);
+upgrade_failed:
+	close(old_fd);
+	return -1;
+}
+
+void gossip_store_corrupt(void)
+{
+	status_broken("gossip_store: Moving to %s.corrupt",
+		      GOSSIP_STORE_FILENAME);
+	rename(GOSSIP_STORE_FILENAME, GOSSIP_STORE_FILENAME ".corrupt");
+}
+
+struct gossip_store *gossip_store_new(const tal_t *ctx,
+				      struct daemon *daemon,
+				      bool *populated)
+{
+	struct gossip_store *gs = tal(ctx, struct gossip_store);
+
+	gs->daemon = daemon;
+	gs->fd = gossip_store_upgrade(daemon, &gs->len, populated);
+	if (gs->fd < 0)
+		return tal_free(gs);
+	gs->last_writes = tal_arr(gs, const u8 *, 0);
+	tal_add_destructor(gs, gossip_store_destroy);
+	return gs;
+}
+
+void gossip_store_reopen(struct gossip_store *gs)
+{
+	close(gs->fd);
+	gs->fd = gossip_store_open(&gs->len, NULL);
+	if (gs->fd < 0)
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "gossmap reopen failed: %s", strerror(errno));
+}
+
+void gossip_store_fsync(const struct gossip_store *gs)
+{
+	if (fsync(gs->fd) != 0)
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "gossmap fsync failed: %s", strerror(errno));
+}
+
+void gossip_store_rewrite_end(struct gossip_store *gs)
+{
+	u64 offset = gs->len;
+	const u8 **msgs = gs->last_writes;
+
+	for (size_t i = 0; i < tal_count(msgs); i++) {
+		/* Don't overwrite version byte */
+		assert(tal_bytelen(msgs[i]) < gs->len);
+		offset -= tal_bytelen(msgs[i]);
+	}
+
+	for (size_t i = 0; i < tal_count(msgs); i++) {
+		if (pwrite(gs->fd, msgs[i], tal_bytelen(msgs[i]), offset) != tal_bytelen(msgs[i]))
+			status_failed(STATUS_FAIL_INTERNAL_ERROR,
+				      "Failed to re-write %s at offset %"PRIu64,
+				      tal_hex(tmpctx, msgs[i]), offset);
+		offset += tal_bytelen(msgs[i]);
+	}
+
+	/* Hit it harder. */
+	gossip_store_fsync(gs);
+}
+
+void gossip_store_writes_confirmed(struct gossip_store *gs)
+{
+	tal_free(gs->last_writes);
+	gs->last_writes = tal_arr(gs, const u8 *, 0);
+}
+
+u64 gossip_store_add(struct gossip_store *gs,
+		     const u8 *gossip_msg,
+		     u32 timestamp)
+{
+	u64 off = gs->len, filelen;
+
+	/* Double check: this should always be EOF! */
+	filelen = lseek(gs->fd, 0, SEEK_END);
+	if (filelen != off) {
+		status_broken("gossip_store: file was len %"PRIu64
+			      ", expected %"PRIu64", trying fsync!",
+			      filelen, off);
+
+		gossip_store_fsync(gs);
+		filelen = lseek(gs->fd, 0, SEEK_END);
+		if (filelen != off)
+			status_failed(STATUS_FAIL_INTERNAL_ERROR,
+				      "gossip_store: file was len %"PRIu64
+				      ", expected %"PRIu64,
+				      filelen, off);
+	}
+
+	if (!append_msg(gs->fd, gossip_msg, timestamp, &gs->len, &gs->last_writes)) {
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Failed writing to gossip store: %s",
+			      strerror(errno));
+	}
+
+	/* By gossmap convention, offset is *after* hdr */
+	return off + sizeof(struct gossip_hdr);
+}
+
+/* Offsets are all gossmap-style: *after* hdr! */
+static const u8 *gossip_store_get_with_hdr(const tal_t *ctx,
+					   struct gossip_store *gs,
+					   u64 offset,
+					   struct gossip_hdr *hdr)
+{
+	u32 msglen, checksum;
+	u8 *msg;
+
+	if (offset <= sizeof(*hdr))
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "gossip_store: can't access offset %"PRIu64,
+			      offset);
+	if (pread(gs->fd, hdr, sizeof(*hdr), offset - sizeof(*hdr)) != sizeof(*hdr)) {
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "gossip_store: can't read hdr offset %"PRIu64
+			      "/%"PRIu64": %s",
+			      offset - sizeof(*hdr), gs->len, strerror(errno));
+	}
+
+	if (be16_to_cpu(hdr->flags) & GOSSIP_STORE_DELETED_BIT)
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "gossip_store: get delete entry offset %"PRIu64
+			      "/%"PRIu64"",
+			      offset - sizeof(*hdr), gs->len);
+
+	msglen = be16_to_cpu(hdr->len);
+	checksum = be32_to_cpu(hdr->crc);
+	msg = tal_arr(ctx, u8, msglen);
+	if (pread(gs->fd, msg, msglen, offset) != msglen)
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "gossip_store: can't read len %u offset %"PRIu64
+			      "/%"PRIu64, msglen, offset, gs->len);
+
+	if (checksum != crc32c(be32_to_cpu(hdr->timestamp), msg, msglen))
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "gossip_store: bad checksum offset %"PRIu64": %s",
+			      offset - sizeof(*hdr), tal_hex(tmpctx, msg));
+
+	return msg;
+}
+
+/* Populates hdr */
+static bool check_msg_type(struct gossip_store *gs, u64 offset, int flag, int type,
+			   struct gossip_hdr *hdr)
+{
+	const u8 *msg = gossip_store_get_with_hdr(tmpctx, gs, offset, hdr);
+
+	if (fromwire_peektype(msg) == type)
+		return true;
+
+	status_broken("asked to flag-%u type %i @%"PRIu64" but store contains "
+		      "%i (gs->len=%"PRIu64"): %s",
+		      flag, type, offset, fromwire_peektype(msg),
+		      gs->len, tal_hex(tmpctx, msg));
+	return false;
+}
+
+/* Returns offset of following entry (i.e. after its header). */
+u64 gossip_store_set_flag(struct gossip_store *gs,
+			  u64 offset, u16 flag, int type)
+{
+	struct gossip_hdr hdr;
+
+	if (!check_msg_type(gs, offset, flag, type, &hdr))
+		return offset;
+
+	if (be16_to_cpu(hdr.flags) & flag) {
+		status_broken("gossip_store flag-%u @%"PRIu64" for %u already set!",
+			      flag, offset, type);
+	}
+
+	hdr.flags |= cpu_to_be16(flag);
+	if (pwrite(gs->fd, &hdr, sizeof(hdr), offset - sizeof(hdr)) != sizeof(hdr))
+
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Failed writing set flags @%"PRIu64": %s",
+			      offset, strerror(errno));
+
+	return offset + be16_to_cpu(hdr.len) + sizeof(struct gossip_hdr);
+}
+
+u16 gossip_store_get_flags(struct gossip_store *gs,
+			   u64 offset, int type)
+{
+	struct gossip_hdr hdr;
+
+	if (!check_msg_type(gs, offset, -1, type, &hdr))
+		return 0;
+
+	return be16_to_cpu(hdr.flags);
+}
+
+void gossip_store_clear_flag(struct gossip_store *gs,
+			     u64 offset, u16 flag, int type)
+{
+	struct gossip_hdr hdr;
+
+	if (!check_msg_type(gs, offset, flag, type, &hdr))
+		return;
+
+	assert(be16_to_cpu(hdr.flags) & flag);
+	hdr.flags &= ~cpu_to_be16(flag);
+	if (pwrite(gs->fd, &hdr, sizeof(hdr), offset - sizeof(hdr)) != sizeof(hdr))
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Failed writing clear flags @%"PRIu64": %s",
+			      offset, strerror(errno));
+}
+
+void gossip_store_del(struct gossip_store *gs,
+		      u64 offset,
+		      int type)
+{
+	u64 next_index;
+
+	assert(offset > sizeof(struct gossip_hdr));
+	next_index = gossip_store_set_flag(gs, offset,
+					   GOSSIP_STORE_DELETED_BIT,
+					   type);
+
+	/* For a channel_announcement, we need to delete amount too */
+	if (type == WIRE_CHANNEL_ANNOUNCEMENT)
+		gossip_store_set_flag(gs, next_index,
+				      GOSSIP_STORE_DELETED_BIT,
+				      WIRE_GOSSIP_STORE_CHANNEL_AMOUNT);
+}
+
+u32 gossip_store_get_timestamp(struct gossip_store *gs, u64 offset)
+{
+	struct gossip_hdr hdr;
+
+	assert(offset > sizeof(struct gossip_hdr));
+
+	if (pread(gs->fd, &hdr, sizeof(hdr), offset - sizeof(hdr)) != sizeof(hdr)) {
+		status_broken("gossip_store overrun during get_timestamp @%"PRIu64
+			      " gs->len: %"PRIu64, offset, gs->len);
+		return 0;
+	}
+
+	return be32_to_cpu(hdr.timestamp);
+}
+
+void gossip_store_set_timestamp(struct gossip_store *gs, u64 offset, u32 timestamp)
+{
+	struct gossip_hdr hdr;
+	const u8 *msg;
+
+	msg = gossip_store_get_with_hdr(tmpctx, gs, offset, &hdr);
+
+	/* Change timestamp and crc */
+	hdr.timestamp = cpu_to_be32(timestamp);
+	hdr.crc = cpu_to_be32(crc32c(timestamp, msg, tal_bytelen(msg)));
+
+	if (pwrite(gs->fd, &hdr, sizeof(hdr), offset - sizeof(hdr)) != sizeof(hdr))
+		status_failed(STATUS_FAIL_INTERNAL_ERROR,
+			      "Failed writing header to re-timestamp @%"PRIu64": %s",
+			      offset, strerror(errno));
+}
+
+u64 gossip_store_len_written(const struct gossip_store *gs)
+{
+	return gs->len;
+}

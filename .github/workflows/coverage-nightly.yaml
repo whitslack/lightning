@@ -1,0 +1,171 @@
+name: Coverage (Nightly)
+
+on:
+  schedule:
+    # Run at 2 AM UTC every day
+    - cron: '0 2 * * *'
+  # Allow manual triggers for testing
+  workflow_dispatch:
+  # Allow being called from other workflows
+  workflow_call:
+
+concurrency:
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    name: Build with Coverage
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Install dependencies
+        run: bash -x .github/scripts/setup.sh
+
+      - name: Build with coverage instrumentation
+        run: |
+          ./configure --enable-debugbuild --enable-coverage CC=clang
+          uv run make -j $(nproc) testpack.tar.bz2
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: cln-coverage-build
+          path: testpack.tar.bz2
+
+  test:
+    name: Test (${{ matrix.name }})
+    runs-on: ubuntu-22.04
+    needs: compile
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: sqlite
+            db: sqlite3
+            pytest_par: 10
+          - name: postgres
+            db: postgres
+            pytest_par: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.1.0
+
+      - name: Install dependencies
+        run: bash -x .github/scripts/setup.sh
+
+      - name: Install Bitcoin Core
+        run: bash -x .github/scripts/install-bitcoind.sh
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: cln-coverage-build
+
+      - name: Unpack build
+        run: tar -xaf testpack.tar.bz2
+
+      - name: Run tests with coverage
+        env:
+          CLN_COVERAGE_DIR: ${{ github.workspace }}/coverage-raw
+          TEST_DB_PROVIDER: ${{ matrix.db }}
+          PYTEST_PAR: ${{ matrix.pytest_par }}
+          SLOW_MACHINE: 1
+          TIMEOUT: 900
+          TEST_LOG_IGNORE_ERRORS: "1"
+        run: |
+          mkdir -p "$CLN_COVERAGE_DIR"
+          uv run eatmydata pytest tests/ -n ${PYTEST_PAR} -vvv
+
+      - name: Upload coverage data
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: coverage-raw-${{ matrix.name }}
+          # pyln-testing puts the profiles in per-test subdirectories
+          path: coverage-raw/
+          if-no-files-found: error
+
+  report:
+    name: Generate Coverage Report
+    runs-on: ubuntu-22.04
+    needs: test
+    if: always()
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # The raw profile format has no compatibility guarantees across LLVM
+      # releases, so llvm-profdata has to come from the same release as the
+      # clang that produced the profiles: the distro default in both cases.
+      - name: Install LLVM tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: cln-coverage-build
+
+      - name: Unpack build
+        run: tar -xaf testpack.tar.bz2
+
+      - name: Download all coverage artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: coverage-raw-*
+          path: coverage-artifacts
+
+      # collect-coverage.sh walks the tree itself and rejects the profiles
+      # that crashed tests left half-written, so it gets the whole download.
+      - name: Merge coverage data
+        run: ./contrib/coverage/collect-coverage.sh coverage-artifacts
+
+      - name: Generate HTML report
+        run: ./contrib/coverage/generate-coverage-report.sh
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v6
+        with:
+          files: coverage/coverage.lcov
+          flags: integration-tests
+          name: cln-nightly-coverage
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
+
+      - name: Upload HTML report
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-html-report
+          path: coverage/html
+          retention-days: 90
+
+      - name: Add summary to job
+        run: |
+          echo "## Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat coverage/summary.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📊 Download detailed HTML report from workflow artifacts" >> $GITHUB_STEP_SUMMARY

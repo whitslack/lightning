@@ -1,0 +1,264 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "openchannel_update",
+  "title": "Command to update a collab channel open",
+  "description": [
+    "`openchannel_update` is a low level RPC command which continues an open channel, as specified by *channel_id*. An updated *psbt* is passed in; any changes from the PSBT last returned (either from `openchannel_init` or a previous call to `openchannel_update`) will be communicated to the peer.",
+    "",
+    "Must be called after `openchannel_init` and before `openchannel_signed`.",
+    "",
+    "Must be called until *commitments_secured* is returned as true, at which point `openchannel_signed` should be called with a signed version of the PSBT returned by the last call to `openchannel_update`."
+  ],
+  "request": {
+    "required": [
+      "channel_id",
+      "psbt"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "channel_id": {
+        "type": "hash",
+        "description": [
+          "Id of the channel."
+        ]
+      },
+      "psbt": {
+        "type": "string",
+        "description": [
+          "Updated PSBT to be sent to the peer. May be identical to the PSBT last returned by either `openchannel_init` or `openchannel_update`."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "channel_id",
+      "psbt",
+      "commitments_secured",
+      "channel_type",
+      "funding_outnum"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "channel_id": {
+        "type": "hash",
+        "description": [
+          "The channel id of the channel."
+        ]
+      },
+      "channel_type": {
+        "type": "object",
+        "description": [
+          "Channel_type as negotiated with peer."
+        ],
+        "added": "v24.02",
+        "additionalProperties": false,
+        "required": [
+          "bits",
+          "names"
+        ],
+        "properties": {
+          "bits": {
+            "type": "array",
+            "description": [
+              "Each bit set in this channel_type."
+            ],
+            "added": "v24.02",
+            "items": {
+              "type": "u32",
+              "description": [
+                "Bit number."
+              ]
+            }
+          },
+          "names": {
+            "type": "array",
+            "description": [
+              "Feature name for each bit set in this channel_type. Note that *anchors_zero_fee_htlc_tx* is a deprecated synonym for *anchors*."
+            ],
+            "added": "v24.02",
+            "items": {
+              "type": "string",
+              "enum": [
+                "static_remotekey/even",
+                "anchor_outputs/even",
+                "anchors_zero_fee_htlc_tx/even",
+                "anchors/even",
+                "scid_alias/even",
+                "zeroconf/even"
+              ],
+              "description": [
+                "Name of feature bit."
+              ]
+            }
+          }
+        }
+      },
+      "psbt": {
+        "type": "string",
+        "description": [
+          "The PSBT of the funding transaction."
+        ]
+      },
+      "commitments_secured": {
+        "type": "boolean",
+        "description": [
+          "Whether the *psbt* is complete (if true, sign *psbt* and call `openchannel_signed` to complete the channel open)."
+        ]
+      },
+      "funding_outnum": {
+        "type": "u32",
+        "description": [
+          "The index of the funding output in the psbt."
+        ]
+      },
+      "close_to": {
+        "type": "hex",
+        "description": [
+          "Scriptpubkey which we have to close to if we mutual close."
+        ]
+      },
+      "requires_confirmed_inputs": {
+        "type": "boolean",
+        "description": [
+          "Does peer require confirmed inputs in psbt?"
+        ]
+      }
+    },
+    "allOf": [
+      {
+        "if": {
+          "additionalProperties": true,
+          "properties": {
+            "commitments_secured": {
+              "type": "boolean",
+              "enum": [
+                true
+              ]
+            }
+          }
+        },
+        "then": {
+          "additionalProperties": true,
+          "required": [
+            "channel_id",
+            "funding_outnum"
+          ],
+          "properties": {
+            "commitments_secured": {},
+            "channel_id": {
+              "type": "hash",
+              "description": [
+                "The derived channel id."
+              ]
+            },
+            "close_to": {
+              "type": "hex",
+              "description": [
+                "If a `close_to` address was provided to `openchannel_init` and the peer supports `option_upfront_shutdownscript`."
+              ]
+            },
+            "funding_outnum": {
+              "type": "u32",
+              "description": [
+                "The index of the funding output for this channel in the funding transaction."
+              ]
+            }
+          }
+        },
+        "else": {
+          "additionalProperties": false,
+          "properties": {
+            "commitments_secured": {}
+          }
+        }
+      }
+    ]
+  },
+  "errors": [
+    "On error, the returned object will contain `code` and `message` properties,",
+    "with `code` being one of the following:",
+    "",
+    "- -32602: If the given parameters are wrong.",
+    "- -1: Catchall nonspecific error.",
+    "- 305: Peer is not connected.",
+    "- 309: PSBT missing required fields",
+    "- 311: Unknown channel id.",
+    "- 312: Channel in an invalid state"
+  ],
+  "author": [
+    "Lisa Neigut [niftynei@gmail.com](mailto:niftynei@gmail.com) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-openchannel_init(7)",
+    "lightning-openchannel_signed(7)",
+    "lightning-openchannel_bump(7)",
+    "lightning-openchannel_abort(7)",
+    "lightning-fundchannel_start(7)",
+    "lightning-fundchannel_complete(7)",
+    "lightning-fundchannel(7)",
+    "lightning-fundpsbt(7)",
+    "lightning-utxopsbt(7)",
+    "lightning-multifundchannel(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:openchannel_update#1",
+        "method": "openchannel_update",
+        "params": {
+          "channel_id": "6ed0fa56ef2d9b805a6f7a389c3ac4eac30af9dfa9303508c75f077a75f23c79",
+          "psbt": "cHNidP8BAgQCAAAAAQMEogAAAAEEAQEBBQECAQYBAwH7BAIAAAAAAQBxAgAAAAEaYvzABO/Tmns/5Pj+Lu8mq0dBTwbgXn7sIOgQk3YHjgEAAAAA/f///wLlIfTSAAAAABYAFPJ2kvsnSXL4xIO6Sg17Xv463zn+AMLrCwAAAAAWABRK3/BFe6ndrO3PwSwcSEUCKwcapqEAAAABAR8AwusLAAAAABYAFErf8EV7qd2s7c/BLBxIRQIrBxqmAQ4gixvdQs5QxtEy9tQ2uXlDCXgnivw4U3qycsMXXeHGnkkBDwQBAAAAARAE/f///wz8CWxpZ2h0bmluZwEIjjwf0yMGZhAAAQMIQVncCwAAAAABBCJRICFEx0UvLB1BZGdp2HsWO9d0fGe8fgNU1jzgv3sgwUE6DPwJbGlnaHRuaW5nAQiQPB/TIwZmEAABAwhAQg8AAAAAAAEEIgAgZ39EM2qkj2R6eylrL3yjvBuWGjwmoGk+btb3KO6w1zkM/AlsaWdodG5pbmcBCL0EbgYVB9kiAA=="
+        }
+      },
+      "response": {
+        "channel_id": "6ed0fa56ef2d9b805a6f7a389c3ac4eac30af9dfa9303508c75f077a75f23c79",
+        "psbt": "cHNidP8BAgQCAAAAAQMEogAAAAEEAQEBBQECAQYBAwH7BAIAAAAAAQBxAgAAAAEaYvzABO/Tmns/5Pj+Lu8mq0dBTwbgXn7sIOgQk3YHjgEAAAAA/f///wLlIfTSAAAAABYAFPJ2kvsnSXL4xIO6Sg17Xv463zn+AMLrCwAAAAAWABRK3/BFe6ndrO3PwSwcSEUCKwcapqEAAAABAR8AwusLAAAAABYAFErf8EV7qd2s7c/BLBxIRQIrBxqmAQ4gixvdQs5QxtEy9tQ2uXlDCXgnivw4U3qycsMXXeHGnkkBDwQBAAAAARAE/f///wz8CWxpZ2h0bmluZwEIjjwf0yMGZhAAAQMIQVncCwAAAAABBCJRICFEx0UvLB1BZGdp2HsWO9d0fGe8fgNU1jzgv3sgwUE6DPwJbGlnaHRuaW5nAQiQPB/TIwZmEAABAwhAQg8AAAAAAAEEIgAgZ39EM2qkj2R6eylrL3yjvBuWGjwmoGk+btb3KO6w1zkM/AlsaWdodG5pbmcBCL0EbgYVB9kiAA==",
+        "channel_type": {
+          "bits": [
+            12,
+            22
+          ],
+          "names": [
+            "static_remotekey/even",
+            "anchors/even"
+          ]
+        },
+        "commitments_secured": true,
+        "funding_outnum": 1,
+        "close_to": "51205a367183bfddfa55f61b7a3f838b64a083a9f08044bb8d468578e784da79560e"
+      }
+    },
+    {
+      "request": {
+        "id": "example:openchannel_update#2",
+        "method": "openchannel_update",
+        "params": [
+          "6ed0fa56ef2d9b805a6f7a389c3ac4eac30af9dfa9303508c75f077a75f23c79",
+          "cHNidP8BAgQCAAAAAQMESgAAAAEEAQEBBQECAQYBAwH7BAIAAAAAAQBxAgAAAAEaYvzABO/Tmns/5Pj+Lu8mq0dBTwbgXn7sIOgQk3YHjgEAAAAA/f///wLlIfTSAAAAABYAFPJ2kvsnSXL4xIO6Sg17Xv463zn+AMLrCwAAAAAWABRK3/BFe6ndrO3PwSwcSEUCKwcapqEAAAABAR8AwusLAAAAABYAFErf8EV7qd2s7c/BLBxIRQIrBxqmAQ4gixvdQs5QxtEy9tQ2uXlDCXgnivw4U3qycsMXXeHGnkkBDwQBAAAAARAE/f///wz8CWxpZ2h0bmluZwEIljwf0yMGZhAAAQMIYg3NCwAAAAABBCJRIG4J/dDX/XezD0k+zYuaNc42C9jFbhxwzONKmR8VeurIDPwJbGlnaHRuaW5nAQiYPB/TIwZmEAABAwiAhB4AAAAAAAEEIgAgZ39EM2qkj2R6eylrL3yjvBuWGjwmoGk+btb3KO6w1zkM/AlsaWdodG5pbmcBCL8EbgYVB9kiAA=="
+        ]
+      },
+      "response": {
+        "channel_id": "6ed0fa56ef2d9b805a6f7a389c3ac4eac30af9dfa9303508c75f077a75f23c79",
+        "psbt": "cHNidP8BAgQCAAAAAQMESgAAAAEEAQEBBQECAQYBAwH7BAIAAAAAAQBxAgAAAAEaYvzABO/Tmns/5Pj+Lu8mq0dBTwbgXn7sIOgQk3YHjgEAAAAA/f///wLlIfTSAAAAABYAFPJ2kvsnSXL4xIO6Sg17Xv463zn+AMLrCwAAAAAWABRK3/BFe6ndrO3PwSwcSEUCKwcapqEAAAABAR8AwusLAAAAABYAFErf8EV7qd2s7c/BLBxIRQIrBxqmAQ4gixvdQs5QxtEy9tQ2uXlDCXgnivw4U3qycsMXXeHGnkkBDwQBAAAAARAE/f///wz8CWxpZ2h0bmluZwEIljwf0yMGZhAAAQMIYg3NCwAAAAABBCJRIG4J/dDX/XezD0k+zYuaNc42C9jFbhxwzONKmR8VeurIDPwJbGlnaHRuaW5nAQiYPB/TIwZmEAABAwiAhB4AAAAAAAEEIgAgZ39EM2qkj2R6eylrL3yjvBuWGjwmoGk+btb3KO6w1zkM/AlsaWdodG5pbmcBCL8EbgYVB9kiAA==",
+        "channel_type": {
+          "bits": [
+            12,
+            22
+          ],
+          "names": [
+            "static_remotekey/even",
+            "anchors/even"
+          ]
+        },
+        "commitments_secured": true,
+        "funding_outnum": 1,
+        "close_to": "51205a367183bfddfa55f61b7a3f838b64a083a9f08044bb8d468578e784da79560e"
+      }
+    }
+  ]
+}

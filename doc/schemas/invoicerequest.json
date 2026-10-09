@@ -1,0 +1,161 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "added": "v22.11",
+  "rpc": "invoicerequest",
+  "title": "Command for offering payments",
+  "description": [
+    "The **invoicerequest** RPC command creates an `invoice_request` to send payments: it automatically enables the processing of an incoming invoice, and payment of it. The reader of the resulting `invoice_request` can use lightning-sendinvoice(7) to collect their payment."
+  ],
+  "request": {
+    "required": [
+      "amount"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "amount": {
+        "type": "msat",
+        "description": [
+          "A positive value in millisatoshi precision; it can be a whole number, or a whole number ending in *msat* or *sat*, or a number with three decimal places ending in *sat*, or a number with 1 to 11 decimal places ending in *btc*."
+        ]
+      },
+      "description": {
+        "type": "string",
+        "description": [
+          "A short description of purpose of the payment, e.g. *ATM withdrawl*. This value is encoded into the resulting `invoice_request` and is viewable by anyone you expose it to. It must be UTF-8, and cannot use *\\u* JSON escape codes."
+        ]
+      },
+      "issuer": {
+        "type": "string",
+        "description": [
+          "Who is issuing it (i.e. you) if appropriate."
+        ]
+      },
+      "label": {
+        "type": "string",
+        "description": [
+          "An internal-use name for the offer, which can be any UTF-8 string."
+        ]
+      },
+      "absolute_expiry": {
+        "type": "u64",
+        "description": [
+          "The time the offer is valid until, in seconds since the first day of 1970 UTC. If not set, the `invoice_request` remains valid (though it can be deactivated by the issuer of course). This is encoded in the `invoice_request`."
+        ]
+      },
+      "single_use": {
+        "type": "boolean",
+        "description": [
+          "Indicates that the `invoice_request` is only valid once; we may attempt multiple payments, but as soon as one is successful no more invoices are accepted (i.e. only one person can take the money)."
+        ],
+        "default": "True"
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "invreq_id",
+      "single_use",
+      "active",
+      "bolt12",
+      "used"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "invreq_id": {
+        "type": "hash",
+        "description": [
+          "The SHA256 hash of all invoice_request fields less than 160."
+        ]
+      },
+      "active": {
+        "type": "boolean",
+        "enum": [
+          true
+        ],
+        "description": [
+          "Whether the invoice_request is currently active."
+        ]
+      },
+      "single_use": {
+        "type": "boolean",
+        "description": [
+          "Whether the invoice_request will become inactive after we pay an invoice for it."
+        ]
+      },
+      "bolt12": {
+        "type": "string",
+        "description": [
+          "The bolt12 string starting with lnr."
+        ]
+      },
+      "used": {
+        "type": "boolean",
+        "enum": [
+          false
+        ],
+        "description": [
+          "Whether the invoice_request has already been used."
+        ]
+      },
+      "label": {
+        "type": "string",
+        "description": [
+          "The label provided when creating the invoice_request."
+        ]
+      }
+    }
+  },
+  "errors": [
+    "On failure, an error is returned and no `invoice_request` is created. If the lightning process fails before responding, the caller should use lightning-listinvoicerequests(7) to query whether it was created or not.",
+    "",
+    "- -1: Catchall nonspecific error."
+  ],
+  "author": [
+    "Rusty Russell [rusty@rustcorp.com.au](mailto:rusty@rustcorp.com.au) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-listinvoicerequests(7)",
+    "lightning-disableinvoicerequest(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:invoicerequest#1",
+        "method": "invoicerequest",
+        "params": {
+          "amount": 1000000,
+          "description": "Simple test"
+        }
+      },
+      "response": {
+        "invreq_id": "3acd9ca593d5a1b735c98afa6efc9ee4b8e5b004a36f416a7003ffa70e0196e4",
+        "active": true,
+        "single_use": true,
+        "bolt12": "lnr1qqgv27pu76evyr7zc4urea4jcg8uyzst2d5k6urvv5s8getnw3gzqp3zderpzxstt8927ynqg044h0egcd8n5h3n9g0u0v4h8ncc3yg02gps7sjqtqssxwz9sqkjtd8qwnx06lxckvu6g8w8t0ue0zsrfqqygj636s4sw7v67pqwvcxd9ngrvwv4ccd2dc9vtyskuqpl6kskculsxsldq88hahcmyfp4mr3pqeeas9hsywx65c288qjcx5qj2lf73matnke66c2p32e67g",
+        "used": false
+      }
+    },
+    {
+      "request": {
+        "id": "example:invoicerequest#2",
+        "method": "invoicerequest",
+        "params": {
+          "amount": "10000sat",
+          "description": "Requesting for invoice",
+          "issuer": "clightning store"
+        }
+      },
+      "response": {
+        "invreq_id": "bdbaa2fa505fef38702e3c239241cc4ecbca06be87e6034ef9dd849f0a32646c",
+        "active": true,
+        "single_use": true,
+        "bolt12": "lnr1qqgv27pu76evyr7rc4urea4jcg8uxzsk2fjhzat9wd6xjmn8ypnx7u3qd9h8vmmfvdj3yyrrd35kw6r5de5kueeqwd6x7un92qsqvgnwgcg35z6ee2h3yczraddm72xrfua9uve2rlrm9deu7xyfzr6jqwvfdqzcyypns3vq95jmfcr5en7hek9n8xjpm36mlxtc5q6gqpzyk5w59vrhnxhsgqtn4dvxr7stgwyltx4nal94vmmeeha8gr2neyqyu3024vdy2nef58jpt97d780gtft6yhmhww35qe4uaty5ffmnlgalfj93ycj7qs66",
+        "used": false
+      }
+    }
+  ]
+}

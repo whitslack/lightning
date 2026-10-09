@@ -1,0 +1,158 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "commando",
+  "title": "Command to Send a Command to a Remote Peer",
+  "description": [
+    "The **commando** RPC command is a homage to bad 80s movies. It also sends a directly-connected *peer_id* a custom message, containing a request to run *method* (with an optional dictionary of *params*); generally the peer will only allow you to run a command if it has provided you with a *rune* which allows it."
+  ],
+  "request": {
+    "required": [
+      "peer_id",
+      "method"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "peer_id": {
+        "type": "pubkey",
+        "description": [
+          "Peer to command."
+        ]
+      },
+      "method": {
+        "type": "string",
+        "description": [
+          "Method to invoke on peer."
+        ]
+      },
+      "params": {
+        "oneOf": [
+          {
+            "type": "array",
+            "description": [
+              "Array of positional parameters."
+            ]
+          },
+          {
+            "type": "object",
+            "description": [
+              "Parameters for method."
+            ]
+          }
+        ]
+      },
+      "rune": {
+        "type": "string",
+        "description": [
+          "Rune to authorize the command."
+        ]
+      },
+      "filter": {
+        "type": "object",
+        "description": [
+          "Filter to peer to apply to any successful result."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [],
+    "additionalProperties": true,
+    "properties": {},
+    "pre_return_value_notes": [
+      "On success, the return depends on the *method* invoked."
+    ]
+  },
+  "errors": [
+    "On failure, one of the following error codes may be returned:",
+    "",
+    "- -32600: Usually means peer is not connected",
+    "- 19535: the local commando plugin discovered an error.",
+    "- 19536: the remote commando plugin discovered an error.",
+    "- 19537: the remote commando plugin said we weren't authorized.",
+    "",
+    "It can also fail if the peer does not respond, in which case it will simply hang awaiting a response."
+  ],
+  "author": [
+    "Rusty Russell [rusty@rustcorp.com.au](mailto:rusty@rustcorp.com.au) wrote the original Python commando.py plugin, the in-tree commando plugin, and this manual page.",
+    "",
+    "Christian Decker came up with the name \"commando\", which almost excuses his previous adoption of the name \"Eltoo\"."
+  ],
+  "see_also": [
+    "lightning-commando-rune(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:commando#1",
+        "method": "commando",
+        "params": {
+          "peer_id": "033845802d25b4e074ccfd7cd8b339a41dc75bf9978a034800444b51d42b07799a",
+          "rune": "7cKJyALVY0_LLVV-AB9oetXjipOdyt0EhOuYrSS42fM9MA==",
+          "method": "newaddr",
+          "params": {
+            "addresstype": "p2tr"
+          }
+        }
+      },
+      "response": {
+        "p2tr": "bcrt1p5vr5t873cpcw4hss4hfhgeyv734a2gcyz70nz0cw25h5jy7k036s6tat8g"
+      }
+    },
+    {
+      "request": {
+        "id": "example:commando#2",
+        "method": "commando",
+        "params": {
+          "peer_id": "033845802d25b4e074ccfd7cd8b339a41dc75bf9978a034800444b51d42b07799a",
+          "rune": "UcVH186Z5ldtHgscIaNAZ_fdUstCR6OCwiVV7CPx_q09MSZpZF4wMzgxOTRiNWYzMmJkZjBhYTU5OCZtZXRob2Q9bGlzdHBlZXJz",
+          "method": "listpeers",
+          "params": [
+            "03cecbfdc68544cc596223b68ce0710c9e5d2c9cb317ee07822d95079acc703d31"
+          ]
+        }
+      },
+      "response": {
+        "peers": [
+          {
+            "id": "03cecbfdc68544cc596223b68ce0710c9e5d2c9cb317ee07822d95079acc703d31",
+            "connected": true,
+            "num_channels": 2,
+            "netaddr": [
+              "127.0.0.1:30005"
+            ],
+            "features": "800898882a8a59a1"
+          }
+        ]
+      }
+    },
+    {
+      "request": {
+        "id": "example:commando#3",
+        "method": "commando",
+        "params": {
+          "peer_id": "033845802d25b4e074ccfd7cd8b339a41dc75bf9978a034800444b51d42b07799a",
+          "rune": "a0noy2CAu8-s2xSgJuBW09hqB_YsqLkwIDy5qkftGMk9MiZtZXRob2Q9cGF5JnBuYW1lYW1vdW50bXNhdDwxMDAwMA==",
+          "method": "pay",
+          "params": {
+            "bolt11": "lnbcrt1pne035qsp5r0wdx7ur2ksfqp3m20sdy2yleawgnkc6zu0ua3qek25zr280rjfspp5gtsy37aeh4vz7alehxl88yak5234edpyp58780hztrw9ysyxpkwsdqcdserxgryv4ekxunfwp6xjmmwxqyjw5qcqp99qxpqysgq092sevrrqgr60s7v248nxhyqlfdktu9rdeg728j2eduafqh8wqd3jycamqf84n0rpempvyhacvkaqjtkqrqqu3fy9vmcl503mjzkfksqtz6mm3",
+            "amount_msat": 9900
+          }
+        }
+      },
+      "response": {
+        "payment_preimage": "09e7f193a0100ea609e7f193a0100ea609e7f193a0100ea609e7f193a0100ea6",
+        "amount_msat": 9900,
+        "amount_sent_msat": 9900,
+        "parts": 1,
+        "destination": "033845802d25b4e074ccfd7cd8b339a41dc75bf9978a034800444b51d42b07799a",
+        "payment_hash": "42e048fbb9bd582f77f9b9be7393b6a2a35cb4240d0fe3bee258dc5240860d9d",
+        "status": "complete",
+        "created_at": 1738000000.0
+      }
+    }
+  ]
+}

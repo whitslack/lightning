@@ -1,0 +1,341 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "delinvoice",
+  "title": "Command for removing an invoice (or just its description)",
+  "description": [
+    "The **delinvoice** RPC command removes an invoice with *status* as given in **listinvoices**, or with *desconly* set, removes its description."
+  ],
+  "request": {
+    "required": [
+      "label",
+      "status"
+    ],
+    "additionalProperties": true,
+    "properties": {
+      "label": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "u64"
+          }
+        ],
+        "description": [
+          "Label of the invoice to be deleted."
+        ]
+      },
+      "status": {
+        "type": "string",
+        "description": [
+          "Label of the invoice to be deleted. The caller should be particularly aware of the error case caused by the *status* changing just before this command is invoked!"
+        ],
+        "enum": [
+          "paid",
+          "expired",
+          "unpaid"
+        ]
+      },
+      "desconly": {
+        "type": "boolean",
+        "description": [
+          "If set to True, the invoice is not deleted, but has its description removed (this can save space with very large descriptions, as would be used with lightning-invoice(7) *deschashonly*."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "label",
+      "payment_hash",
+      "status",
+      "created_index",
+      "expires_at"
+    ],
+    "additionalProperties": true,
+    "properties": {
+      "label": {
+        "type": "string",
+        "description": [
+          "Unique label given at creation time."
+        ]
+      },
+      "bolt11": {
+        "type": "string",
+        "description": [
+          "BOLT11 string."
+        ]
+      },
+      "bolt12": {
+        "type": "string",
+        "description": [
+          "BOLT12 string."
+        ]
+      },
+      "amount_msat": {
+        "type": "msat",
+        "description": [
+          "The amount required to pay this invoice."
+        ]
+      },
+      "description": {
+        "type": "string",
+        "description": [
+          "Description used in the invoice."
+        ]
+      },
+      "payment_hash": {
+        "type": "hash",
+        "description": [
+          "The hash of the *payment_preimage* which will prove payment."
+        ]
+      },
+      "created_index": {
+        "type": "u64",
+        "added": "v23.08",
+        "description": [
+          "1-based index indicating order this invoice was created in."
+        ]
+      },
+      "updated_index": {
+        "type": "u64",
+        "added": "v23.08",
+        "description": [
+          "1-based index indicating order this invoice was changed (only present if it has changed since creation)."
+        ]
+      },
+      "status": {
+        "type": "string",
+        "description": [
+          "State of invoice."
+        ],
+        "enum": [
+          "paid",
+          "expired",
+          "unpaid"
+        ]
+      },
+      "expires_at": {
+        "type": "u64",
+        "description": [
+          "UNIX timestamp when invoice expires (or expired)."
+        ]
+      }
+    },
+    "allOf": [
+      {
+        "if": {
+          "required": [
+            "bolt12"
+          ]
+        },
+        "then": {
+          "required": [],
+          "additionalProperties": false,
+          "properties": {
+            "label": {},
+            "bolt12": {},
+            "status": {},
+            "expires_at": {},
+            "msatoshi": {},
+            "amount_msat": {},
+            "description": {},
+            "payment_hash": {},
+            "pay_index": {},
+            "created_index": {},
+            "updated_index": {},
+            "amount_received_msat": {},
+            "paid_at": {},
+            "payment_preimage": {},
+            "local_offer_id": {
+              "type": "hex",
+              "description": [
+                "Offer for which this invoice was created."
+              ]
+            },
+            "invreq_payer_note": {
+              "type": "string",
+              "description": [
+                "The optional *invreq_payer_note* from invoice_request which created this invoice."
+              ]
+            }
+          }
+        },
+        "else": {
+          "required": [
+            "bolt11"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "label": {},
+            "bolt11": {},
+            "status": {},
+            "expires_at": {},
+            "msatoshi": {},
+            "amount_msat": {},
+            "description": {},
+            "payment_hash": {},
+            "pay_index": {},
+            "created_index": {},
+            "updated_index": {},
+            "amount_received_msat": {},
+            "msatoshi_received": {},
+            "paid_at": {},
+            "payment_preimage": {}
+          }
+        }
+      },
+      {
+        "if": {
+          "additionalProperties": true,
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "paid"
+              ]
+            }
+          }
+        },
+        "then": {
+          "additionalProperties": false,
+          "required": [
+            "pay_index",
+            "amount_received_msat",
+            "paid_at",
+            "payment_preimage"
+          ],
+          "properties": {
+            "label": {},
+            "bolt11": {},
+            "bolt12": {},
+            "status": {},
+            "expires_at": {},
+            "msatoshi": {},
+            "amount_msat": {},
+            "description": {},
+            "payment_hash": {},
+            "invreq_payer_note": {},
+            "local_offer_id": {},
+            "created_index": {},
+            "updated_index": {},
+            "pay_index": {
+              "type": "u64",
+              "description": [
+                "Unique index for this invoice payment."
+              ]
+            },
+            "amount_received_msat": {
+              "type": "msat",
+              "description": [
+                "How much was actually received."
+              ]
+            },
+            "paid_at": {
+              "type": "u64",
+              "description": [
+                "UNIX timestamp of when payment was received."
+              ]
+            },
+            "payment_preimage": {
+              "type": "secret",
+              "description": [
+                "SHA256 of this is the *payment_hash* offered in the invoice."
+              ]
+            }
+          }
+        },
+        "else": {
+          "additionalProperties": false,
+          "properties": {
+            "label": {},
+            "bolt11": {},
+            "bolt12": {},
+            "status": {},
+            "msatoshi": {},
+            "amount_msat": {},
+            "description": {},
+            "payment_hash": {},
+            "expires_at": {},
+            "created_index": {},
+            "updated_index": {},
+            "pay_index": {},
+            "invreq_payer_note": {},
+            "local_offer_id": {}
+          }
+        }
+      }
+    ],
+    "pre_return_value_notes": [
+      "Note: The return is the same as an object from lightning-listinvoices(7)."
+    ]
+  },
+  "errors": [
+    "The following errors may be reported:",
+    "",
+    "- -1: Database error.",
+    "- 905: An invoice with that label does not exist.",
+    "- 906: The invoice *status* does not match the parameter. An error object will be returned as error *data*, containing *current_status* and *expected_status* fields. This is most likely due to the *status* of the invoice changing just before this command is invoked.",
+    "- 908: The invoice already has no description, and *desconly* was set."
+  ],
+  "author": [
+    "Rusty Russell [rusty@rustcorp.com.au](mailto:rusty@rustcorp.com.au) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-listinvoices(7)",
+    "lightning-waitinvoice(7)",
+    "lightning-invoice(7)",
+    "lightning-autoclean-status(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:delinvoice#1",
+        "method": "delinvoice",
+        "params": {
+          "label": "lbl_l36",
+          "status": "unpaid"
+        }
+      },
+      "response": {
+        "label": "lbl_l36",
+        "bolt11": "lnbcrt500u1pne035qsp5zkz2glrfqgvw7dar86umteldh7rrspqg6qt0s7t5qrs2zwr7urkspp5msm0sn03dnp47a5vtfx9qvzdscqluuwnzupy5hx0ulqswwa4j7wqdqcdsenvgryv4ekxunfwp6xjmmwxqyjw5qcqp99qxpqysgqajsulk3lmdklgd8y6vf942m874kpgew4xnk3qp8dxz0jz4nscn6r6wxmuu8fw76nhcpcpqyzgrwgk0eqjv5hzja6cqdp22wv8de3mygp7kgefl",
+        "payment_hash": "dc36f84df16cc35f768c5a4c50304d8601fe71d317024a5ccfe7c1073bb5979c",
+        "amount_msat": 50000000,
+        "status": "unpaid",
+        "description": "l36 description",
+        "expires_at": 1738604800,
+        "created_index": 9
+      }
+    },
+    {
+      "request": {
+        "id": "example:delinvoice#2",
+        "method": "delinvoice",
+        "params": {
+          "label": "lbl_l37",
+          "status": "paid",
+          "desconly": true
+        }
+      },
+      "response": {
+        "label": "lbl_l37",
+        "bolt11": "lnbcrt500u1pne035qsp5h4ctf82jng2sd6uqzsmzn32r7w2mjhdgsa2tlayr7c2e2s2727jqpp5xq8txm0yn56cf3k7jg46dnqrdhukl87g605vrjyx6p2vk3tpay2sdqcdsenwgryv4ekxunfwp6xjmmwxqyjw5qcqp99qxpqysgqeypx4zjc3tupr0wzlryztjgsme4zgfh6vk9fw504fx7ctrpg6nvsnse9kmwzy3h8km53rfa9cfvrufp7ycfhpndfqkzk6p6khws2c7spyevnqf",
+        "payment_hash": "300eb36de49d3584c6de922ba6cc036df96f9fc8d3e8c1c886d054cb4561e915",
+        "amount_msat": 50000000,
+        "status": "paid",
+        "pay_index": 9,
+        "amount_received_msat": 50000000,
+        "paid_at": 1738000000,
+        "payment_preimage": "3e3b17b070d9dc503e3b17b070d9dc503e3b17b070d9dc503e3b17b070d9dc50",
+        "expires_at": 1738604800,
+        "created_index": 10,
+        "updated_index": 9
+      }
+    }
+  ]
+}

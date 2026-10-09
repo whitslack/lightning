@@ -1,0 +1,18 @@
+[project]
+name = "pyln-bolt7"
+version = "1.0.246"
+description = "BOLT7"
+authors = [{ name = "Rusty Russell" }]
+license = { text = "BSD-MIT" }
+requires-python = ">=3.10,<4.0"
+dependencies = []
+
+[dependency-groups]
+dev = ["pyln-proto>=0.10.2"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["pyln"]
+
+[build-system]
+requires = ["hatchling>=1.0.0"]
+build-backend = "hatchling.build"

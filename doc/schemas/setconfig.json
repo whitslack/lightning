@@ -1,0 +1,213 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "added": "v23.08",
+  "rpc": "setconfig",
+  "title": "Dynamically change some config options",
+  "description": [
+    "The **setconfig** RPC command allows you set the (dynamic) configuration option named by `config`: options which take a value (as separate from simple flag options) also need a `val` parameter.",
+    "",
+    "This new value will *also* be written at the end of the `config.setconfig` file (but see lightningd-config), for persistence across restarts (and any old value commented out if they were set in other config files).",
+    "",
+    "You can see what options are dynamically adjustable using lightning-listconfigs(7). Note that you can also adjust existing options for stopped plugins; they will have an effect when the plugin is restarted."
+  ],
+  "request": {
+    "required": [
+      "config"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "config": {
+        "type": "string",
+        "description": [
+          "Name of the config variable which should be set to the value of the variable."
+        ]
+      },
+      "val": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "integer"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": [
+              "For multi options, an array of string values."
+            ]
+          }
+        ],
+        "description": [
+          "Value of the config variable to be set or updated. For multi options, this must be an array of strings."
+        ]
+      },
+      "transient": {
+        "type": "boolean",
+        "added": "v25.02",
+        "default": "False",
+        "description": [
+          "If set, this change does NOT try to alter the configuration files, so the change will be reverted on any restart."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "config"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "config": {
+        "type": "object",
+        "description": [
+          "Config settings after completion."
+        ],
+        "additionalProperties": false,
+        "required": [
+          "config",
+          "dynamic"
+        ],
+        "properties": {
+          "config": {
+            "type": "string",
+            "description": [
+              "Name of the config variable which was set."
+            ]
+          },
+          "source": {
+            "type": "string",
+            "description": [
+              "Source of configuration setting (`file`:`linenum`) for non-multi options."
+            ]
+          },
+          "sources": {
+            "type": "array",
+            "added": "v26.06",
+            "items": {
+              "type": "string"
+            },
+            "description": [
+              "Sources of configuration settings (`file`:`linenum`) for multi options."
+            ]
+          },
+          "plugin": {
+            "type": "string",
+            "description": [
+              "The plugin this configuration setting is for."
+            ]
+          },
+          "dynamic": {
+            "type": "boolean",
+            "enum": [
+              true
+            ],
+            "description": [
+              "Whether this option is settable via setconfig."
+            ]
+          },
+          "set": {
+            "type": "boolean",
+            "description": [
+              "For simple flag options."
+            ]
+          },
+          "value_str": {
+            "type": "string",
+            "description": [
+              "For string options."
+            ]
+          },
+          "value_msat": {
+            "type": "msat",
+            "description": [
+              "For msat options."
+            ]
+          },
+          "value_int": {
+            "type": "integer",
+            "description": [
+              "For integer options."
+            ]
+          },
+          "value_bool": {
+            "type": "boolean",
+            "description": [
+              "For boolean options."
+            ]
+          },
+          "values_str": {
+            "type": "array",
+            "added": "v26.06",
+            "items": {
+              "type": "string"
+            },
+            "description": [
+              "For multi-string options."
+            ]
+          }
+        }
+      }
+    }
+  },
+  "errors": [
+    "The following error codes may occur:",
+    "",
+    "- -32602: JSONRPC2_INVALID_PARAMS, i.e. the parameter is not dynamic, or the val was invalid."
+  ],
+  "author": [
+    "Rusty Russell [rusty@rustcorp.com.au](mailto:rusty@rustcorp.com.au) is mainly responsible for this feature."
+  ],
+  "see_also": [
+    "lightningd-config(5)",
+    "lightning-listconfigs(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:setconfig#1",
+        "method": "setconfig",
+        "params": [
+          "autoclean-expiredinvoices-age",
+          300
+        ]
+      },
+      "response": {
+        "config": {
+          "config": "autoclean-expiredinvoices-age",
+          "value_int": 300,
+          "source": "/home/rusty/.lightning/regtest/config.setconfig:2",
+          "plugin": "/usr/local/libexec/plugins/autoclean",
+          "dynamic": true
+        }
+      }
+    },
+    {
+      "request": {
+        "id": "example:setconfig#2",
+        "method": "setconfig",
+        "params": {
+          "config": "min-capacity-sat",
+          "val": 500000
+        }
+      },
+      "response": {
+        "config": {
+          "config": "min-capacity-sat",
+          "value_int": 500000,
+          "source": "/home/rusty/.lightning/regtest/config.setconfig:3",
+          "dynamic": true
+        }
+      }
+    }
+  ]
+}

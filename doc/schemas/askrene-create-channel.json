@@ -1,0 +1,88 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "askrene-create-channel",
+  "title": "Command to add a channel to layer",
+  "added": "v24.11",
+  "description": [
+    "The **askrene-create-channel** RPC command tells askrene create a channel in the given layer.  To actually populate the channel use *askrene-update-channel* in each direction."
+  ],
+  "request": {
+    "required": [
+      "layer",
+      "source",
+      "destination",
+      "short_channel_id",
+      "capacity_msat"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "layer": {
+        "type": "string",
+        "description": [
+          "The name of the layer to apply this change to."
+        ]
+      },
+      "source": {
+        "type": "pubkey",
+        "description": [
+          "The source node id for the channel."
+        ]
+      },
+      "destination": {
+        "type": "pubkey",
+        "description": [
+          "The destination node id for the channel (must be different from source)."
+        ]
+      },
+      "short_channel_id": {
+        "type": "short_channel_id",
+        "description": [
+          "The short channel id for the channel.  If a channel with this short channel id already exists in *layer*, the *source*, *destination* and *capacity_msat* must be the same."
+        ]
+      },
+      "capacity_msat": {
+        "type": "msat",
+        "description": [
+          "The capacity (onchain size) of the channel.",
+          "NOTE: this is in millisatoshis!"
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [],
+    "additionalProperties": false,
+    "properties": {}
+  },
+  "see_also": [
+    "lightning-getroutes(7)",
+    "lightning-askrene-disable-node(7)",
+    "lightning-askrene-update-channel(7)",
+    "lightning-askrene-inform-channel(7)",
+    "lightning-askrene-listlayers(7)",
+    "lightning-askrene-age(7)"
+  ],
+  "author": [
+    "Rusty Russell [rusty@rustcorp.com.au](mailto:rusty@rustcorp.com.au) is mainly responsible."
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:askrene-create-channel#1",
+        "method": "askrene-create-channel",
+        "params": {
+          "layer": "test_layers",
+          "source": "03cecbfdc68544cc596223b68ce0710c9e5d2c9cb317ee07822d95079acc703d31",
+          "destination": "038194b5f32bdf0aa59812c86c4ef7ad2f294104fa027d1ace9b469bb6f88cf37b",
+          "short_channel_id": "0x0x1",
+          "capacity_msat": "1000000sat"
+        }
+      },
+      "response": {}
+    }
+  ]
+}

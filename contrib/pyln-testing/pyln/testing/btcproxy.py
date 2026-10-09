@@ -1,0 +1,127 @@
+""" A bitcoind proxy that allows instrumentation and canned responses
+"""
+from flask import Flask, request  # type: ignore
+from bitcoin.rpc import JSONRPCError  # type: ignore
+from bitcoin.rpc import RawProxy as BitcoinProxy  # type: ignore
+from cheroot.wsgi import Server  # type: ignore
+from cheroot.wsgi import PathInfoDispatcher  # type: ignore
+
+import decimal
+import flask  # type: ignore
+import json
+import logging
+import socket
+import threading
+import time
+
+
+class DecimalEncoder(json.JSONEncoder):
+    """By default json.dumps does not handle Decimals correctly, so we override it's handling
+    """
+    def default(self, o):
+        if isinstance(o, decimal.Decimal):
+            return "{:.8f}".format(float(o))
+        return super(DecimalEncoder, self).default(o)
+
+
+class BitcoinRpcProxy(object):
+    def __init__(self, bitcoind, rpcport=0):
+        self.app = Flask("BitcoindProxy")
+        self.app.add_url_rule("/", "API entrypoint", self.proxy, methods=['POST'])
+        self.rpcport = rpcport
+        self.mocks = {}
+        self.mock_counts = {}
+        self.bitcoind = bitcoind
+        self.request_count = 0
+
+    def _handle_request(self, r):
+        brpc = BitcoinProxy(btc_conf_file=self.bitcoind.conf_file)
+        method = r['method']
+
+        # If we have set a mock for this method reply with that instead of
+        # forwarding the request.
+        if method in self.mocks and isinstance(self.mocks[method], dict):
+            ret = {}
+            ret['id'] = r['id']
+            ret['error'] = None
+            ret['result'] = self.mocks[method]
+            self.mock_counts[method] += 1
+            return ret
+        elif method in self.mocks and callable(self.mocks[method]):
+            self.mock_counts[method] += 1
+            # If a mock returns "None" it means "call the real one"
+            ret = self.mocks[method](r)
+            if ret is not None:
+                return ret
+
+        try:
+            reply = {
+                "result": brpc._call(r['method'], *r['params']),
+                "error": None,
+                "id": r['id']
+            }
+        except JSONRPCError as e:
+            reply = {
+                "error": e.error,
+                "code": -32603,
+                "id": r['id']
+            }
+        self.request_count += 1
+        return reply
+
+    def proxy(self):
+        r = json.loads(request.data.decode('ASCII'))
+
+        if isinstance(r, list):
+            reply = [self._handle_request(subreq) for subreq in r]
+        else:
+            reply = self._handle_request(r)
+
+        response = flask.Response(json.dumps(reply, cls=DecimalEncoder))
+        response.headers['Content-Type'] = 'application/json'
+        return response
+
+    def start(self):
+        d = PathInfoDispatcher({'/': self.app})
+        self.server = Server(('127.0.0.1', self.rpcport), d)
+        self.proxy_thread = threading.Thread(target=self.server.start)
+        self.proxy_thread.daemon = True
+        self.proxy_thread.start()
+
+        if self.rpcport == 0:
+            while self.server.bind_addr[1] == 0:
+                time.sleep(0.01)
+            self.rpcport = self.server.bind_addr[1]
+
+        deadline = time.time() + 10
+        while time.time() < deadline:
+            try:
+                s = socket.create_connection(('127.0.0.1', self.rpcport),
+                                             timeout=0.5)
+                s.close()
+                break
+            except OSError:
+                time.sleep(0.05)
+        else:
+            raise RuntimeError("BitcoinRpcProxy failed to bind on "
+                               "127.0.0.1:{}".format(self.rpcport))
+        logging.debug("BitcoinRpcProxy proxying incoming port {} to {}".format(self.rpcport, self.bitcoind.rpcport))
+
+    def stop(self):
+        self.server.stop()
+        self.proxy_thread.join()
+        logging.debug("BitcoinRpcProxy shut down after processing {} requests".format(self.request_count))
+
+    def mock_rpc(self, method, response=None):
+        """Mock the response to a future RPC call of @method
+
+        The response can either be a dict with the full JSON-RPC response, or a
+        function that returns such a response. If the response is None the mock
+        is removed and future calls will be passed through to bitcoind again.
+
+        """
+        if response is not None:
+            self.mocks[method] = response
+            self.mock_counts[method] = 0
+        elif method in self.mocks:
+            del self.mocks[method]

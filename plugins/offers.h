@@ -1,0 +1,110 @@
+#ifndef LIGHTNING_PLUGINS_OFFERS_H
+#define LIGHTNING_PLUGINS_OFFERS_H
+#include "config.h"
+
+struct command_result;
+struct command;
+struct onion_message;
+struct plugin;
+
+/* plugin_data for this plugin */
+struct offers_data {
+	/* This is me. */
+	struct pubkey id;
+	/* --fetchinvoice-noconnect */
+	bool disable_connect;
+	/* --cltv-final */
+	u16 cltv_final;
+	/* Current header_count */
+	u32 blockheight;
+	/* Basis for invoice path_secrets */
+	struct secret invoicesecret_base;
+	/* Base for offers path_secrets */
+	struct secret offerblinding_base;
+	/* Base for node aliases for invoice requests */
+	struct secret nodealias_base;
+	/* Any --payment-fronting-node specified */
+	struct pubkey *fronting_nodes;
+	/* --dev-invoice-bpath-scid */
+	bool dev_invoice_bpath_scid;
+	/* --dev-invoice-internal-scid */
+	struct short_channel_id *dev_invoice_internal_scid;
+	/* --dev-currency-expiry: max invoice expiry for currency offers (default 600) */
+	u32 dev_currency_expiry;
+	/* Use get_gossmap() to access this! */
+	struct gossmap *global_gossmap_;
+};
+
+struct offers_data *get_offers_data(struct plugin *plugin);
+
+/* Helper to send a reply (connecting if required), and discard result */
+struct command_result *WARN_UNUSED_RESULT
+send_onion_reply(struct command *cmd,
+		 struct blinded_path *reply_path,
+		 struct tlv_onionmsg_tlv *payload);
+
+/* Helper to send an onion message */
+#define inject_onionmessage(cmd, omsg, success, fail, arg)		\
+	inject_onionmessage_((cmd), (omsg),				\
+			     typesafe_cb_preargs(struct command_result *, void *, \
+						 (success), (arg),	\
+						 struct command *,	\
+						 const char *,		\
+						 const char *,		\
+						 const jsmntok_t *),	\
+			     typesafe_cb_preargs(struct command_result *, void *, \
+						 (fail), (arg),		\
+						 struct command *,	\
+						 const char *,		\
+						 const char *,		\
+						 const jsmntok_t *),	\
+			     (arg))
+
+struct command_result *
+inject_onionmessage_(struct command *cmd,
+		     const struct onion_message *omsg,
+		     struct command_result *(*cb)(struct command *command,
+						  const char *method,
+						  const char *buf,
+						  const jsmntok_t *result,
+						  void *arg),
+		     struct command_result *(*errcb)(struct command *command,
+						     const char *method,
+						     const char *buf,
+						     const jsmntok_t *result,
+						     void *arg),
+		     void *arg);
+
+/* Get the (latest) gossmap */
+struct gossmap *get_gossmap(struct plugin *plugin);
+
+/* Get the best (private) channel */
+struct chaninfo {
+	struct pubkey id;
+	struct amount_msat capacity, htlc_min, htlc_max;
+	u32 feebase, feeppm, cltv;
+};
+
+/* Calls listpeerchannels, then cb with best peer (if any!) which has needed_feature and (if set) the given payment capacity. */
+struct command_result *find_best_peer_(struct command *cmd,
+				       u64 needed_features,
+				       const struct amount_msat *amount,
+				       const struct pubkey *fronting_nodes,
+				       struct command_result *(*cb)(struct command *,
+								    const struct chaninfo *,
+								    void *),
+				       void *arg);
+
+#define find_best_peer(cmd, needed_features, amount, fronting_nodes, cb, arg) \
+	find_best_peer_((cmd), (needed_features), (amount), (fronting_nodes), \
+			typesafe_cb_preargs(struct command_result *, void *, \
+					    (cb), (arg),		\
+					    struct command *,		\
+					    const struct chaninfo *),	\
+			(arg))
+
+/* Do we want a blinded path from a peer? */
+bool we_want_blinded_path(struct plugin *plugin,
+			  const struct pubkey *fronting_nodes,
+			  bool for_payment);
+#endif /* LIGHTNING_PLUGINS_OFFERS_H */

@@ -1,0 +1,94 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "openchannel_abort",
+  "title": "Command to abort a channel to a peer",
+  "description": [
+    "`openchannel_abort` is a low level RPC command which initiates an abort for specified channel. It uses the openchannel protocol which allows for interactive transaction construction."
+  ],
+  "request": {
+    "required": [
+      "channel_id"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "channel_id": {
+        "type": "hash",
+        "description": [
+          "Channel id of the channel to be aborted."
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "channel_id",
+      "channel_canceled",
+      "reason"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "channel_id": {
+        "type": "hash",
+        "description": [
+          "The channel id of the aborted channel."
+        ]
+      },
+      "channel_canceled": {
+        "type": "boolean",
+        "description": [
+          "Whether this is completely canceled (there may be remaining in-flight transactions)."
+        ]
+      },
+      "reason": {
+        "type": "string",
+        "description": [
+          "Usually \"Abort requested\", but if it happened to fail at the same time it could be different."
+        ]
+      }
+    }
+  },
+  "errors": [
+    "On error the returned object will contain `code` and `message` properties, with `code` being one of the following:",
+    "",
+    "- -32602: If the given parameters are wrong.",
+    "- -1: Catchall nonspecific error.",
+    "- 305: Peer is not connected.",
+    "- 311: Unknown channel id.",
+    "- 312: Channel in an invalid state"
+  ],
+  "author": [
+    "Lisa Neigut [niftynei@gmail.com](mailto:niftynei@gmail.com) is mainly responsible."
+  ],
+  "see_also": [
+    "lightning-openchannel_init(7)",
+    "lightning-openchannel_update(7)",
+    "lightning-openchannel_signed(7)",
+    "lightning-openchannel_bump(7)",
+    "lightning-fundchannel_start(7)",
+    "lightning-fundchannel_complete(7)",
+    "lightning-fundchannel(7)",
+    "lightning-fundpsbt(7)",
+    "lightning-utxopsbt(7)",
+    "lightning-multifundchannel(7)"
+  ],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:openchannel_abort#1",
+        "method": "openchannel_abort",
+        "params": {
+          "channel_id": "6ed0fa56ef2d9b805a6f7a389c3ac4eac30af9dfa9303508c75f077a75f23c79"
+        }
+      },
+      "response": {
+        "channel_id": "6ed0fa56ef2d9b805a6f7a389c3ac4eac30af9dfa9303508c75f077a75f23c79",
+        "channel_canceled": false,
+        "reason": "Abort requested"
+      }
+    }
+  ]
+}

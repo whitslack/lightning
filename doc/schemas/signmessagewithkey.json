@@ -1,0 +1,93 @@
+{
+  "$schema": "../rpc-schema-draft.json",
+  "type": "object",
+  "rpc": "signmessagewithkey",
+  "title": "Command to create a signature using a key from the wallet",
+  "description": [
+    "The **signmessagewithkey** RPC command creates a digital signature of *message* using the key associated with the address provided in the input.",
+    "The signature scheme follows the BIP137 specification."
+  ],
+  "added": "v25.05",
+  "request": {
+    "required": [
+      "message",
+      "address"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "message": {
+        "type": "string",
+        "description": [
+          "Less than 65536 characters long message to be signed by the node."
+        ]
+      },
+      "address": {
+        "type": "string",
+        "description": [
+          "A Bitcoin accepted type address for lookup in the list of addresses issued to date.",
+          "Only P2WPKH type addresses are supported"
+        ]
+      }
+    }
+  },
+  "response": {
+    "required": [
+      "address",
+      "pubkey",
+      "signature",
+      "base64"
+    ],
+    "additionalProperties": false,
+    "properties": {
+      "address": {
+        "type": "string",
+        "description": [
+          "The bitcoin address used for signing."
+        ]
+      },
+      "pubkey": {
+        "type": "pubkey",
+        "description": [
+          "The public key associated with the bitcoin address provided."
+        ]
+      },
+      "signature": {
+        "type": "hex",
+        "description": [
+          "The signature."
+        ]
+      },
+      "base64": {
+        "type": "string",
+        "description": [
+          "The signature encoded in base64."
+        ]
+      }
+    }
+  },
+  "author": [
+    "Lagrang3 [lagrang3@protonmail.com](mailto:lagrang3@protonmail.com) is mainly responsible."
+  ],
+  "see_also": [],
+  "resources": [
+    "Main web site: [https://github.com/ElementsProject/lightning](https://github.com/ElementsProject/lightning)"
+  ],
+  "examples": [
+    {
+      "request": {
+        "id": "example:signmessagewithkey#1",
+        "method": "signmessagewithkey",
+        "params": {
+          "message": "signing this message with key",
+          "address": "bcrt1qzpr5cu5tfrcegrfzkusqyt6nj5tfx7qeqpdd4n"
+        }
+      },
+      "response": {
+        "address": "bcrt1qzpr5cu5tfrcegrfzkusqyt6nj5tfx7qeqpdd4n",
+        "pubkey": "03128eb6d21daf33c92e6eeac1b06f4a520345a144498d93c24ea9c9ba7b223372",
+        "signature": "28459b23d091bbdc2f0e288b86a5702e922449cec85d957e0603a5aaea3a32af430235a23d65fbc54036d383ae8e08da89dd234f676e7d5de6badc296ad99008cb",
+        "base64": "KEWbI9CRu9wvDiiLhqVwLpIkSc7IXZV+BgOlquo6Mq9DAjWiPWX7xUA204Oujgjaid0jT2dufV3mutwpatmQCMs="
+      }
+    }
+  ]
+}
